@@ -8,7 +8,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > **自律アップデート指示**
 > このファイルは MD Game Editor のプラグインシステム仕様を記述したスキルファイルです。
 > 以下のいずれかが発生した場合、**このファイル自体を必ず更新すること**:
-> - `md-game-editor/PLUGIN.md` の仕様が変更された
+> - `md-game-editor/docs/PLUGIN.md` の仕様が変更された
 > - `md-game-editor/plugin-manager.js` に新しいフック/タイプが追加・削除された
 > - `md-game-editor/plugins/` に新しい組み込みプラグインが追加された
 > - Plugin Runtime のメジャーバージョンが上がった

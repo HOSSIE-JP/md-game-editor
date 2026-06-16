@@ -6,7 +6,7 @@ applyTo: "**"
 
 > **自律アップデート指示**
 > このファイルはユーザーが MD Game Editor 向けプラグインを生成させるためにプロジェクトに配置する指示書です。
-> - MD Game Editor の `md-game-editor/PLUGIN.md` や `md-game-editor/plugin-manager.js` が変更されたとき、この指示書の該当部分を更新すること
+> - MD Game Editor の `md-game-editor/docs/PLUGIN.md` や `md-game-editor/plugin-manager.js` が変更されたとき、この指示書の該当部分を更新すること
 > - SGDK の `main()` シグネチャや API が変更されたとき、「SGDK コード規約」セクションを更新すること
 > - プラグインシステムのフック仕様が追加・変更されたとき、「フック早見表」を更新すること
 > - 更新後は末尾の「Last Updated」を書き換えること

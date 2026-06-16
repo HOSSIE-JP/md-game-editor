@@ -9,11 +9,11 @@ Rust/WASM 実装は別リポジトリ (`md_emulator`) で管理します。
   パッケージングを変更する前に、次を読んでください。
   - `.github/skills/md-game-editor-plugin/SKILL.md`
   - `.github/skills/md-game-editor-plugin/instructions.md`
-  - `PLUGIN.md`
+  - `docs/PLUGIN.md`
 - 同梱 WASM エミュレーターや `copy-pkg` / `prepare-dist` を変更する前に、
   `docs/emulator-bundle.md` を読んでください。
 - 公開 API や外部 AI 操作用 API を変更する場合は、同じ作業内で
-  `AI_CONTROL.md` または関連する `docs/` を更新してください。
+  `docs/AI_CONTROL.md` または関連する `docs/` を更新してください。
 - 外部リポジトリからコードをコピーしてはいけません。外部情報は挙動を
   理解するためだけに使い、実装は独自に行ってください。
 
