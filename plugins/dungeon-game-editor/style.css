@@ -1,0 +1,259 @@
+.dge-root {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #101417;
+  color: #edf2e8;
+  overflow: hidden;
+}
+
+.dge-top-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2d3634;
+  background: #171d1c;
+}
+
+.dge-top-tabs button,
+.dge-tools button,
+.dge-icon,
+.dge-save,
+.dge-wide,
+.dge-compass button,
+.dge-preview-controls button {
+  min-height: 30px;
+  border: 1px solid #3e4946;
+  border-radius: 4px;
+  background: #242b29;
+  color: #f2f5ef;
+  cursor: pointer;
+}
+
+.dge-top-tabs button {
+  padding: 0 12px;
+}
+
+.dge-top-tabs button.active,
+.dge-tools button.active {
+  background: #315d4d;
+  border-color: #7bd9a6;
+}
+
+.dge-status {
+  margin-left: auto;
+  min-width: 120px;
+  text-align: right;
+  color: #aebbb5;
+  font-size: 12px;
+}
+
+.dge-dirty {
+  min-width: 52px;
+  text-align: right;
+  color: #ffd166;
+  font-size: 12px;
+}
+
+.dge-save {
+  min-width: 72px;
+  background: #28593e;
+}
+
+.dge-panel {
+  display: none;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+.dge-panel.active {
+  display: flex;
+  flex-direction: column;
+}
+
+.dge-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(360px, 1fr) 180px;
+  min-width: 840px;
+  min-height: 650px;
+  flex: 1 0 auto;
+  overflow: visible;
+}
+
+.dge-left,
+.dge-right {
+  padding: 12px;
+  background: #171d1c;
+  border-right: 1px solid #2d3634;
+  overflow: auto;
+}
+
+.dge-right {
+  border-right: 0;
+  border-left: 1px solid #2d3634;
+}
+
+.dge-center {
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  overflow: auto;
+}
+
+.dge-row,
+.dge-size-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.dge-size-row .dge-field {
+  flex: 1;
+}
+
+.dge-field {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #bac7bf;
+}
+
+.dge-field input,
+.dge-floor-select {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  border: 1px solid #3d4945;
+  border-radius: 4px;
+  background: #0f1312;
+  color: #edf2e8;
+  padding: 0 8px;
+}
+
+.dge-icon {
+  flex: 0 0 30px;
+  width: 30px;
+}
+
+.dge-icon.danger {
+  color: #ffb7a5;
+}
+
+.dge-wide {
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.dge-tool-title,
+.dge-mini-title {
+  margin: 8px 0;
+  color: #bac7bf;
+  font-size: 12px;
+}
+
+.dge-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dge-map {
+  width: min(100%, calc(100vh - 130px));
+  max-height: calc(100vh - 130px);
+  aspect-ratio: 1;
+  image-rendering: pixelated;
+  background: #101417;
+  border: 1px solid #3d4945;
+}
+
+.dge-cell-info,
+.dge-preview-info {
+  min-height: 36px;
+  padding: 8px;
+  border: 1px solid #36413e;
+  border-radius: 4px;
+  background: #111514;
+  color: #edf2e8;
+  font-size: 12px;
+}
+
+.dge-compass {
+  display: grid;
+  grid-template-columns: repeat(3, 42px);
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.dge-compass button:nth-child(4) {
+  grid-column: 2;
+}
+
+.dge-preview-shell {
+  min-height: 100%;
+  flex: 1 0 auto;
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  background: #101417;
+  overflow: auto;
+}
+
+.dge-preview-stage {
+  position: relative;
+  width: min(92vw, 800px);
+  max-height: calc(100vh - 170px);
+  aspect-ratio: 200 / 128;
+}
+
+.dge-view {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 200 / 128;
+  image-rendering: pixelated;
+  border: 1px solid #3d4945;
+  background: #050607;
+}
+
+.dge-minimap {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: min(24vw, 160px);
+  max-width: 160px;
+  aspect-ratio: 1;
+  image-rendering: pixelated;
+  border: 1px solid #7bd9a6;
+  background: #101417;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+.dge-preview-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.dge-preview-controls button {
+  width: 48px;
+}
+
+.dge-assets {
+  max-width: 760px;
+  padding: 18px;
+  width: min(760px, 100%);
+}
+
+.dge-generated-assets {
+  border-top: 1px solid #2d3634;
+  margin-top: 8px;
+  padding-top: 14px;
+  color: #bac7bf;
+  font-size: 12px;
+  line-height: 1.7;
+  word-break: break-all;
+}

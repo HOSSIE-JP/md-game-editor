@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>テストプレイ</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", sans-serif; background: #0a0c10; color: #e6edf3; display: flex; flex-direction: column; height: 100vh; }
+    .topbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #101520; border-bottom: 1px solid #1e2535; flex-shrink: 0; }
+    .topbar h1 { margin: 0; font-size: 15px; color: #4aa3ff; }
+    .topbar .rom-name { font-size: 12px; color: #9ba7b8; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    button { padding: 6px 12px; border-radius: 7px; border: 1px solid #2a2f3a; background: #202633; color: #e6edf3; cursor: pointer; font-size: 13px; }
+    button:hover { border-color: #4aa3ff; }
+    .icon-btn { width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+    .screen-area { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
+    canvas#screen { image-rendering: pixelated; background: #000; }
+    .status-bar { padding: 4px 14px; font-size: 11px; color: #9ba7b8; background: #0f1117; border-top: 1px solid #1e2535; }
+    svg { width: 16px; height: 16px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>テストプレイ</h1>
+    <span class="rom-name" id="romName">読み込み中...</span>
+
+    <button id="btnPlay" class="icon-btn" title="Play/Pause">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon id="iconPlay" points="5,3 19,12 5,21" fill="currentColor" stroke="none"/>
+      </svg>
+    </button>
+    <button id="btnReset" class="icon-btn" title="Reset">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v5h5"/>
+      </svg>
+    </button>
+    <button id="btnMute" class="icon-btn" title="Mute">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 14h4l5 4V6l-5 4H4z"/><path d="M16 9a4 4 0 0 1 0 6"/>
+      </svg>
+    </button>
+
+    <label style="font-size:12px; color:#9ba7b8;">Scale:
+      <select id="scaleSelect" style="padding:4px;background:#202633;border:1px solid #2a2f3a;color:#e6edf3;border-radius:6px;">
+        <option value="1">1x</option>
+        <option value="2" selected>2x</option>
+        <option value="3">3x</option>
+      </select>
+    </label>
+
+    <button id="btnDebug" title="デバッグウィンドウ">Debug</button>
+    <button id="btnSettings" title="テストプレイ設定">Settings</button>
+  </div>
+
+  <div class="screen-area">
+    <canvas id="screen" width="320" height="224"></canvas>
+  </div>
+  <div class="status-bar" id="statusBar">初期化中...</div>
+
+  <script type="module">
+    import MdEmulator from './md-emulator.js';
+
+    const WASM_JS_URL = new URL('./pkg/md_wasm.js', import.meta.url).href;
+    const ACTION_TO_BUTTON = {
+      UP: MdEmulator.Buttons.UP,
+      DOWN: MdEmulator.Buttons.DOWN,
+      LEFT: MdEmulator.Buttons.LEFT,
+      RIGHT: MdEmulator.Buttons.RIGHT,
+      A: MdEmulator.Buttons.A,
+      B: MdEmulator.Buttons.B,
+      C: MdEmulator.Buttons.C,
+      START: MdEmulator.Buttons.START,
+    };
+    const DEFAULT_SETTINGS = {
+      keyboard: {
+        UP: 'ArrowUp',
+        DOWN: 'ArrowDown',
+        LEFT: 'ArrowLeft',
+        RIGHT: 'ArrowRight',
+        A: 'KeyA',
+        B: 'KeyZ',
+        C: 'KeyX',
+        START: 'Enter',
+      },
+      gamepad: {
+        UP: 'button:12',
+        DOWN: 'button:13',
+        LEFT: 'button:14',
+        RIGHT: 'button:15',
+        A: 'button:2',
+        B: 'button:0',
+        C: 'button:1',
+        START: 'button:9',
+      },
+      gamepadDeadzone: 0.5,
+      debug: {
+        autoRefresh: true,
+        vramTileLayout: '256x512',
+      },
+    };
+
+    const params = new URLSearchParams(window.location.search);
+    const romPath = params.get('romPath') || '';
+
+    const canvas = document.getElementById('screen');
+    const statusBar = document.getElementById('statusBar');
+    const romNameEl = document.getElementById('romName');
+
+    let emu = null;
+    let running = false;
+    let muted = false;
+    let inputLoopId = 0;
+    let lastInputMask = -1;
+    let settings = structuredClone(DEFAULT_SETTINGS);
+    const pressedKeys = new Set();
+
+    function setStatus(text) { statusBar.textContent = text; }
+
+    function mergeSettings(next) {
+      return {
+        keyboard: { ...DEFAULT_SETTINGS.keyboard, ...(next?.keyboard || {}) },
+        gamepad: { ...DEFAULT_SETTINGS.gamepad, ...(next?.gamepad || {}) },
+        gamepadDeadzone: typeof next?.gamepadDeadzone === 'number' ? next.gamepadDeadzone : DEFAULT_SETTINGS.gamepadDeadzone,
+        debug: { ...DEFAULT_SETTINGS.debug, ...(next?.debug || {}) },
+      };
+    }
+
+    function applyScale(scale) {
+      const s = Number(scale) || 2;
+      canvas.style.width = `${320 * s}px`;
+      canvas.style.height = `${224 * s}px`;
+    }
+
+    function isBindingActive(binding, gamepad, deadzone) {
+      if (!binding || !gamepad) {
+        return false;
+      }
+      const [kind, indexText, signText] = String(binding).split(':');
+      const index = Number(indexText);
+      if (kind === 'button') {
+        return Number.isInteger(index) && (gamepad.buttons[index]?.value || 0) > 0.5;
+      }
+      if (kind === 'axis') {
+        const direction = Number(signText) || 1;
+        const value = gamepad.axes[index] || 0;
+        return direction < 0 ? value <= -deadzone : value >= deadzone;
+      }
+      return false;
+    }
+
+    function computeInputMask() {
+      let mask = 0;
+      const deadzone = Math.max(0.05, Math.min(0.95, Number(settings.gamepadDeadzone) || DEFAULT_SETTINGS.gamepadDeadzone));
+
+      for (const [action, keyCode] of Object.entries(settings.keyboard)) {
+        if (pressedKeys.has(keyCode)) {
+          mask |= ACTION_TO_BUTTON[action] || 0;
+        }
+      }
+
+      if (navigator.getGamepads) {
+        const gamepads = Array.from(navigator.getGamepads()).filter(Boolean);
+        for (const gamepad of gamepads) {
+          for (const [action, binding] of Object.entries(settings.gamepad)) {
+            if (isBindingActive(binding, gamepad, deadzone)) {
+              mask |= ACTION_TO_BUTTON[action] || 0;
+            }
+          }
+        }
+      }
+
+      return mask;
+    }
+
+    function tickInput() {
+      if (emu) {
+        const mask = computeInputMask();
+        if (mask !== lastInputMask) {
+          emu.setInput(1, mask);
+          lastInputMask = mask;
+        }
+      }
+      inputLoopId = requestAnimationFrame(tickInput);
+    }
+
+    function startInputLoop() {
+      if (!inputLoopId) {
+        inputLoopId = requestAnimationFrame(tickInput);
+      }
+    }
+
+    function stopInputLoop() {
+      if (inputLoopId) {
+        cancelAnimationFrame(inputLoopId);
+        inputLoopId = 0;
+      }
+      pressedKeys.clear();
+      lastInputMask = -1;
+      if (emu) {
+        emu.setInput(1, 0);
+      }
+    }
+
+    function maybeConsumeKey(event) {
+      if (!settings?.keyboard) {
+        return false;
+      }
+      return Object.values(settings.keyboard).includes(event.code);
+    }
+
+    async function init() {
+      if (!romPath) {
+        setStatus('ROM パスが指定されていません');
+        return;
+      }
+
+      const baseName = romPath.split(/[\\/]/).pop();
+      romNameEl.textContent = baseName;
+      document.title = `テストプレイ: ${baseName}`;
+
+      try {
+        settings = mergeSettings(await window.electronTestPlay.getSettings());
+        setStatus('WASM エミュレータ初期化中...');
+        emu = new MdEmulator({ wasmJsUrl: WASM_JS_URL, audio: true, sram: true });
+        emu.attachCanvas(canvas);
+        emu.addEventListener('error', (ev) => setStatus(`エラー: ${ev?.detail?.message}`));
+        await emu.init();
+
+        setStatus('ROM を読み込み中...');
+        const bytes = await window.electronTestPlay.readRomFile(romPath);
+        await emu.loadRom(new Uint8Array(bytes), baseName);
+        emu.play();
+        running = true;
+        startInputLoop();
+        updatePlayButton();
+        setStatus(`実行中: ${baseName}`);
+      } catch (err) {
+        setStatus(`初期化エラー: ${err.message || err}`);
+      }
+    }
+
+    function updatePlayButton() {
+      const btn = document.getElementById('btnPlay');
+      const icon = document.getElementById('iconPlay');
+      if (running) {
+        // Pause icon
+        icon.outerHTML = '<g id="iconPlay"><rect x="6" y="4" width="4" height="16" fill="currentColor"/><rect x="14" y="4" width="4" height="16" fill="currentColor"/></g>';
+        btn.title = 'Pause';
+      } else {
+        icon.outerHTML = '<polygon id="iconPlay" points="5,3 19,12 5,21" fill="currentColor" stroke="none"/>';
+        btn.title = 'Play';
+      }
+    }
+
+    document.getElementById('btnPlay').addEventListener('click', () => {
+      if (!emu) return;
+      if (running) { emu.pause(); running = false; setStatus('一時停止'); }
+      else { emu.play(); running = true; setStatus('実行中'); }
+      updatePlayButton();
+    });
+
+    document.getElementById('btnReset').addEventListener('click', () => {
+      if (!emu) return;
+      emu.reset();
+      emu.play();
+      running = true;
+      updatePlayButton();
+      setStatus('リセット');
+    });
+
+    document.getElementById('btnMute').addEventListener('click', () => {
+      if (!emu) return;
+      muted = !muted;
+      emu.setMuted(muted);
+    });
+
+    document.getElementById('scaleSelect').addEventListener('change', (e) => applyScale(e.target.value));
+
+    document.getElementById('btnDebug').addEventListener('click', () => {
+      window.electronTestPlay.openDebugWindow({ mode: 'wasm' });
+    });
+
+    document.getElementById('btnSettings').addEventListener('click', () => {
+      window.electronTestPlay.openSettingsWindow();
+    });
+
+    window.addEventListener('keydown', (event) => {
+      if (maybeConsumeKey(event)) {
+        event.preventDefault();
+        pressedKeys.add(event.code);
+      }
+    });
+
+    window.addEventListener('keyup', (event) => {
+      if (maybeConsumeKey(event)) {
+        event.preventDefault();
+        pressedKeys.delete(event.code);
+      }
+    });
+
+    window.addEventListener('blur', () => {
+      pressedKeys.clear();
+      if (emu) {
+        emu.setInput(1, 0);
+        lastInputMask = 0;
+      }
+    });
+
+    window.addEventListener('beforeunload', () => {
+      stopInputLoop();
+    });
+
+    window.electronTestPlay.onSettingsChanged((nextSettings) => {
+      settings = mergeSettings(nextSettings);
+      setStatus('設定を更新しました');
+    });
+
+    applyScale(2);
+    init();
+
+    // デバッグブリッジ（debug-wasm.html からアクセス）
+    window.__mdDebugBridge = {
+      getWasmDebugSnapshot: async (palette = 0) => {
+        if (!emu?.handle) return { ok: false, error: 'emulator not ready' };
+        try {
+          const h = emu.handle;
+          const parse = (v) => { try { return typeof v === 'string' ? JSON.parse(v) : v; } catch { return v; } };
+          return {
+            ok: true, source: 'wasm', palette,
+            registers: parse(h.get_vdp_registers_json()),
+            planes: { A: parse(h.debug_render_plane('A')), B: parse(h.debug_render_plane('B')), W: parse(h.debug_render_plane('W')) },
+            tiles: parse(h.debug_render_tiles(palette)),
+            cram: parse(h.debug_cram_colors_json()),
+            sprites: parse(h.debug_sprites_json()),
+            frame: { width: 320, height: 224, pixels_argb: Array.from(h.get_framebuffer_argb()) },
+          };
+        } catch (err) {
+          return { ok: false, error: String(err?.message || err) };
+        }
+      },
+    };
+  </script>
+</body>
+</html>

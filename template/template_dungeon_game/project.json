@@ -1,0 +1,12 @@
+{
+  "coreId": "mega-drive",
+  "title": "DUNGEON TEST",
+  "author": "HOSSIE",
+  "serial": "GM 00000000-02",
+  "region": "JUE",
+  "generatedAt": "2026-05-24T00:00:00.000Z",
+  "pluginRoles": {
+    "builder": "dungeon-game-builder",
+    "testplay": "standard-emulator"
+  }
+}

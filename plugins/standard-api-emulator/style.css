@@ -1,0 +1,82 @@
+.api-emulator-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 100%;
+}
+
+.api-emulator-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.api-emulator-header h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  color: #e6edf3;
+}
+
+.api-emulator-header p,
+.api-emulator-info {
+  margin: 0;
+  color: #9ba7b8;
+  font-size: 13px;
+}
+
+.api-emulator-status {
+  min-width: 120px;
+  padding: 5px 8px;
+  border: 1px solid #344052;
+  background: #151b26;
+  color: #d7e2f2;
+  text-align: center;
+  font-size: 12px;
+}
+
+.api-emulator-status[data-running="true"] {
+  border-color: #2c8f6b;
+  color: #8ee6c0;
+}
+
+.api-emulator-controls {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.api-emulator-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #9ba7b8;
+  font-size: 12px;
+}
+
+.api-emulator-controls input {
+  width: 110px;
+  padding: 6px 8px;
+  border: 1px solid #344052;
+  background: #101520;
+  color: #e6edf3;
+}
+
+.api-emulator-controls button {
+  min-height: 32px;
+}
+
+.api-emulator-log {
+  flex: 1;
+  min-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid #26324a;
+  background: #080c13;
+  color: #b8c4d9;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}

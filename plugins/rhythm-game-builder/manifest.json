@@ -1,0 +1,19 @@
+{
+  "id": "rhythm-game-builder",
+  "name": "リズムゲームビルダー",
+  "description": "リズムゲームエンジン、譜面データ、サンプルアセットを同期し、SGDK ROM ビルドを実行します。",
+  "version": "1.0.0",
+  "icon": "build",
+  "types": ["build"],
+  "generator": true,
+  "supportedCores": ["mega-drive"],
+  "permissions": ["project.read", "project.write", "build.configure"],
+  "dependencies": ["rhythm-game-editor"],
+  "roles": [{ "id": "builder", "label": "ビルド", "exclusive": true, "order": 10 }],
+  "hooks": [
+    "onBuildStart",
+    "onBuildLog",
+    "onBuildEnd",
+    "onBuildError"
+  ]
+}

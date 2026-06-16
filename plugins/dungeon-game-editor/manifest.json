@@ -1,0 +1,48 @@
+{
+  "id": "dungeon-game-editor",
+  "name": "ダンジョンゲームエディター",
+  "description": "薄い壁の 3D ダンジョンマップ、フロア別素材、3D プレビュー、SGDK 用データ出力を編集します。",
+  "version": "1.0.0",
+  "icon": "grid",
+  "types": ["editor"],
+  "supportedCores": ["mega-drive"],
+  "permissions": ["project.read", "project.write", "res.read", "res.write"],
+  "dependencies": ["dungeon-game-builder"],
+  "hooks": [
+    "getTab",
+    "onActivate",
+    "onDeactivate",
+    "listDungeonFloors",
+    "saveDungeonFloor",
+    "deleteDungeonFloor",
+    "moveDungeonFloor",
+    "generateDungeonFloor",
+    "exportDungeonData",
+    "listDungeonSettings",
+    "saveDungeonSettings"
+  ],
+  "mainApi": {
+    "hooks": [
+      "listDungeonFloors",
+      "saveDungeonFloor",
+      "deleteDungeonFloor",
+      "moveDungeonFloor",
+      "generateDungeonFloor",
+      "exportDungeonData",
+      "listDungeonSettings",
+      "saveDungeonSettings"
+    ]
+  },
+  "tab": {
+    "label": "ダンジョン",
+    "icon": "grid",
+    "page": "dungeon-game-editor",
+    "order": 6
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "dungeon-game-editor",
+    "capabilities": ["page", "dungeon-game-editor"]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "slideshow",
+  "name": "スライドショーゲーム",
+  "description": "resources.res に登録された imageXXX という名前の IMAGE アセット（320×224px）を 5 秒ごとに切り替えるスライドショーを生成します。コントローラー左右キーで手動切替、bgm アセット（XGM2 / WAV）をループ再生します。",
+  "version": "1.0.1",
+  "icon": "play",
+  "types": ["build"],
+  "permissions": ["project.read", "project.write", "build.configure"],
+  "roles": [{ "id": "builder", "label": "Build", "exclusive": true, "order": 10 }],
+  "hooks": [
+    "onBuildStart",
+    "onBuildLog",
+    "onBuildEnd",
+    "onBuildError"
+  ]
+}

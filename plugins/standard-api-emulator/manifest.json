@@ -1,0 +1,11 @@
+{
+  "id": "standard-api-emulator",
+  "name": "標準エミュレーター（API）",
+  "description": "REST API サーバー経由で Mega Drive エミュレーターを操作する Test Play プラグインです。",
+  "version": "1.0.0",
+  "icon": "bug",
+  "types": ["emulator", "tool"],
+  "permissions": ["project.read", "testplay.launch", "api.start"],
+  "roles": [{ "id": "testplay", "label": "Test Play", "exclusive": true, "order": 21 }],
+  "hooks": ["onTestPlay"]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "mega-drive-core",
+  "name": "Mega Drive Core",
+  "description": "SGDK / rescomp / MD emulator を使う Mega Drive プロジェクトコアです。",
+  "version": "0.1.0",
+  "icon": "settings",
+  "types": ["core"],
+  "supportedCores": ["mega-drive"],
+  "core": {
+    "id": "mega-drive",
+    "label": "Mega Drive",
+    "platform": "md"
+  },
+  "permissions": ["project.read", "project.write", "build.configure", "setup.manage"]
+}

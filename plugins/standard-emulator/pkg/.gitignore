@@ -1,0 +1,9 @@
+*
+!.gitignore
+!README.md
+!build_meta.js
+!md_wasm.d.ts
+!md_wasm.js
+!md_wasm_bg.wasm
+!md_wasm_bg.wasm.d.ts
+!package.json

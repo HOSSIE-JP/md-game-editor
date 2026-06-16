@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API Debug Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 12px; }
+    h1 { font-size: 16px; margin-bottom: 8px; color: #7ec8e3; }
+    h2 { font-size: 14px; margin: 0; color: #8bc6ec; }
+    a { color: #7ec8e3; }
+    .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    .toolbar button, .toolbar select, .toolbar input { font-family: monospace; padding: 4px 10px; background: #2a2a4a; color: #e0e0e0; border: 1px solid #555; }
+    .toolbar button { cursor: pointer; }
+    .toolbar button:hover { background: #3a3a5a; }
+    .toolbar label { font-size: 12px; }
+    #status { font-size: 11px; color: #aaa; margin-bottom: 8px; }
+    .panels { display: flex; flex-wrap: wrap; gap: 12px; }
+    .panel { background: #222244; border: 1px solid #444; padding: 8px; }
+    .panel canvas { image-rendering: pixelated; border: 1px solid #333; display: block; }
+    .panel-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .panel-header-actions { display: flex; gap: 6px; }
+    .mini-btn { font-family: monospace; font-size: 11px; padding: 2px 8px; background: #2a2a4a; color: #e0e0e0; border: 1px solid #555; cursor: pointer; }
+    .mini-btn:hover { background: #3a3a5a; }
+    .info-block { font-size: 11px; margin-top: 4px; white-space: pre-wrap; }
+    .pre-block { font-size: 11px; max-height: 420px; overflow: auto; background: #16162a; border: 1px solid #333; padding: 8px; min-width: 420px; }
+    .cram-grid { display: grid; grid-template-columns: repeat(16, 24px); gap: 1px; }
+    .cram-cell { width: 24px; height: 24px; border: 1px solid #555; cursor: pointer; position: relative; }
+    .cram-cell:hover { border-color: #fff; z-index: 1; }
+    .cram-cell .tooltip { display: none; position: absolute; top: -28px; left: 0; background: #000; color: #fff; font-size: 10px; padding: 2px 4px; white-space: nowrap; border: 1px solid #888; z-index: 10; }
+    .cram-cell:hover .tooltip { display: block; }
+    table.sprite-table { font-size: 11px; border-collapse: collapse; width: 100%; }
+    table.sprite-table th, table.sprite-table td { border: 1px solid #444; padding: 2px 6px; text-align: right; }
+    table.sprite-table th { background: #2a2a4a; }
+    table.sprite-table tr:nth-child(even) { background: #1e1e3a; }
+    .tab-bar { display: flex; gap: 2px; margin-bottom: 8px; flex-wrap: wrap; }
+    .tab-bar button { padding: 6px 14px; background: #2a2a4a; border: 1px solid #555; border-bottom: none; color: #aaa; cursor: pointer; }
+    .tab-bar button.active { background: #222244; color: #fff; border-bottom: 1px solid #222244; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+  </style>
+</head>
+<body>
+  <h1>API Debug Viewer</h1>
+  <div class="toolbar">
+    <label>API: <input id="apiBase" type="text" value="http://127.0.0.1:8080" style="width:200px" /></label>
+    <button id="btnRefresh">Refresh All</button>
+    <button id="btnAutoRefresh">Auto Refresh: OFF</button>
+    <button id="btnCopySummary">Copy Snapshot</button>
+    <button id="btnCopyActive">Copy Active Tab</button>
+    <button id="btnSaveActiveImage">Save Active PNG</button>
+    <button id="btnSaveReport">Save Report PNG</button>
+    <label>Tile Palette: <select id="tilePalette"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+  </div>
+  <div id="status">idle</div>
+
+  <div class="tab-bar">
+    <button class="active" data-tab="registers">Registers</button>
+    <button data-tab="planes">Scroll Planes</button>
+    <button data-tab="tiles">Tiles</button>
+    <button data-tab="cram">CRAM</button>
+    <button data-tab="sprites">Sprites</button>
+    <button data-tab="frame">Frame</button>
+  </div>
+
+  <div id="tab-registers" class="tab-content active">
+    <div class="panel">
+      <div class="panel-header">
+        <h2>VDP Registers / DMA / Counters</h2>
+        <div class="panel-header-actions">
+          <button class="mini-btn" data-copy="registers">Copy JSON</button>
+        </div>
+      </div>
+      <pre id="registersPre" class="pre-block"></pre>
+    </div>
+  </div>
+
+  <div id="tab-planes" class="tab-content">
+    <div class="panels">
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Plane A</h2>
+          <div class="panel-header-actions">
+            <button class="mini-btn" data-copy="plane:A">Copy JSON</button>
+            <button class="mini-btn" data-save-canvas="canvasPlaneA" data-filename="vdp-plane-a.png">Save PNG</button>
+          </div>
+        </div>
+        <canvas id="canvasPlaneA" width="512" height="512"></canvas>
+        <div id="planeAInfo" class="info-block"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Plane B</h2>
+          <div class="panel-header-actions">
+            <button class="mini-btn" data-copy="plane:B">Copy JSON</button>
+            <button class="mini-btn" data-save-canvas="canvasPlaneB" data-filename="vdp-plane-b.png">Save PNG</button>
+          </div>
+        </div>
+        <canvas id="canvasPlaneB" width="512" height="512"></canvas>
+        <div id="planeBInfo" class="info-block"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Window</h2>
+          <div class="panel-header-actions">
+            <button class="mini-btn" data-copy="plane:W">Copy JSON</button>
+            <button class="mini-btn" data-save-canvas="canvasWindow" data-filename="vdp-window-plane.png">Save PNG</button>
+          </div>
+        </div>
+        <canvas id="canvasWindow" width="512" height="256"></canvas>
+        <div id="planeWInfo" class="info-block"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-tiles" class="tab-content">
+    <div class="panel">
+      <div class="panel-header">
+        <h2>VRAM Tiles (2048 tiles, 32×64 grid)</h2>
+        <div class="panel-header-actions">
+          <button class="mini-btn" data-copy="tiles">Copy JSON</button>
+          <button class="mini-btn" data-save-canvas="canvasTiles" data-filename="vdp-tiles.png">Save PNG</button>
+        </div>
+      </div>
+      <canvas id="canvasTiles" width="256" height="512" style="width:512px;height:1024px;"></canvas>
+      <div id="tilesInfo" class="info-block"></div>
+    </div>
+  </div>
+
+  <div id="tab-cram" class="tab-content">
+    <div class="panel">
+      <div class="panel-header">
+        <h2>CRAM Palette (4 palettes × 16 colors)</h2>
+        <div class="panel-header-actions">
+          <button class="mini-btn" data-copy="cram">Copy JSON</button>
+        </div>
+      </div>
+      <div id="cramGrid" class="cram-grid"></div>
+      <div id="cramInfo" class="info-block"></div>
+    </div>
+  </div>
+
+  <div id="tab-sprites" class="tab-content">
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Sprite Attribute Table</h2>
+        <div class="panel-header-actions">
+          <button class="mini-btn" data-copy="sprites">Copy JSON</button>
+        </div>
+      </div>
+      <div style="max-height:500px;overflow:auto;">
+        <table class="sprite-table">
+          <thead>
+            <tr><th>#</th><th>X</th><th>Y</th><th>W</th><th>H</th><th>Tile</th><th>Pal</th><th>Pri</th><th>HF</th><th>VF</th><th>Link</th></tr>
+          </thead>
+          <tbody id="spriteBody"></tbody>
+        </table>
+      </div>
+      <div id="spriteInfo" class="info-block"></div>
+    </div>
+  </div>
+
+  <div id="tab-frame" class="tab-content">
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Composited Frame</h2>
+        <div class="panel-header-actions">
+          <button class="mini-btn" data-copy="frame">Copy JSON</button>
+          <button class="mini-btn" data-save-canvas="canvasFrame" data-filename="vdp-frame.png">Save PNG</button>
+        </div>
+      </div>
+      <canvas id="canvasFrame" width="320" height="224" style="width:640px;height:448px;"></canvas>
+      <div id="frameInfo" class="info-block"></div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const apiBaseInput = document.getElementById('apiBase');
+    const statusEl = document.getElementById('status');
+    const debugState = {
+      registers: null,
+      planes: { A: null, B: null, W: null },
+      tiles: null,
+      cram: null,
+      sprites: null,
+      frame: null,
+    };
+
+    const initialPort = Number(params.get('port')) || 8080;
+    apiBaseInput.value = `http://127.0.0.1:${initialPort}`;
+
+    function apiBase() { return apiBaseInput.value.replace(/\/+$/, ''); }
+    function setStatus(text) { statusEl.textContent = text; }
+
+    function drawArgbToCanvas(canvas, width, height, pixelsArgb) {
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      const img = ctx.createImageData(width, height);
+      const dst = img.data;
+      const len = Math.min(pixelsArgb.length, width * height);
+      for (let i = 0; i < len; i++) {
+        const c = pixelsArgb[i] >>> 0;
+        const o = i * 4;
+        dst[o] = (c >> 16) & 0xff;
+        dst[o + 1] = (c >> 8) & 0xff;
+        dst[o + 2] = c & 0xff;
+        dst[o + 3] = (c >> 24) & 0xff;
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+
+    function sampleHash(values) {
+      if (!Array.isArray(values) || values.length === 0) {
+        return '00000000';
+      }
+      const stride = Math.max(1, Math.floor(values.length / 4096));
+      let hash = 2166136261 >>> 0;
+      for (let i = 0; i < values.length; i += stride) {
+        hash ^= Number(values[i]) >>> 0;
+        hash = Math.imul(hash, 16777619) >>> 0;
+      }
+      return hash.toString(16).padStart(8, '0');
+    }
+
+    function summarizeImage(data) {
+      if (!data) {
+        return null;
+      }
+      return {
+        width: data.width,
+        height: data.height,
+        pixels: Array.isArray(data.pixels_argb) ? data.pixels_argb.length : 0,
+        hash: sampleHash(data.pixels_argb),
+      };
+    }
+
+    function registersToText(data) {
+      if (!data) {
+        return 'no data';
+      }
+      const registers = Array.isArray(data.registers) ? data.registers : [];
+      const registerLines = registers.map((value, index) => {
+        const hexIndex = index.toString(16).toUpperCase().padStart(2, '0');
+        const hexValue = Number(value).toString(16).toUpperCase().padStart(2, '0');
+        return `R${hexIndex}: 0x${hexValue}`;
+      });
+      return [
+        `frame=${data.frame}`,
+        `status=0x${Number(data.status || 0).toString(16).toUpperCase().padStart(4, '0')}`,
+        `code=0x${Number(data.code || 0).toString(16).toUpperCase().padStart(2, '0')}`,
+        `address=0x${Number(data.address || 0).toString(16).toUpperCase().padStart(4, '0')}`,
+        `data_writes=${data.data_writes}`,
+        `ctrl_writes=${data.ctrl_writes}`,
+        `dma_68k_count=${data.dma_68k_count}`,
+        `dma_68k_total_words=${data.dma_68k_total_words}`,
+        `dma_fill_count=${data.dma_fill_count}`,
+        `dma_copy_count=${data.dma_copy_count}`,
+        `last_dma_target_addr=0x${Number(data.last_dma_target_addr || 0).toString(16).toUpperCase().padStart(4, '0')}`,
+        `last_dma_source=0x${Number(data.last_dma_source || 0).toString(16).toUpperCase().padStart(6, '0')}`,
+        `last_dma_length=${data.last_dma_length}`,
+        `hint_delivered=${data.hint_delivered}`,
+        `vint_delivered=${data.vint_delivered}`,
+        '',
+        ...registerLines,
+      ].join('\n');
+    }
+
+    async function fetchJson(path) {
+      const response = await fetch(apiBase() + path);
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText}`);
+      }
+      return response.json();
+    }
+
+    async function copyText(label, text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        setStatus(`${label} copied to clipboard`);
+      } catch (error) {
+        const area = document.createElement('textarea');
+        area.value = text;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        area.remove();
+        setStatus(`${label} copied to clipboard (fallback)`);
+      }
+    }
+
+    function getCopyPayload(kind) {
+      if (kind === 'registers') {
+        return debugState.registers;
+      }
+      if (kind.startsWith('plane:')) {
+        return debugState.planes[kind.split(':')[1]];
+      }
+      if (kind === 'tiles') {
+        return debugState.tiles;
+      }
+      if (kind === 'cram') {
+        return debugState.cram;
+      }
+      if (kind === 'sprites') {
+        return debugState.sprites;
+      }
+      if (kind === 'frame') {
+        return debugState.frame;
+      }
+      return null;
+    }
+
+    function buildSnapshotSummary() {
+      return {
+        captured_at: new Date().toISOString(),
+        api_base: apiBase(),
+        registers: debugState.registers,
+        planes: {
+          A: summarizeImage(debugState.planes.A),
+          B: summarizeImage(debugState.planes.B),
+          W: summarizeImage(debugState.planes.W),
+        },
+        tiles: debugState.tiles ? {
+          palette: debugState.tiles.palette,
+          image: summarizeImage(debugState.tiles),
+        } : null,
+        cram: debugState.cram ? {
+          count: Array.isArray(debugState.cram.colors_argb) ? debugState.cram.colors_argb.length : 0,
+          hash: sampleHash(debugState.cram.colors_argb),
+          colors_argb: debugState.cram.colors_argb,
+        } : null,
+        sprites: debugState.sprites ? {
+          count: Array.isArray(debugState.sprites.sprites) ? debugState.sprites.sprites.length : 0,
+          sprites: debugState.sprites.sprites,
+        } : null,
+        frame: summarizeImage(debugState.frame),
+      };
+    }
+
+    function getActiveTabPayload() {
+      const active = document.querySelector('.tab-bar button.active')?.dataset.tab;
+      if (active === 'registers') {
+        return { tab: active, data: debugState.registers };
+      }
+      if (active === 'planes') {
+        return { tab: active, data: debugState.planes };
+      }
+      if (active === 'tiles') {
+        return { tab: active, data: debugState.tiles };
+      }
+      if (active === 'cram') {
+        return { tab: active, data: debugState.cram };
+      }
+      if (active === 'sprites') {
+        return { tab: active, data: debugState.sprites };
+      }
+      if (active === 'frame') {
+        return { tab: active, data: debugState.frame };
+      }
+      return { tab: active || 'unknown', data: null };
+    }
+
+    function downloadCanvas(canvas, filename) {
+      if (!canvas || !canvas.width || !canvas.height) {
+        throw new Error('image is not available yet');
+      }
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/png');
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+
+    function getActiveCanvasDescriptor() {
+      const active = document.querySelector('.tab-bar button.active')?.dataset.tab;
+      if (active === 'planes') {
+        return { canvasId: 'canvasPlaneA', filename: 'vdp-plane-a.png', label: 'Plane A' };
+      }
+      if (active === 'tiles') {
+        return { canvasId: 'canvasTiles', filename: 'vdp-tiles.png', label: 'Tiles' };
+      }
+      if (active === 'frame') {
+        return { canvasId: 'canvasFrame', filename: 'vdp-frame.png', label: 'Frame' };
+      }
+      return null;
+    }
+
+    function renderCanvasCard(ctx, canvas, title, x, y, maxWidth) {
+      const scale = Math.min(1, maxWidth / canvas.width);
+      const width = Math.max(1, Math.round(canvas.width * scale));
+      const height = Math.max(1, Math.round(canvas.height * scale));
+      ctx.fillStyle = '#1a2237';
+      ctx.fillRect(x, y, width + 24, height + 44);
+      ctx.strokeStyle = '#4b628f';
+      ctx.strokeRect(x + 0.5, y + 0.5, width + 23, height + 43);
+      ctx.fillStyle = '#e8eefc';
+      ctx.font = '16px monospace';
+      ctx.fillText(title, x + 12, y + 20);
+      ctx.drawImage(canvas, x + 12, y + 32, width, height);
+      return y + height + 56;
+    }
+
+    function buildReportCanvas() {
+      const reportCanvas = document.createElement('canvas');
+      reportCanvas.width = 1280;
+      reportCanvas.height = 1180;
+      const ctx = reportCanvas.getContext('2d');
+
+      ctx.fillStyle = '#0b1020';
+      ctx.fillRect(0, 0, reportCanvas.width, reportCanvas.height);
+
+      ctx.fillStyle = '#f2f5ff';
+      ctx.font = '28px monospace';
+      ctx.fillText('VDP Debug Snapshot', 32, 42);
+
+      ctx.fillStyle = '#9db0d5';
+      ctx.font = '15px monospace';
+      const frameNumber = debugState.registers?.frame ?? 'n/a';
+      ctx.fillText(`Captured: ${new Date().toISOString()}   API: ${apiBase()}   Frame: ${frameNumber}`, 32, 70);
+
+      const cards = [
+        { canvasId: 'canvasFrame', title: 'Composited Frame', x: 32, y: 104, maxWidth: 580 },
+        { canvasId: 'canvasPlaneA', title: 'Plane A', x: 652, y: 104, maxWidth: 596 },
+        { canvasId: 'canvasPlaneB', title: 'Plane B', x: 652, y: 504, maxWidth: 596 },
+        { canvasId: 'canvasWindow', title: 'Window Plane', x: 32, y: 504, maxWidth: 580 },
+        { canvasId: 'canvasTiles', title: 'Tiles', x: 32, y: 804, maxWidth: 1216 },
+      ];
+
+      cards.forEach((card) => {
+        const canvas = document.getElementById(card.canvasId);
+        if (canvas && canvas.width && canvas.height) {
+          renderCanvasCard(ctx, canvas, card.title, card.x, card.y, card.maxWidth);
+        }
+      });
+
+      ctx.fillStyle = '#1a2237';
+      ctx.fillRect(652, 904, 596, 236);
+      ctx.strokeStyle = '#4b628f';
+      ctx.strokeRect(652.5, 904.5, 595, 235);
+      ctx.fillStyle = '#e8eefc';
+      ctx.font = '16px monospace';
+      ctx.fillText('Summary', 664, 926);
+      ctx.fillStyle = '#c6d2ee';
+      ctx.font = '13px monospace';
+
+      const lines = [
+        `register_hash: ${sampleHash(debugState.registers?.registers || [])}`,
+        `plane_a_hash: ${summarizeImage(debugState.planes.A)?.hash || '00000000'}`,
+        `plane_b_hash: ${summarizeImage(debugState.planes.B)?.hash || '00000000'}`,
+        `window_hash: ${summarizeImage(debugState.planes.W)?.hash || '00000000'}`,
+        `tiles_hash: ${summarizeImage(debugState.tiles)?.hash || '00000000'}`,
+        `frame_hash: ${summarizeImage(debugState.frame)?.hash || '00000000'}`,
+        `cram_hash: ${sampleHash(debugState.cram?.colors_argb || [])}`,
+        `sprite_count: ${(debugState.sprites?.sprites || []).length}`,
+        `shadow_highlight: ${((debugState.registers?.registers || [])[0x0C] & 0x08) ? 'on' : 'off'}`,
+      ];
+      lines.forEach((line, index) => {
+        ctx.fillText(line, 664, 952 + index * 20);
+      });
+
+      return reportCanvas;
+    }
+
+    function saveActiveImage() {
+      const descriptor = getActiveCanvasDescriptor();
+      if (!descriptor) {
+        setStatus('active tab has no image export');
+        return;
+      }
+      downloadCanvas(document.getElementById(descriptor.canvasId), descriptor.filename);
+      setStatus(`${descriptor.label} PNG saved`);
+    }
+
+    function saveReportImage() {
+      const canvas = buildReportCanvas();
+      downloadCanvas(canvas, 'vdp-debug-report.png');
+      setStatus('report PNG saved');
+    }
+
+    async function refreshRegisters() {
+      const data = await fetchJson('/api/v1/vdp/registers');
+      debugState.registers = data;
+      document.getElementById('registersPre').textContent = registersToText(data);
+    }
+
+    async function refreshPlane(name, canvasId, infoId) {
+      const data = await fetchJson(`/api/v1/vdp/plane?name=${name}`);
+      debugState.planes[name] = data;
+      if (data.pixels_argb) {
+        drawArgbToCanvas(document.getElementById(canvasId), data.width, data.height, data.pixels_argb);
+      }
+      const summary = summarizeImage(data);
+      document.getElementById(infoId).textContent = `${data.width}x${data.height}px\npixels=${summary.pixels}\nhash=${summary.hash}`;
+    }
+
+    async function refreshTiles() {
+      const palette = Number(document.getElementById('tilePalette').value);
+      const data = await fetchJson(`/api/v1/vdp/tiles?palette=${palette}`);
+      debugState.tiles = data;
+      if (data.pixels_argb) {
+        drawArgbToCanvas(document.getElementById('canvasTiles'), data.width, data.height, data.pixels_argb);
+      }
+      const summary = summarizeImage(data);
+      document.getElementById('tilesInfo').textContent = `palette=${palette}\npixels=${summary.pixels}\nhash=${summary.hash}`;
+    }
+
+    async function refreshCram() {
+      const data = await fetchJson('/api/v1/vdp/colors');
+      debugState.cram = data;
+      if (!data.colors_argb) {
+        return;
+      }
+      const grid = document.getElementById('cramGrid');
+      grid.innerHTML = '';
+      data.colors_argb.forEach((argb, index) => {
+        const c = argb >>> 0;
+        const r = (c >> 16) & 0xff;
+        const g = (c >> 8) & 0xff;
+        const b = c & 0xff;
+        const cell = document.createElement('div');
+        cell.className = 'cram-cell';
+        cell.style.backgroundColor = `rgb(${r},${g},${b})`;
+        cell.addEventListener('click', () => {
+          const cellData = { index, palette: (index >> 4) & 3, color: index & 15, argb };
+          copyText('CRAM cell', JSON.stringify(cellData, null, 2));
+        });
+        const tip = document.createElement('span');
+        tip.className = 'tooltip';
+        tip.textContent = `#${index} P${(index >> 4) & 3}:${index & 15} rgb(${r},${g},${b})`;
+        cell.appendChild(tip);
+        grid.appendChild(cell);
+      });
+      document.getElementById('cramInfo').textContent = `colors=${data.colors_argb.length}\nhash=${sampleHash(data.colors_argb)}\ncell click: copy one color`;
+    }
+
+    async function refreshSprites() {
+      const data = await fetchJson('/api/v1/vdp/sprites');
+      debugState.sprites = data;
+      const body = document.getElementById('spriteBody');
+      body.innerHTML = '';
+      (data.sprites || []).forEach((sprite, index) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${index}</td><td>${sprite.x}</td><td>${sprite.y}</td><td>${sprite.width}</td><td>${sprite.height}</td><td>$${sprite.tile.toString(16).toUpperCase()}</td><td>${sprite.palette}</td><td>${sprite.priority ? 1 : 0}</td><td>${sprite.hflip ? 'Y' : ''}</td><td>${sprite.vflip ? 'Y' : ''}</td><td>${sprite.link}</td>`;
+        body.appendChild(tr);
+      });
+      document.getElementById('spriteInfo').textContent = `sprites=${(data.sprites || []).length}`;
+    }
+
+    async function refreshFrame() {
+      const data = await fetchJson('/api/v1/video/frame');
+      debugState.frame = data;
+      if (data.pixels_argb) {
+        drawArgbToCanvas(document.getElementById('canvasFrame'), data.width, data.height, data.pixels_argb);
+      }
+      const summary = summarizeImage(data);
+      document.getElementById('frameInfo').textContent = `${data.width}x${data.height}px\npixels=${summary.pixels}\nhash=${summary.hash}`;
+    }
+
+    async function refreshAll() {
+      setStatus('refreshing...');
+      const startedAt = performance.now();
+      await Promise.all([
+        refreshRegisters(),
+        refreshPlane('A', 'canvasPlaneA', 'planeAInfo'),
+        refreshPlane('B', 'canvasPlaneB', 'planeBInfo'),
+        refreshPlane('W', 'canvasWindow', 'planeWInfo'),
+        refreshTiles(),
+        refreshCram(),
+        refreshSprites(),
+        refreshFrame(),
+      ]);
+      setStatus(`refreshed in ${(performance.now() - startedAt).toFixed(0)}ms`);
+    }
+
+    document.querySelectorAll('.tab-bar button').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.tab-bar button').forEach((item) => item.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach((item) => item.classList.remove('active'));
+        button.classList.add('active');
+        document.getElementById('tab-' + button.dataset.tab).classList.add('active');
+      });
+    });
+
+    document.getElementById('btnRefresh').addEventListener('click', refreshAll);
+
+    let autoInterval = null;
+    document.getElementById('btnAutoRefresh').addEventListener('click', () => {
+      const button = document.getElementById('btnAutoRefresh');
+      if (autoInterval) {
+        clearInterval(autoInterval);
+        autoInterval = null;
+        button.textContent = 'Auto Refresh: OFF';
+      } else {
+        autoInterval = setInterval(refreshAll, 500);
+        button.textContent = 'Auto Refresh: ON';
+      }
+    });
+
+    document.getElementById('tilePalette').addEventListener('change', refreshTiles);
+
+    document.getElementById('btnCopySummary').addEventListener('click', () => {
+      copyText('Snapshot summary', JSON.stringify(buildSnapshotSummary(), null, 2));
+    });
+
+    document.getElementById('btnCopyActive').addEventListener('click', () => {
+      const payload = getActiveTabPayload();
+      copyText(`Active tab (${payload.tab})`, JSON.stringify(payload, null, 2));
+    });
+
+    document.getElementById('btnSaveActiveImage').addEventListener('click', () => {
+      try {
+        saveActiveImage();
+      } catch (error) {
+        setStatus('save failed: ' + error.message);
+      }
+    });
+
+    document.getElementById('btnSaveReport').addEventListener('click', () => {
+      try {
+        saveReportImage();
+      } catch (error) {
+        setStatus('report export failed: ' + error.message);
+      }
+    });
+
+    document.querySelectorAll('[data-copy]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const kind = button.dataset.copy;
+        const payload = getCopyPayload(kind);
+        copyText(kind, JSON.stringify(payload, null, 2));
+      });
+    });
+
+    document.querySelectorAll('[data-save-canvas]').forEach((button) => {
+      button.addEventListener('click', () => {
+        try {
+          downloadCanvas(document.getElementById(button.dataset.saveCanvas), button.dataset.filename || 'debug.png');
+          setStatus(`${button.dataset.filename || 'debug.png'} saved`);
+        } catch (error) {
+          setStatus('save failed: ' + error.message);
+        }
+      });
+    });
+
+    refreshAll().catch((error) => setStatus('initial fetch failed: ' + error));
+  </script>
+</body>
+</html>

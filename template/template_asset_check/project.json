@@ -1,0 +1,22 @@
+{
+  "title": "ASSET CHECK",
+  "author": "HOSSIE",
+  "serial": "GM 00000000-01",
+  "region": "JUE",
+  "generatedAt": "2026-05-06T16:08:04.684Z",
+  "pluginRoles": {
+    "builder": "asset-checker",
+    "testplay": "standard-emulator"
+  },
+  "pluginSettings": {
+    "sidebarOrder": [
+      "asset-manager",
+      "md-bgm-composer",
+      "sprite-editor",
+      "tilemap-editor",
+      "code-editor",
+      "block-stage-editor",
+      "ai-control"
+    ]
+  }
+}

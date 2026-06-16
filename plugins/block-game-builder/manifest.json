@@ -1,0 +1,17 @@
+{
+  "id": "block-game-builder",
+  "name": "ブロック崩しゲームビルダー",
+  "description": "ブロック崩しゲームエンジンのソースコードとステージデータを同期し、SGDK ROM ビルドを実行します。",
+  "version": "1.0.0",
+  "icon": "build",
+  "types": ["build"],
+  "permissions": ["project.read", "project.write", "build.configure"],
+  "dependencies": ["block-stage-editor"],
+  "roles": [{ "id": "builder", "label": "ビルド", "exclusive": true, "order": 10 }],
+  "hooks": [
+    "onBuildStart",
+    "onBuildLog",
+    "onBuildEnd",
+    "onBuildError"
+  ]
+}

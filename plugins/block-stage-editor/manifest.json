@@ -1,0 +1,37 @@
+{
+  "id": "block-stage-editor",
+  "name": "ブロック崩しステージエディタ",
+  "description": "ブロック崩しゲームのステージ配置、背景、BGM、クリア画像を編集し、SGDK 用ステージヘッダーを生成します。",
+  "version": "1.0.0",
+  "icon": "grid",
+  "types": ["editor"],
+  "permissions": ["project.read", "project.write", "res.read", "res.write", "dialog.openFile"],
+  "dependencies": ["image-resize-converter", "image-quantize-converter", "audio-converter", "block-game-builder"],
+  "hooks": [
+    "getTab",
+    "onActivate",
+    "onDeactivate",
+    "listStages",
+    "saveStage",
+    "deleteStage",
+    "moveStage",
+    "exportStageData",
+    "listBlockSettings",
+    "saveBlockSettings"
+  ],
+  "mainApi": {
+    "hooks": ["listStages", "saveStage", "deleteStage", "moveStage", "exportStageData", "listBlockSettings", "saveBlockSettings"]
+  },
+  "tab": {
+    "label": "ブロック崩し",
+    "icon": "grid",
+    "page": "block-stage-editor",
+    "order": 5
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "block-stage-editor",
+    "capabilities": ["page", "block-stage-editor"]
+  }
+}

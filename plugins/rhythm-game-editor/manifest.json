@@ -1,0 +1,48 @@
+{
+  "id": "rhythm-game-editor",
+  "name": "リズムゲームエディター",
+  "description": "Mega Drive 向けリズムゲームの楽曲、譜面、メタ情報、ゲーム内アセットを編集します。",
+  "version": "1.0.0",
+  "icon": "music",
+  "types": ["editor", "asset"],
+  "supportedCores": ["mega-drive"],
+  "permissions": ["project.read", "project.write", "res.read", "res.write", "dialog.openFile", "main.invokeHook"],
+  "dependencies": ["asset-manager", "audio-converter", "image-resize-converter", "image-quantize-converter", "rhythm-game-builder"],
+  "hooks": [
+    "getTab",
+    "onActivate",
+    "onDeactivate",
+    "listRhythmSongs",
+    "saveRhythmSong",
+    "deleteRhythmSong",
+    "moveRhythmSong",
+    "listRhythmSettings",
+    "saveRhythmSettings",
+    "exportRhythmData",
+    "validateRhythmProject"
+  ],
+  "mainApi": {
+    "hooks": [
+      "listRhythmSongs",
+      "saveRhythmSong",
+      "deleteRhythmSong",
+      "moveRhythmSong",
+      "listRhythmSettings",
+      "saveRhythmSettings",
+      "exportRhythmData",
+      "validateRhythmProject"
+    ]
+  },
+  "tab": {
+    "label": "リズムゲーム",
+    "icon": "music",
+    "page": "rhythm-game-editor",
+    "order": 6
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "rhythm-game-editor",
+    "capabilities": ["page", "rhythm-game-editor"]
+  }
+}

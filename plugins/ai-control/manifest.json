@@ -1,0 +1,21 @@
+{
+  "id": "ai-control",
+  "name": "AI Control",
+  "description": "外部AIツールが MD Game Editor を操作するための localhost REST / MCP bridge を起動します。",
+  "version": "1.0.0",
+  "icon": "bug",
+  "types": ["editor", "tool"],
+  "permissions": ["project.read", "project.write", "build.configure", "api.start"],
+  "tab": {
+    "label": "AI Control",
+    "page": "ai-control",
+    "icon": "bug",
+    "order": 98
+  },
+  "renderer": {
+    "page": "ai-control",
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "capabilities": ["page", "ai-control"]
+  }
+}

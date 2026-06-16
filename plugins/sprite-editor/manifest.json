@@ -1,0 +1,22 @@
+{
+  "id": "sprite-editor",
+  "name": "SPRITE エディタ",
+  "description": "RESCOMP の SPRITE 定義を一覧、追加、編集、削除し、スプライトシートとフレームをプレビューします。",
+  "version": "0.1.0",
+  "icon": "sprite",
+  "types": ["editor", "asset"],
+  "permissions": ["project.read", "project.write", "dialog.openFile", "res.read", "res.write"],
+  "dependencies": ["asset-manager", "image-resize-converter", "image-quantize-converter"],
+  "tab": {
+    "label": "Sprites",
+    "icon": "assets",
+    "page": "sprite-editor",
+    "order": 40
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "sprite-editor",
+    "capabilities": ["page", "sprite-editor"]
+  }
+}

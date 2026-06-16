@@ -1,0 +1,16 @@
+{
+  "name": "md-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "license": "MIT",
+  "files": [
+    "md_wasm_bg.wasm",
+    "md_wasm.js",
+    "md_wasm.d.ts"
+  ],
+  "main": "md_wasm.js",
+  "types": "md_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

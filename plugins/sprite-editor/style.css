@@ -1,0 +1,383 @@
+.sprite-editor-root {
+  --sprite-left-width: 300px;
+  --sprite-right-width: 320px;
+  display: grid;
+  grid-template-columns: var(--sprite-left-width) 3px minmax(420px, 1fr) 3px var(--sprite-right-width);
+  gap: 1px;
+  min-height: 0;
+  width: calc(100% + 48px);
+  height: calc(100% + 40px);
+  margin: -20px -24px;
+  background: var(--border);
+  color: var(--text);
+}
+
+.sprite-editor-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.sprite-editor-column-resizer {
+  min-width: 0;
+  background: #1e2a3a;
+  cursor: col-resize;
+  position: relative;
+}
+
+.sprite-editor-column-resizer:hover,
+.sprite-editor-column-resizer.active {
+  background: #4aa3ff;
+}
+
+.sprite-editor-toolbar,
+.sprite-editor-subtoolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  background: #111722;
+  flex-wrap: wrap;
+}
+
+.sprite-editor-toolbar h2,
+.sprite-editor-panel-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-right: auto;
+}
+
+.sprite-editor-filter {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sprite-editor-filter label,
+.sprite-editor-field label,
+.sprite-editor-inline-field {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sprite-editor-input,
+.sprite-editor-select,
+.sprite-editor-textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #0d111a;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 8px;
+}
+
+.sprite-editor-textarea {
+  min-height: 66px;
+  resize: vertical;
+}
+
+.sprite-editor-tree {
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.sprite-editor-file {
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.sprite-editor-file-toggle {
+  width: 100%;
+  border: 0;
+  background: #111722;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.sprite-editor-file-toggle:hover {
+  background: var(--panel-hover);
+}
+
+.sprite-editor-file-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sprite-editor-item {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sprite-editor-item:hover,
+.sprite-editor-item.active {
+  background: #152033;
+}
+
+.sprite-editor-thumb {
+  width: 48px;
+  height: 40px;
+  image-rendering: pixelated;
+  background:
+    linear-gradient(45deg, #1f2633 25%, transparent 25%),
+    linear-gradient(-45deg, #1f2633 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1f2633 75%),
+    linear-gradient(-45deg, transparent 75%, #1f2633 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.sprite-editor-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sprite-editor-item-meta,
+.sprite-editor-status {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sprite-editor-list-actions {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.sprite-editor-list-icon {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.sprite-editor-center {
+  display: grid;
+  grid-template-rows: minmax(0, 0.9fr) 6px minmax(0, 1.1fr);
+  gap: 1px;
+  min-height: 0;
+  background: var(--border);
+}
+
+.sprite-editor-preview,
+.sprite-editor-sheet {
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.sprite-editor-splitter {
+  min-height: 6px;
+  cursor: row-resize;
+  background: linear-gradient(to right, transparent, var(--muted) 45%, var(--muted) 55%, transparent);
+  opacity: 0.55;
+}
+
+.sprite-editor-splitter:hover,
+.sprite-editor-splitter.is-dragging {
+  opacity: 1;
+  background-color: rgba(74, 163, 255, 0.14);
+}
+
+.sprite-editor-canvas-wrap {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+}
+
+.sprite-editor-canvas-wrap canvas {
+  image-rendering: pixelated;
+  background: #0b0f17;
+  border: 1px solid var(--border);
+}
+
+.sprite-editor-animation-rows {
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  padding: 8px 10px 10px;
+  display: grid;
+  gap: 7px;
+  flex: 0 0 auto;
+  max-height: min(220px, 38%);
+  overflow: auto;
+}
+
+.sprite-editor-row-title {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sprite-editor-row-list {
+  display: grid;
+  gap: 2px;
+}
+
+.sprite-editor-row-header,
+.sprite-editor-row-config {
+  display: grid;
+  grid-template-columns: 74px minmax(104px, 128px) minmax(118px, 148px) 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.sprite-editor-row-header {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 4px 2px;
+}
+
+.sprite-editor-row-config.is-selected {
+  background: rgba(74, 163, 255, 0.08);
+  border-radius: 6px;
+}
+
+.sprite-editor-row-config {
+  min-height: 32px;
+  padding: 2px 4px;
+}
+
+.sprite-editor-row-config .sprite-editor-input {
+  padding: 5px 8px;
+}
+
+.sprite-editor-props {
+  overflow: auto;
+  padding: 0;
+}
+
+.sprite-editor-form-grid {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.sprite-editor-props .sprite-editor-empty,
+.sprite-editor-props .sprite-editor-status {
+  margin: 0;
+  padding: 10px;
+}
+
+.sprite-editor-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.sprite-editor-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.sprite-editor-actions[hidden] {
+  display: none !important;
+}
+
+.sprite-editor-action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.sprite-editor-primary,
+.sprite-editor-secondary,
+.sprite-editor-danger {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sprite-editor-primary {
+  border-color: #2d5280;
+  background: #0d1e35;
+  color: var(--accent);
+}
+
+.sprite-editor-danger {
+  border-color: #5a2a25;
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.sprite-editor-primary:hover,
+.sprite-editor-secondary:hover,
+.sprite-editor-danger:hover {
+  border-color: var(--accent);
+}
+
+.sprite-editor-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 16px;
+  text-align: center;
+}
+
+.sprite-editor-modal-form {
+  display: grid;
+  gap: 12px;
+  padding: 12px 0 0;
+}
+
+@media (max-width: 1160px) {
+  .sprite-editor-root {
+    grid-template-columns: 260px minmax(360px, 1fr) 300px;
+  }
+
+  .sprite-editor-column-resizer {
+    display: none;
+  }
+}

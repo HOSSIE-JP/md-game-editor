@@ -1,0 +1,36 @@
+{
+  "title": "SLIDE SHOW",
+  "author": "HOSSIE",
+  "serial": "GM 00000000-00",
+  "region": "JUE",
+  "generatedAt": "2026-05-09T12:53:00.350Z",
+  "pluginRoles": {
+    "builder": "slideshow",
+    "testplay": "standard-emulator"
+  },
+  "pluginSettings": {
+    "sidebarOrder": [
+      "block-stage-editor",
+      "asset-manager",
+      "md-bgm-composer",
+      "sprite-editor",
+      "tilemap-editor",
+      "code-editor",
+      "ai-control"
+    ],
+    "enabled": {
+      "ai-control": false,
+      "asset-manager": true,
+      "audio-converter": true,
+      "block-stage-editor": false,
+      "code-editor": true,
+      "image-quantize-converter": true,
+      "image-resize-converter": true,
+      "md-bgm-composer": false,
+      "midi-converter": true,
+      "shared": true,
+      "sprite-editor": false,
+      "tilemap-editor": false
+    }
+  }
+}

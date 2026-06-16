@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "component": "md-emulator-wasm",
+  "packageVersion": "0.1.0",
+  "buildMetaVersion": "1775145806",
+  "capturedAt": "2026-06-16T16:03:56.458Z",
+  "source": {
+    "type": "git",
+    "repositoryPath": "/Users/hossie/development/md_emulator",
+    "remote": "https://github.com/HOSSIE-JP/md_emulator.git",
+    "commit": "78c781b0a5cf917a9e542377ec493dbd3b136c6b",
+    "shortCommit": "78c781b0a5cf",
+    "dirty": false
+  },
+  "files": {
+    "pkg/md_wasm.js": {
+      "sha256": "da6bdc13e528ba6967a5d16ed2d18b19db30e2c8664091bfd49cc46244a098bc"
+    },
+    "pkg/md_wasm_bg.wasm": {
+      "sha256": "db4e1f6a7831129377b3dfbcff093a7479bd43cb65de704fe07ddcbdb623cf65"
+    },
+    "pkg/package.json": {
+      "sha256": "379e2e8bcab2a0a70008d1a5d1b9acc61372b6cf6e9c1129d01d9369f709f3bf"
+    },
+    "pkg/build_meta.js": {
+      "sha256": "2a1e020eff3b1c399b26a46f1d7d5b2c0c8fa0b78b8c551ed6196428d0747db2"
+    },
+    "md-emulator.js": {
+      "sha256": "df245a20c0fb21826589b881113c6efb5ef6d30130307cf03d234e7a7ca124e8"
+    },
+    "wasm-player.js": {
+      "sha256": "9650f53b24cf71792da8f8082129056e751576af3f3ccc7fd627b6b5d35608c9"
+    }
+  }
+}

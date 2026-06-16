@@ -1,0 +1,16 @@
+{
+  "id": "asset-checker",
+  "name": "アセットチェッカー",
+  "description": "IMAGE / SPRITE / MAP / TILEMAP / BGM アセットを ROM 上のテキスト UI で順次確認するビルドプラグインです。",
+  "version": "0.1.0",
+  "icon": "check",
+  "types": ["build"],
+  "permissions": ["project.read", "build.configure"],
+  "roles": [{ "id": "builder", "label": "ビルド", "exclusive": true, "order": 10 }],
+  "hooks": [
+    "onBuildStart",
+    "onBuildLog",
+    "onBuildEnd",
+    "onBuildError"
+  ]
+}

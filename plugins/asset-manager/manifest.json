@@ -1,0 +1,22 @@
+{
+  "id": "asset-manager",
+  "name": "Rescomp アセット管理",
+  "description": "Rescomp アセットの一覧/編集/登録を行う標準エディタプラグインです。",
+  "version": "1.0.1",
+  "icon": "assets",
+  "types": ["editor", "asset"],
+  "permissions": ["project.read", "project.write", "dialog.openFile", "res.read", "res.write"],
+  "dependencies": ["image-resize-converter", "image-quantize-converter", "audio-converter", "midi-converter"],
+  "tab": {
+    "label": "Assets",
+    "icon": "assets",
+    "page": "assets",
+    "order": 10
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "assets",
+    "capabilities": ["page", "asset-manager", "asset-type-provider", "asset-import-handler", "image-import-pipeline"]
+  }
+}

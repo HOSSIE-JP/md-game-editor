@@ -1,0 +1,18 @@
+{
+  "id": "dungeon-game-builder",
+  "name": "ダンジョンゲームビルダー",
+  "description": "3D ダンジョンゲームエンジンとフロアデータを同期し、SGDK ROM ビルドを実行します。",
+  "version": "1.0.0",
+  "icon": "build",
+  "types": ["build"],
+  "supportedCores": ["mega-drive"],
+  "permissions": ["project.read", "project.write", "build.configure"],
+  "dependencies": ["dungeon-game-editor"],
+  "roles": [{ "id": "builder", "label": "ビルド", "exclusive": true, "order": 10 }],
+  "hooks": [
+    "onBuildStart",
+    "onBuildLog",
+    "onBuildEnd",
+    "onBuildError"
+  ]
+}
