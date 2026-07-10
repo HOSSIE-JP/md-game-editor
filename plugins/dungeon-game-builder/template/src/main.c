@@ -1,6 +1,8 @@
 /* =============================================================
  * Dungeon Game
- * 25x16 BG tile first-person dungeon renderer.
+ * デシジョンテーブル方式 25x16 BG タイル疑似3Dダンジョン
+ *  - 前進/後退/左右回転を焼き込みフレームで滑らかにアニメーション
+ *  - 扉 (通行可能)、宝箱/階段ビルボード、暗闇セル対応
  * ============================================================= */
 
 #include <genesis.h>
@@ -85,13 +87,6 @@ static void applyMove(const DungeonFloorData *floor, u8 action)
     }
 }
 
-static u8 turnTargetDir(u8 dir, u8 action)
-{
-    if (action == DUN_ACTION_TURN_L) return (u8)((dir + 3) & 3);
-    if (action == DUN_ACTION_TURN_R) return (u8)((dir + 1) & 3);
-    return dir & 3;
-}
-
 static void resetPlayer(void)
 {
     const DungeonFloorData *floor = &dungeon_floors[floor_index];
@@ -100,25 +95,41 @@ static void resetPlayer(void)
     player_dir = floor->start_dir & 3;
 }
 
-static void animateAction(const DungeonFloorData *floor, u8 action)
+static void applyCellDarkness(const DungeonFloorData *floor)
 {
-    u8 frame;
-    u8 hold;
-    const u8 start_dir = player_dir;
-    const u8 target_dir = turnTargetDir(player_dir, action);
-    if (action == DUN_ACTION_NONE) return;
-    for (frame = 0; frame < DUN_WALL_PHASE_COUNT; frame++)
-    {
-        const u8 draw_dir = (action == DUN_ACTION_TURN_L || action == DUN_ACTION_TURN_R)
-            ? (frame < ((DUN_WALL_PHASE_COUNT + 1) / 2) ? start_dir : target_dir)
-            : player_dir;
-        DUN_drawView(floor, player_x, player_y, draw_dir, action, frame);
+    const u8 flags = floor->flags[DUN_INDEX(floor, player_x, player_y)];
+    DUN_setDark((flags & DUN_FLAG_DARK) != 0);
+}
+
+static void drawCurrentView(const DungeonFloorData *floor)
+{
+    applyCellDarkness(floor);
+    DUN_drawStatic(floor, player_x, player_y, player_dir);
 #if DUN_USE_TEXT_HUD
-        DUN_drawHud(floor_index, player_x, player_y, draw_dir);
+    DUN_drawHud(floor_index, player_x, player_y, player_dir);
 #endif
-        for (hold = 0; hold < DUN_ANIMATION_STEP_VBLANKS; hold++) SYS_doVBlankProcess();
+}
+
+static void performAction(const DungeonFloorData *floor, u8 action)
+{
+    if (action == DUN_ACTION_FORWARD)
+    {
+        DUN_playForward(floor, player_x, player_y, player_dir);
+    }
+    else if (action == DUN_ACTION_BACKWARD)
+    {
+        /* 後退 = 移動先セル基準の前進フレームを逆再生 */
+        const u8 back = (u8)((player_dir + 2) & 3);
+        const u8 target_x = (u8)(player_x + dir_dx[back]);
+        const u8 target_y = (u8)(player_y + dir_dy[back]);
+        DUN_playBackward(floor, target_x, target_y, player_dir);
+    }
+    else if (action == DUN_ACTION_TURN_L || action == DUN_ACTION_TURN_R)
+    {
+        DUN_playTurn(floor, player_x, player_y, player_dir, action == DUN_ACTION_TURN_L);
     }
     applyMove(floor, action);
+    drawCurrentView(floor);
 }
 
 static u8 pressedAction(const DungeonFloorData *floor, u16 pressed)
@@ -134,14 +145,6 @@ static u8 pressedAction(const DungeonFloorData *floor, u16 pressed)
     return DUN_ACTION_NONE;
 }
 
-static bool actionUsesWallAnimation(u8 action)
-{
-    return action == DUN_ACTION_FORWARD
-        || action == DUN_ACTION_BACKWARD
-        || action == DUN_ACTION_TURN_L
-        || action == DUN_ACTION_TURN_R;
-}
-
 int main(bool hardReset)
 {
     (void)hardReset;
@@ -150,6 +153,7 @@ int main(bool hardReset)
     JOY_init();
     DUN_initView();
     resetPlayer();
+    drawCurrentView(&dungeon_floors[floor_index]);
 
     while (TRUE)
     {
@@ -159,23 +163,22 @@ int main(bool hardReset)
         u8 action = DUN_ACTION_NONE;
         prev_joy = joy;
 
-        action = pressedAction(floor, pressed);
         if ((pressed & BUTTON_START) && dungeon_floor_count > 1)
         {
             floor_index = (u8)((floor_index + 1) % dungeon_floor_count);
             resetPlayer();
+            drawCurrentView(&dungeon_floors[floor_index]);
         }
-
-        if (action != DUN_ACTION_NONE)
+        else
         {
-            if (actionUsesWallAnimation(action)) animateAction(floor, action);
-            else applyMove(floor, action);
+            action = pressedAction(floor, pressed);
+            if (action != DUN_ACTION_NONE)
+            {
+                performAction(floor, action);
+            }
         }
 
-        DUN_drawView(&dungeon_floors[floor_index], player_x, player_y, player_dir, DUN_ACTION_NONE, 0);
-#if DUN_USE_TEXT_HUD
-        DUN_drawHud(floor_index, player_x, player_y, player_dir);
-#endif
+        SPR_update();
         SYS_doVBlankProcess();
     }
 

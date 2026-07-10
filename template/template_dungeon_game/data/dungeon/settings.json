@@ -1,5 +1,6 @@
 {
   "animation_frames": 8,
+  "turn_frames": 8,
   "view_tile_width": 25,
   "view_tile_height": 16,
   "view_pixel_width": 200,

@@ -1,3 +1,13 @@
+/*
+ * ダンジョンゲームエディター renderer module
+ *
+ * 3D プレビューは render-core.js (SGDK エクスポータと同一のレンダリングコア)
+ * を通して描画する。実機と同じ 16 色量子化・同じ離散アニメフレーム・同じ
+ * ビルボード座標テーブルを使うため、プレビュー = 実機出力となる。
+ */
+await import(new URL('./render-core.js', import.meta.url));
+const core = globalThis.DungeonRenderCore;
+
 const MAX_SIZE = 20;
 const DIRS = [
   { id: 'n', label: 'N', dx: 0, dy: -1, bit: 1, opposite: 's' },
@@ -20,34 +30,18 @@ const TOOLS = [
 ];
 const DEFAULT_ASSET_REFS = {
   wall_texture: 'dungeon/textures/dungeon_texture_atlas.png#wall',
+  door_texture: 'dungeon/textures/dungeon_texture_atlas.png#door',
   floor_texture: 'dungeon/textures/dungeon_texture_atlas.png#floor',
   ceiling_texture: 'dungeon/textures/dungeon_texture_atlas.png#ceiling',
   chest_texture: 'dungeon/textures/dungeon_texture_atlas.png#chest',
   stairs_up_texture: 'dungeon/textures/dungeon_texture_atlas.png#stairs_up',
   stairs_down_texture: 'dungeon/textures/dungeon_texture_atlas.png#stairs_down',
 };
-const ATLAS_RECTS = {
-  wall: [0, 0],
-  floor: [1, 0],
-  ceiling: [2, 0],
-  chest: [0, 1],
-  stairs_up: [1, 1],
-  stairs_down: [2, 1],
-};
 const VIEW_W = 200;
 const VIEW_H = 128;
-const VIEW_HORIZON = 64;
-const VIEW_PROJECT_Y = 58;
-const VIEW_PROJECT_X = VIEW_PROJECT_Y;
-const FOV = Math.atan((VIEW_W / 2) / VIEW_PROJECT_X) * 2;
-const VIEW_EYE_Z = 0.42;
-const VIEW_NEAR_CLIP = 0.045;
-const VIEW_CAMERA_BACKSTEP = 0.18;
-const VIEW_DEPTH_EPSILON = 0.002;
-const WALL_SEGMENT_OVERLAP = 0.01;
-const VIEW_MODEL_RADIUS = 7;
-const ANIMATION_MS = 320;
-const PREVIEW_TRANSPARENT_KEY = { r: 255, g: 0, b: 255 };
+/* 実機の 1 アニメフレーム = DUN_ANIMATION_STEP_VBLANKS(2) vblank ≒ 33ms */
+const FRAME_STEP_MS = 34;
+const DARK_PALETTE_SCALE = 0.35;
 
 export function activatePlugin({ plugin, root, api, logger, registerCapability }) {
   const state = {
@@ -63,7 +57,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     animation: null,
     animationFrame: 0,
     textureCache: new Map(),
-    textures: {},
+    textures: null,
+    viewModel: null,
     exportInfo: null,
     wasActive: root.classList.contains('active'),
     activationObserver: null,
@@ -216,6 +211,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     ui.width.value = state.current.width;
     ui.height.value = state.current.height;
     state.preview = { ...state.current.start };
+    stopPreviewAnimation();
     renderAll();
   }
 
@@ -334,17 +330,183 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     mapCtx.stroke();
   }
 
+  /* ------------------------------------------------------------------
+   * 3D プレビュー (render-core による実機同等描画)
+   * ------------------------------------------------------------------ */
+
+  /*
+   * ビューモデル: エッジ集合・パレット・シェード帯・ビルボードテーブル。
+   * テクスチャ / 設定が変わったときだけ再構築する。
+   */
+  function getViewModel() {
+    if (state.viewModel) return state.viewModel;
+    const settings = state.settings || {};
+    const textures = core.normalizeTextures(state.textures || {});
+    const palette = core.buildViewPalette(textures);
+    const spaces = core.buildEdgeSpaces(settings);
+    const spritePalette = core.buildSpritePalette(textures);
+    state.viewModel = {
+      textures,
+      settings,
+      spaces,
+      palette,
+      darkPalette: core.darkenPalette(palette, DARK_PALETTE_SCALE),
+      bands: core.buildBandTables(palette, textures),
+      spritePalette,
+      sheets: {
+        chest: core.renderBillboardSheet(textures.chest, spritePalette),
+        stairs_up: core.renderBillboardSheet(textures.stairs_up, spritePalette),
+        stairs_down: core.renderBillboardSheet(textures.stairs_down, spritePalette),
+      },
+      billboards: core.buildBillboardTables(settings),
+    };
+    return state.viewModel;
+  }
+
+  function invalidateViewModel() {
+    state.viewModel = null;
+  }
+
+  /*
+   * 現在のプレビュー状態から描画フレームを決める。
+   * 戻り値: { pose, defs, states, mirrored, bbPoses, baseCell }
+   */
+  function currentPreviewFrame(model) {
+    const floor = state.current;
+    const anim = state.animation;
+    if (!anim) {
+      return {
+        pose: core.poseStatic(),
+        defs: model.spaces.move,
+        mirrored: false,
+        bbPoses: model.billboards.staticPoses,
+        base: { ...state.preview },
+      };
+    }
+    const k = anim.frameIndex;
+    if (anim.action === 'forward') {
+      return {
+        pose: model.spaces.frames.fwdPoses[k],
+        defs: model.spaces.move,
+        mirrored: false,
+        bbPoses: model.billboards.fwdPoses[k],
+        base: { x: anim.from.x, y: anim.from.y, dir: anim.from.dir },
+      };
+    }
+    if (anim.action === 'back') {
+      /* 後退 = 移動先セル基準の前進フレーム逆再生 */
+      const reversed = model.spaces.frames.fwdPoses.length - 1 - k;
+      return {
+        pose: model.spaces.frames.fwdPoses[reversed],
+        defs: model.spaces.move,
+        mirrored: false,
+        bbPoses: model.billboards.fwdPoses[reversed],
+        base: { x: anim.to.x, y: anim.to.y, dir: anim.to.dir },
+      };
+    }
+    const left = anim.action === 'turn-left';
+    return {
+      pose: model.spaces.frames.turnPoses[k],
+      defs: left ? model.spaces.turnMirrored : model.spaces.turn,
+      turnDefs: model.spaces.turn,
+      mirrored: left,
+      bbPoses: model.billboards.turnPoses[k],
+      base: { x: anim.from.x, y: anim.from.y, dir: anim.from.dir },
+    };
+  }
+
   function renderPreview() {
     const floor = state.current;
     if (!floor) return;
-    const pose = previewPose();
-    drawPreviewGeometry(floor, pose);
-    renderPreviewMinimap(floor, pose);
+    const model = getViewModel();
+    const frame = currentPreviewFrame(model);
+    const states = core.sampleEdgeStates(floor, frame.base.x, frame.base.y, frame.base.dir, frame.defs);
+    /* 左回転: 鏡像エッジで右回転テーブルを評価し、水平反転で合成する (実機と同一) */
+    const defsForRender = frame.mirrored ? frame.turnDefs : frame.defs;
+    let indices = core.renderView(frame.pose, defsForRender, states, model.textures, model.palette, model.bands);
+    if (frame.mirrored) indices = mirrorIndices(indices);
+
+    const cell = cellAt(state.preview.x, state.preview.y);
+    const paletteForView = cell?.dark ? model.darkPalette : model.palette;
+    const image = viewCtx.createImageData(VIEW_W, VIEW_H);
+    core.indicesToRgba(indices, paletteForView, image.data);
+    drawBillboardsInto(image.data, model, frame, floor);
+    viewCtx.putImageData(image, 0, 0);
+
+    drawPreviewMinimap(floor, minimapPose());
     ui.previewInfo.textContent = `X:${state.preview.x} Y:${state.preview.y} ${DIRS[state.preview.dir]?.label || 'E'}`;
   }
 
-  function renderPreviewMinimap(floor, pose) {
-    drawPreviewMinimap(floor, pose);
+  function mirrorIndices(indices) {
+    const out = new Uint8Array(indices.length);
+    for (let y = 0; y < VIEW_H; y++) {
+      const rowStart = y * VIEW_W;
+      for (let x = 0; x < VIEW_W; x++) {
+        out[rowStart + x] = indices[rowStart + (VIEW_W - 1 - x)];
+      }
+    }
+    return out;
+  }
+
+  /* ビルボード: 実機のスプライト描画と同じテーブル・同じ LOS ルールで合成する */
+  function drawBillboardsInto(rgba, model, frame, floor) {
+    const cells = model.billboards.cells;
+    const size = core.BB_FRAME_SIZE;
+    for (let i = 0; i < cells.length; i++) {
+      const pose = frame.bbPoses[i];
+      if (!pose || pose.frame < 0) continue;
+      let dd = cells[i].dd;
+      let dl = cells[i].dl;
+      if (frame.mirrored) dl = -dl;
+      const dir = frame.base.dir & 3;
+      const right = (dir + 1) & 3;
+      const ax = frame.base.x + dd * DIRS[dir].dx + dl * DIRS[right].dx;
+      const ay = frame.base.y + dd * DIRS[dir].dy + dl * DIRS[right].dy;
+      const cell = (ax >= 0 && ay >= 0 && ax < floor.width && ay < floor.height) ? floor.cells[ay][ax] : null;
+      if (!cell) continue;
+      let sheet = null;
+      if (cell.event === 'chest') sheet = model.sheets.chest;
+      else if (cell.stairs === 'up') sheet = model.sheets.stairs_up;
+      else if (cell.stairs === 'down') sheet = model.sheets.stairs_down;
+      if (!sheet) continue;
+      if (!core.losVisible(floor, frame.base.x, frame.base.y, dir, dd, dl)) continue;
+      const sx0 = frame.mirrored ? (VIEW_W - pose.x - size) : pose.x;
+      const frameOffset = pose.frame * size;
+      for (let y = 0; y < size; y++) {
+        const dy = pose.y + y;
+        if (dy < 0 || dy >= VIEW_H) continue;
+        for (let x = 0; x < size; x++) {
+          const dx = sx0 + x;
+          if (dx < 0 || dx >= VIEW_W) continue;
+          const paletteIndex = sheet.pixels[(y * sheet.width) + frameOffset + x];
+          if (!paletteIndex) continue;
+          const color = model.spritePalette[paletteIndex];
+          const dest = ((dy * VIEW_W) + dx) * 4;
+          rgba[dest] = color.r;
+          rgba[dest + 1] = color.g;
+          rgba[dest + 2] = color.b;
+          rgba[dest + 3] = 255;
+        }
+      }
+    }
+  }
+
+  /* ミニマップ表示用の補間ポーズ (見た目用であり実機挙動には影響しない) */
+  function minimapPose() {
+    if (!state.animation) {
+      return {
+        x: state.preview.x + 0.5,
+        y: state.preview.y + 0.5,
+        angle: dirAngle(state.preview.dir),
+      };
+    }
+    const anim = state.animation;
+    const t = core.easeSmooth((anim.frameIndex + 1) / (anim.total + 1));
+    return {
+      x: lerp(anim.from.x + 0.5, anim.to.x + 0.5, t),
+      y: lerp(anim.from.y + 0.5, anim.to.y + 0.5, t),
+      angle: lerpAngle(dirAngle(anim.from.dir), dirAngle(anim.to.dir), t),
+    };
   }
 
   function drawPreviewMinimap(floor, pose) {
@@ -418,346 +580,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     }
   }
 
-  function previewPose() {
-    if (!state.animation) {
-      return {
-        x: state.preview.x + 0.5,
-        y: state.preview.y + 0.5,
-        angle: dirAngle(state.preview.dir),
-      };
-    }
-    const now = performance.now();
-    const t = Math.min(1, Math.max(0, (now - state.animation.startedAt) / ANIMATION_MS));
-    const eased = easeInOut(t);
-    const from = state.animation.from;
-    const to = state.animation.to;
-    return {
-      x: lerp(from.x + 0.5, to.x + 0.5, eased),
-      y: lerp(from.y + 0.5, to.y + 0.5, eased),
-      angle: lerpAngle(dirAngle(from.dir), dirAngle(to.dir), eased),
-    };
-  }
-
-  function drawPreviewGeometry(floor, pose) {
-    const image = viewCtx.createImageData(VIEW_W, VIEW_H);
-    const pixels = image.data;
-    const zBuffer = new Float32Array(VIEW_W * VIEW_H);
-    zBuffer.fill(Number.POSITIVE_INFINITY);
-    const currentCell = cellAt(Math.floor(pose.x), Math.floor(pose.y)) || blankCell();
-    const dark = currentCell.dark;
-    const cameraPose = previewCameraPose(pose);
-    drawPreviewPlanes(pixels, cameraPose, dark);
-    drawPreviewWallModel(pixels, zBuffer, floor, cameraPose, dark);
-    viewCtx.putImageData(image, 0, 0);
-    drawPreviewBillboards(floor, cameraPose, zBuffer, dark);
-  }
-
-  function previewCameraPose(pose) {
-    return {
-      ...pose,
-      x: pose.x - Math.cos(pose.angle) * VIEW_CAMERA_BACKSTEP,
-      y: pose.y - Math.sin(pose.angle) * VIEW_CAMERA_BACKSTEP,
-    };
-  }
-
-  function drawPreviewPlanes(pixels, _pose, _dark) {
-    for (let sy = 0; sy < VIEW_H; sy++) {
-      for (let sx = 0; sx < VIEW_W; sx++) {
-        writeSolid(pixels, sx, sy, PREVIEW_TRANSPARENT_KEY.r, PREVIEW_TRANSPARENT_KEY.g, PREVIEW_TRANSPARENT_KEY.b);
-      }
-    }
-  }
-
-  function drawPreviewWallModel(pixels, zBuffer, floor, pose, dark) {
-    drawWallRuns(pixels, zBuffer, floor, pose, dark, 'h');
-    drawWallRuns(pixels, zBuffer, floor, pose, dark, 'v');
-  }
-
-  function drawWallRuns(pixels, zBuffer, floor, pose, dark, axis) {
-    const lineCount = axis === 'h' ? floor.height + 1 : floor.width + 1;
-    const segmentCount = axis === 'h' ? floor.width : floor.height;
-    for (let lineIndex = 0; lineIndex < lineCount; lineIndex++) {
-      let runKind = '';
-      let runStart = 0;
-      for (let segmentIndex = 0; segmentIndex <= segmentCount; segmentIndex++) {
-        const kind = segmentIndex < segmentCount ? edgeKindAtGrid(floor, axis, segmentIndex, lineIndex) : '';
-        if (kind && kind === runKind) continue;
-        if (runKind) {
-          drawWallRun3D(pixels, zBuffer, pose, runStart, segmentIndex, lineIndex, axis, runKind, dark);
-        }
-        runKind = kind;
-        runStart = segmentIndex;
-      }
-    }
-  }
-
-  function drawWallRun3D(pixels, zBuffer, pose, runStart, runEnd, lineIndex, axis, kind, dark) {
-    for (let segmentIndex = runStart; segmentIndex < runEnd; segmentIndex++) {
-      const start = segmentIndex - (segmentIndex > runStart ? WALL_SEGMENT_OVERLAP : 0);
-      const end = segmentIndex + 1 + (segmentIndex + 1 < runEnd ? WALL_SEGMENT_OVERLAP : 0);
-      if (axis === 'h') drawWallSpan3D(pixels, zBuffer, pose, start, lineIndex, end, lineIndex, axis, kind, dark);
-      else drawWallSpan3D(pixels, zBuffer, pose, lineIndex, start, lineIndex, end, axis, kind, dark);
-    }
-  }
-
-  function edgeKindAtGrid(floor, axis, segmentIndex, lineIndex) {
-    const first = axis === 'h'
-      ? (lineIndex > 0 ? floor.cells[lineIndex - 1]?.[segmentIndex] : null)
-      : (lineIndex > 0 ? floor.cells[segmentIndex]?.[lineIndex - 1] : null);
-    const second = axis === 'h'
-      ? (lineIndex < floor.height ? floor.cells[lineIndex]?.[segmentIndex] : null)
-      : (lineIndex < floor.width ? floor.cells[segmentIndex]?.[lineIndex] : null);
-    const firstBit = axis === 'h' ? DIR_BY_ID.s.bit : DIR_BY_ID.e.bit;
-    const secondBit = axis === 'h' ? DIR_BY_ID.n.bit : DIR_BY_ID.w.bit;
-    const door = (first && (first.doors & firstBit)) || (second && (second.doors & secondBit));
-    const wall = !first || !second || (first.walls & firstBit) || (second.walls & secondBit);
-    if (door) return 'door';
-    return wall ? 'wall' : '';
-  }
-
-  function drawWallSpan3D(pixels, zBuffer, pose, x0, y0, x1, y1, axis, kind, dark) {
-    const length = Math.max(1, Math.hypot(x1 - x0, y1 - y0));
-    const faceShade = wallFaceShade(pose, axis, dark);
-    const world = [
-      { x: x0, y: y0, z: 0, u: 0, v: 1 },
-      { x: x1, y: y1, z: 0, u: length, v: 1 },
-      { x: x1, y: y1, z: 1, u: length, v: 0 },
-      { x: x0, y: y0, z: 1, u: 0, v: 0 },
-    ];
-    const clipped = clipCameraPolygon(world.map((point) => toCameraPoint(pose, point)));
-    if (clipped.length < 3) return;
-    const projected = clipped.map(projectCameraPoint).filter(Boolean);
-    if (projected.length < 3) return;
-    const texture = textureFor(kind === 'door' ? 'door' : 'wall');
-    for (let i = 1; i < projected.length - 1; i++) {
-      rasterTriangle(pixels, zBuffer, texture, projected[0], projected[i], projected[i + 1], faceShade);
-    }
-  }
-
-  function wallFaceShade(pose, axis, dark) {
-    const forward = { x: Math.cos(pose.angle), y: Math.sin(pose.angle) };
-    const normal = axis === 'h' ? { x: 0, y: 1 } : { x: 1, y: 0 };
-    const alignment = Math.abs(forward.x * normal.x + forward.y * normal.y);
-    const shade = 0.52 + alignment * 0.42;
-    return dark ? Math.min(shade, 0.3) : shade;
-  }
-
-  function toCameraPoint(pose, point) {
-    const forward = { x: Math.cos(pose.angle), y: Math.sin(pose.angle) };
-    const right = { x: -Math.sin(pose.angle), y: Math.cos(pose.angle) };
-    const dx = point.x - pose.x;
-    const dy = point.y - pose.y;
-    return {
-      x: dx * right.x + dy * right.y,
-      y: point.z - VIEW_EYE_Z,
-      z: dx * forward.x + dy * forward.y,
-      u: point.u,
-      v: point.v,
-    };
-  }
-
-  function clipCameraPolygon(points) {
-    const out = [];
-    for (let i = 0; i < points.length; i++) {
-      const a = points[i];
-      const b = points[(i + 1) % points.length];
-      const aIn = a.z >= VIEW_NEAR_CLIP;
-      const bIn = b.z >= VIEW_NEAR_CLIP;
-      if (aIn && bIn) {
-        out.push(b);
-      } else if (aIn && !bIn) {
-        out.push(interpolateCameraPoint(a, b, (VIEW_NEAR_CLIP - a.z) / (b.z - a.z)));
-      } else if (!aIn && bIn) {
-        out.push(interpolateCameraPoint(a, b, (VIEW_NEAR_CLIP - a.z) / (b.z - a.z)), b);
-      }
-    }
-    return out;
-  }
-
-  function interpolateCameraPoint(a, b, t) {
-    return {
-      x: lerp(a.x, b.x, t),
-      y: lerp(a.y, b.y, t),
-      z: VIEW_NEAR_CLIP,
-      u: lerp(a.u, b.u, t),
-      v: lerp(a.v, b.v, t),
-    };
-  }
-
-  function projectCameraPoint(point) {
-    if (point.z < VIEW_NEAR_CLIP) return null;
-    const invZ = 1 / point.z;
-    return {
-      x: VIEW_W / 2 + point.x * VIEW_PROJECT_X * invZ,
-      y: VIEW_HORIZON - point.y * VIEW_PROJECT_Y * invZ,
-      invZ,
-      uOverZ: point.u * invZ,
-      vOverZ: point.v * invZ,
-    };
-  }
-
-  function rasterTriangle(pixels, zBuffer, texture, a, b, c, baseShade) {
-    const area = edgeFunction(a, b, c.x, c.y);
-    if (Math.abs(area) < 0.0001) return;
-    const minX = Math.max(0, Math.floor(Math.min(a.x, b.x, c.x)));
-    const maxX = Math.min(VIEW_W - 1, Math.ceil(Math.max(a.x, b.x, c.x)));
-    const minY = Math.max(0, Math.floor(Math.min(a.y, b.y, c.y)));
-    const maxY = Math.min(VIEW_H - 1, Math.ceil(Math.max(a.y, b.y, c.y)));
-    for (let py = minY; py <= maxY; py++) {
-      for (let px = minX; px <= maxX; px++) {
-        const sampleX = px + 0.5;
-        const sampleY = py + 0.5;
-        const w0 = edgeFunction(b, c, sampleX, sampleY) / area;
-        const w1 = edgeFunction(c, a, sampleX, sampleY) / area;
-        const w2 = edgeFunction(a, b, sampleX, sampleY) / area;
-        if (w0 < -0.0001 || w1 < -0.0001 || w2 < -0.0001) continue;
-        const invZ = (a.invZ * w0) + (b.invZ * w1) + (c.invZ * w2);
-        const depth = 1 / invZ;
-        const index = (py * VIEW_W) + px;
-        if (depth > zBuffer[index] + VIEW_DEPTH_EPSILON) continue;
-        const u = ((a.uOverZ * w0) + (b.uOverZ * w1) + (c.uOverZ * w2)) / invZ;
-        const v = ((a.vOverZ * w0) + (b.vOverZ * w1) + (c.vOverZ * w2)) / invZ;
-        const shade = Math.max(0.24, baseShade / (1 + depth * 0.08));
-        const color = sampleTexture(texture, u, v, shade);
-        const dest = index * 4;
-        pixels[dest] = color.r;
-        pixels[dest + 1] = color.g;
-        pixels[dest + 2] = color.b;
-        pixels[dest + 3] = 255;
-        zBuffer[index] = Math.min(zBuffer[index], depth);
-      }
-    }
-  }
-
-  function edgeFunction(a, b, x, y) {
-    return (x - a.x) * (b.y - a.y) - (y - a.y) * (b.x - a.x);
-  }
-
-  function drawPreviewBillboards(floor, pose, zBuffer, dark) {
-    const sprites = [];
-    for (let y = 0; y < floor.height; y++) {
-      for (let x = 0; x < floor.width; x++) {
-        const cell = floor.cells[y][x];
-        const texture = billboardTexture(cell);
-        if (!texture) continue;
-        const dx = x + 0.5 - pose.x;
-        const dy = y + 0.5 - pose.y;
-        const distance = Math.hypot(dx, dy);
-        if (distance < 0.08 || distance > 6) continue;
-        const diff = normalizeAngle(Math.atan2(dy, dx) - pose.angle);
-        if (Math.abs(diff) > FOV * 0.6) continue;
-        sprites.push({ x, y, texture, distance, diff });
-      }
-    }
-    sprites.sort((a, b) => b.distance - a.distance).forEach((sprite) => {
-      const screenX = VIEW_W / 2 + Math.tan(sprite.diff) * VIEW_PROJECT_X;
-      const size = Math.max(8, Math.min(72, (VIEW_PROJECT_Y * 0.92) / sprite.distance));
-      const x0 = Math.floor(screenX - size / 2);
-      const y0 = Math.floor(VIEW_HORIZON + size * 0.42 - size);
-      drawTexturedBillboard(sprite.texture, x0, y0, Math.floor(size), Math.floor(size), zBuffer, sprite.distance, dark);
-    });
-  }
-
-  function drawTexturedBillboard(texture, x0, y0, width, height, zBuffer, distance, dark) {
-    const tex = texture || textureFor('chest');
-    const shade = dark ? 0.42 : Math.max(0.42, 1 / (1 + distance * 0.08));
-    const frame = viewCtx.getImageData(0, 0, VIEW_W, VIEW_H);
-    const pixels = frame.data;
-    for (let y = 0; y < height; y++) {
-      const sy = y0 + y;
-      if (sy < 0 || sy >= VIEW_H) continue;
-      for (let x = 0; x < width; x++) {
-        const sx = x0 + x;
-        if (sx < 0 || sx >= VIEW_W) continue;
-        if (distance > zBuffer[(sy * VIEW_W) + sx] + 0.1) continue;
-        const color = sampleTexture(tex, x / Math.max(1, width - 1), y / Math.max(1, height - 1), shade);
-        if (color.a < 10 || color.r + color.g + color.b < 18) continue;
-        const i = ((sy * VIEW_W) + sx) * 4;
-        pixels[i] = color.r;
-        pixels[i + 1] = color.g;
-        pixels[i + 2] = color.b;
-        pixels[i + 3] = 255;
-      }
-    }
-    viewCtx.putImageData(frame, 0, 0);
-  }
-
-  function billboardTexture(cell) {
-    if (cell.event === 'chest') return textureFor('chest');
-    if (cell.stairs === 'up') return textureFor('stairs_up');
-    if (cell.stairs === 'down') return textureFor('stairs_down');
-    return null;
-  }
-
-  function textureFor(kind) {
-    return state.textures[kind] || state.textures.wall || makeFallbackTexture(kind);
-  }
-
-  function writeSample(pixels, sx, sy, texture, u, v, shade) {
-    const color = sampleTexture(texture, u, v, shade);
-    const i = ((sy * VIEW_W) + sx) * 4;
-    pixels[i] = color.r;
-    pixels[i + 1] = color.g;
-    pixels[i + 2] = color.b;
-    pixels[i + 3] = 255;
-  }
-
-  function writeSolid(pixels, sx, sy, r, g, b) {
-    const i = ((sy * VIEW_W) + sx) * 4;
-    pixels[i] = r;
-    pixels[i + 1] = g;
-    pixels[i + 2] = b;
-    pixels[i + 3] = 255;
-  }
-
-  function sampleTexture(texture, u, v, shade = 1) {
-    const tex = texture || makeFallbackTexture('wall');
-    const x = Math.abs(Math.floor(fractional(u) * tex.width)) % tex.width;
-    const y = Math.abs(Math.floor(fractional(v) * tex.height)) % tex.height;
-    const i = ((y * tex.width) + x) * 4;
-    return {
-      r: Math.max(0, Math.min(255, Math.floor(tex.data[i] * shade))),
-      g: Math.max(0, Math.min(255, Math.floor(tex.data[i + 1] * shade))),
-      b: Math.max(0, Math.min(255, Math.floor(tex.data[i + 2] * shade))),
-      a: tex.data[i + 3],
-    };
-  }
-
-  function makeFallbackTexture(kind) {
-    if (!state.textureCache.has(`fallback:${kind}`)) {
-      const canvas = document.createElement('canvas');
-      canvas.width = 32;
-      canvas.height = 32;
-      const ctx = canvas.getContext('2d');
-      const palette = {
-        wall: ['#756957', '#4a4338', '#a49678'],
-        door: ['#8a552c', '#4c2f1d', '#d2a25b'],
-        floor: ['#4b3829', '#2a211b', '#6a503a'],
-        ceiling: ['#2b2b38', '#15151f', '#4e4e62'],
-        chest: ['#c48433', '#5b351c', '#f1c46c'],
-        stairs_up: ['#82badb', '#315c73', '#c5e8f4'],
-        stairs_down: ['#9479d1', '#3e2e65', '#d5c6ff'],
-      }[kind] || ['#756957', '#4a4338', '#a49678'];
-      ctx.fillStyle = palette[1];
-      ctx.fillRect(0, 0, 32, 32);
-      for (let y = 0; y < 32; y += 8) {
-        for (let x = 0; x < 32; x += 8) {
-          ctx.fillStyle = ((x + y) & 8) ? palette[0] : palette[1];
-          ctx.fillRect(x, y, 8, 8);
-          ctx.strokeStyle = palette[2];
-          ctx.strokeRect(x + 0.5, y + 0.5, 7, 7);
-        }
-      }
-      state.textureCache.set(`fallback:${kind}`, canvasTexture(canvas));
-    }
-    return state.textureCache.get(`fallback:${kind}`);
-  }
-
-  function canvasTexture(canvas) {
-    const ctx = canvas.getContext('2d');
-    const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    return { canvas, width: canvas.width, height: canvas.height, data: image.data };
-  }
+  /* ------------------------------------------------------------------
+   * テクスチャ読み込み (アトラス + サイドカー)
+   * ------------------------------------------------------------------ */
 
   async function refreshProjectDir() {
     if (state.projectDir) return state.projectDir;
@@ -771,20 +596,12 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (!floor) return;
     const projectDir = await refreshProjectDir();
     const refs = { ...state.defaultAssets, ...(floor.assets || {}) };
-    const entries = [
-      ['wall', refs.wall_texture],
-      ['door', refs.wall_texture],
-      ['floor', refs.floor_texture],
-      ['ceiling', refs.ceiling_texture],
-      ['chest', refs.chest_texture],
-      ['stairs_up', refs.stairs_up_texture],
-      ['stairs_down', refs.stairs_down_texture],
-    ];
     const loaded = {};
-    await Promise.all(entries.map(async ([key, ref]) => {
-      loaded[key] = await loadTextureRef(ref, projectDir, key);
+    await Promise.all(core.TEXTURE_KINDS.map(async (kind) => {
+      loaded[kind] = await loadTextureRef(refs[`${kind}_texture`], projectDir, kind);
     }));
     state.textures = loaded;
+    invalidateViewModel();
     renderPreview();
   }
 
@@ -794,12 +611,33 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (state.textureCache.has(cacheKey)) return state.textureCache.get(cacheKey);
     const sourcePath = resolveAssetPath(parsed.path, projectDir);
     const read = sourcePath ? await api.electronAPI?.readFileAsDataUrl?.(sourcePath).catch(() => null) : null;
-    if (!read?.ok || !read.dataUrl) return makeFallbackTexture(kind);
+    if (!read?.ok || !read.dataUrl) return core.makeFallbackTexture(kind);
     const image = await loadImage(read.dataUrl).catch(() => null);
-    if (!image) return makeFallbackTexture(kind);
-    const texture = cropAtlasTexture(image, parsed.tag || kind);
+    if (!image) return core.makeFallbackTexture(kind);
+    const layout = await loadAtlasLayout(sourcePath);
+    const texture = cropAtlasTexture(image, parsed.tag || kind, layout) || core.makeFallbackTexture(kind);
     state.textureCache.set(cacheKey, texture);
     return texture;
+  }
+
+  /* アトラスサイドカー <atlas>.json ({"columns":4,"rows":2}) を読む */
+  async function loadAtlasLayout(imagePath) {
+    const sidecarPath = imagePath.replace(/\.png$/i, '.json');
+    const cacheKey = `layout:${sidecarPath}`;
+    if (state.textureCache.has(cacheKey)) return state.textureCache.get(cacheKey);
+    let layout = core.ATLAS_LAYOUT_LEGACY;
+    const read = await api.electronAPI?.readFileAsDataUrl?.(sidecarPath).catch(() => null);
+    if (read?.ok && read.dataUrl) {
+      try {
+        const base64 = String(read.dataUrl).split(',')[1] || '';
+        const meta = JSON.parse(decodeURIComponent(escape(atob(base64))));
+        layout = core.atlasLayoutFor(meta);
+      } catch (_) {
+        layout = core.ATLAS_LAYOUT_LEGACY;
+      }
+    }
+    state.textureCache.set(cacheKey, layout);
+    return layout;
   }
 
   function parseTextureRef(ref) {
@@ -824,30 +662,23 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     });
   }
 
-  function cropAtlasTexture(image, tag) {
-    const coords = ATLAS_RECTS[tag] || ATLAS_RECTS.wall;
-    const cellW = Math.floor(image.naturalWidth / 3);
-    const cellH = Math.floor(image.naturalHeight / 2);
+  function cropAtlasTexture(image, tag, layout) {
+    const coords = layout.rects[tag];
+    if (!coords) return null;
+    const cellW = Math.floor(image.naturalWidth / layout.columns);
+    const cellH = Math.floor(image.naturalHeight / layout.rows);
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, cellW);
     canvas.height = Math.max(1, cellH);
     const ctx = canvas.getContext('2d');
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(image, coords[0] * cellW, coords[1] * cellH, cellW, cellH, 0, 0, cellW, cellH);
-    return canvasTexture(canvas);
-  }
-
-  function fractional(value) {
-    return value - Math.floor(value);
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    return { width: canvas.width, height: canvas.height, data: data.data };
   }
 
   function dirAngle(dir) {
     return [-Math.PI / 2, 0, Math.PI / 2, Math.PI][dir & 3] || 0;
-  }
-
-  function dirIndexFromAngle(angle) {
-    const normalized = normalizeAngle(angle);
-    return (Math.round(normalized / (Math.PI / 2)) + 1 + 4) % 4;
   }
 
   function normalizeAngle(value) {
@@ -865,15 +696,16 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     return a + normalizeAngle(b - a) * t;
   }
 
-  function easeInOut(t) {
-    return t * t * (3 - 2 * t);
-  }
+  /* ------------------------------------------------------------------
+   * 素材タブ / 生成情報
+   * ------------------------------------------------------------------ */
 
   function renderAssets() {
     const floor = state.current;
     if (!floor) return;
     const keys = [
       ['wall_texture', '壁'],
+      ['door_texture', '扉'],
       ['floor_texture', '床'],
       ['ceiling_texture', '天井'],
       ['chest_texture', '宝箱'],
@@ -888,13 +720,16 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   function renderGeneratedAssets() {
     const exportInfo = state.exportInfo || {};
     const tileCount = exportInfo.patternTileCount ? `${exportInfo.patternTileCount} tiles` : '-';
+    const warnings = Array.isArray(exportInfo.warnings) && exportInfo.warnings.length
+      ? `<div class="dge-export-warnings">${exportInfo.warnings.map((w) => `⚠ ${escapeHtml(w)}`).join('<br>')}</div>`
+      : '';
     return `
       <div class="dge-generated-assets">
         <button class="dge-wide" data-action="export-assets">SGDKアセット生成</button>
         <div>Tileset: ${escapeHtml(shortProjectPath(exportInfo.patternTilesetPath || 'res/dungeon/generated/dungeon_view_tileset.png'))}</div>
-        <div>Map: ${escapeHtml(shortProjectPath(exportInfo.patternMapPath || 'res/dungeon/generated/dungeon_view_map.png'))}</div>
         <div>Res: ${escapeHtml(shortProjectPath(exportInfo.resourcePath || 'res/resources.res'))}</div>
         <div>${escapeHtml(tileCount)}</div>
+        ${warnings}
       </div>
     `;
   }
@@ -911,6 +746,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     renderPreview();
     renderAssets();
   }
+
+  /* ------------------------------------------------------------------
+   * マップ編集
+   * ------------------------------------------------------------------ */
 
   function closestEdge(offsetX, offsetY, size) {
     const distances = [
@@ -969,6 +808,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     renderAll();
   }
 
+  /* ------------------------------------------------------------------
+   * プレビュー移動 (実機と同じ離散フレーム再生)
+   * ------------------------------------------------------------------ */
+
   function canPreviewMove(dirIndex) {
     const dir = DIRS[dirIndex];
     const cell = cellAt(state.preview.x, state.preview.y);
@@ -978,6 +821,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 
   function movePreview(action) {
     if (!state.current || state.animation) return;
+    const model = getViewModel();
     const from = { ...state.preview };
     const to = { ...state.preview };
     if (action === 'turn-left') to.dir = (to.dir + 3) & 3;
@@ -994,22 +838,39 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       }
     }
     if (from.x === to.x && from.y === to.y && from.dir === to.dir) return;
-    state.animation = { action, from, to, startedAt: performance.now() };
+    const isTurn = action === 'turn-left' || action === 'turn-right';
+    const total = isTurn ? model.spaces.frames.turnPoses.length : model.spaces.frames.fwdPoses.length;
+    state.animation = { action, from, to, frameIndex: 0, total, lastStep: performance.now() };
     cancelAnimationFrame(state.animationFrame);
     state.animationFrame = requestAnimationFrame(stepPreviewAnimation);
   }
 
   function stepPreviewAnimation() {
-    if (!state.animation) return;
+    const anim = state.animation;
+    if (!anim) return;
     renderPreview();
-    if (performance.now() - state.animation.startedAt >= ANIMATION_MS) {
-      state.preview = { ...state.animation.to };
-      state.animation = null;
-      renderPreview();
-      return;
+    const now = performance.now();
+    if (now - anim.lastStep >= FRAME_STEP_MS) {
+      anim.lastStep = now;
+      anim.frameIndex++;
+      if (anim.frameIndex >= anim.total) {
+        state.preview = { ...anim.to };
+        state.animation = null;
+        renderPreview();
+        return;
+      }
     }
     state.animationFrame = requestAnimationFrame(stepPreviewAnimation);
   }
+
+  function stopPreviewAnimation() {
+    cancelAnimationFrame(state.animationFrame);
+    state.animation = null;
+  }
+
+  /* ------------------------------------------------------------------
+   * フロア CRUD / フック連携
+   * ------------------------------------------------------------------ */
 
   async function refresh() {
     state.projectDir = '';
@@ -1023,6 +884,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     state.floors = (result.floors || []).map(normalizeFloorForUi);
     state.settings = result.settings || null;
     state.current = state.floors[0] || blankFloor(1);
+    invalidateViewModel();
     syncForm();
     await loadTexturesForCurrent();
     state.exportInfo = null;
@@ -1083,13 +945,15 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 
   async function exportAssets() {
     if (state.dirty) await saveCurrent();
+    setStatus('SGDKアセット生成中...');
     const result = await api.plugins.invokeHook(plugin.id, 'exportDungeonData', {});
     if (!result?.ok) {
       setStatus(result?.error || 'SGDKアセット生成に失敗しました');
       return;
     }
     state.exportInfo = result;
-    setStatus(`SGDK ${result.patternTileCount || 0} tiles`);
+    const warn = Array.isArray(result.warnings) && result.warnings.length ? ' ⚠' : '';
+    setStatus(`SGDK ${result.patternTileCount || 0} tiles${result.cached ? ' (cache)' : ''}${warn}`);
     renderAssets();
   }
 
@@ -1131,6 +995,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   ui.map.addEventListener('click', handleMapClick);
   ui.floorSelect.addEventListener('change', () => {
     state.current = state.floors.find((floor) => floor.id === ui.floorSelect.value) || state.floors[0] || null;
+    invalidateViewModel();
     syncForm();
     void loadTexturesForCurrent();
   });

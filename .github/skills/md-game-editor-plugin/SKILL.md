@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-06 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins / Dungeon generated wall patterns / Dungeon SGDK TILESET/TILEMAP assets / Dungeon template / Editor UX guardrails / Bundled WASM split metadata
+> § Last Updated: 2026-07 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins / Dungeon decision-table view engine (render-core / 4-cell depth / door / billboards / dark palette) / Dungeon SGDK TILESET+SPRITE assets / Dungeon template / Editor UX guardrails / Bundled WASM split metadata
 
 ---
 
@@ -343,8 +343,8 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `md-bgm-composer` | `editor`, `converter`, `asset` | Mega Drive 向け BGM tracker、MIDI import、VGM/XGM export、XGM2 アセット登録 |
 | `rhythm-game-editor` | `editor`, `asset` | Mega Drive 向けリズムゲームの楽曲/譜面/波形/アルバムアート/ムードスプライト/システムアセット設定 |
 | `rhythm-game-builder` | `build` | リズムゲームエンジン同期、譜面/RES/C データ生成、builder role による ROM ビルド連携 |
-| `dungeon-game-editor` | `editor` | Mega Drive 向け 3D ダンジョンの薄壁フロア編集、ランダム生成、ミニマップ付き 3D プレビュー、フロア別素材設定、3Dビュー由来の SGDK TILESET/TILEMAP アセット生成 |
-| `dungeon-game-builder` | `build` | 25x16 BG タイル描画のダンジョンエンジン同期、フロア/生成済みビュー TILEMAP アセット、builder role による ROM ビルド連携 |
+| `dungeon-game-editor` | `editor` | Mega Drive 向け 3D ダンジョンの薄壁フロア編集、ランダム生成、共有レンダーコア (render-core.js) による実機一致 3D プレビュー (奥行き4マス/扉/ビルボード/暗闇)、デシジョンテーブル焼き込みと SGDK TILESET/SPRITE アセット生成 |
+| `dungeon-game-builder` | `build` | デシジョンテーブル評価 + VRAM ダブルバッファ DMA ストリーミングの 25x16 BG ダンジョンエンジン同期、前進/後退/回転の焼き込みアニメーション、宝箱/階段ビルボードスプライト、builder role による ROM ビルド連携 |
 | `standard-emulator` | `emulator` | WASM Mega Drive エミュレーター |
 | `standard-api-emulator` | `emulator`, `tool` | REST API Mega Drive エミュレーター |
 | `ai-control` | `editor`, `tool` | 外部 AI ツール向け localhost REST / MCP bridge |

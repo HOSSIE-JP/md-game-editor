@@ -20,11 +20,19 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/* テストを高速化するため少ないフレーム数で焼き込む */
+function writeFastSettings(projectDir) {
+  const dir = path.join(projectDir, 'data', 'dungeon');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ animation_frames: 3, turn_frames: 3 }));
+}
+
 function readIndexedPng(filePath) {
   const bytes = fs.readFileSync(filePath);
   let offset = 8;
   let width = 0;
   let height = 0;
+  let plte = null;
   const idat = [];
   while (offset < bytes.length) {
     const length = bytes.readUInt32BE(offset);
@@ -36,6 +44,7 @@ function readIndexedPng(filePath) {
       assert.equal(data[8], 8);
       assert.equal(data[9], 3);
     }
+    if (type === 'PLTE') plte = Buffer.from(data);
     if (type === 'IDAT') idat.push(data);
     offset += 12 + length;
   }
@@ -46,17 +55,7 @@ function readIndexedPng(filePath) {
     assert.equal(raw[rowStart], 0);
     pixels.set(raw.subarray(rowStart + 1, rowStart + 1 + width), y * width);
   }
-  return { width, height, pixels };
-}
-
-function countNonTransparent(image, x0, y0, width, height) {
-  let count = 0;
-  for (let y = y0; y < y0 + height; y++) {
-    for (let x = x0; x < x0 + width; x++) {
-      if (image.pixels[(y * image.width) + x] !== 0) count++;
-    }
-  }
-  return count;
+  return { width, height, pixels, plte };
 }
 
 test('dungeon plugins declare MD editor and builder capabilities', () => {
@@ -90,10 +89,65 @@ test('dungeon plugins declare MD editor and builder capabilities', () => {
   assert.equal(builder.roles[0].id, 'builder');
 });
 
+test('dungeon render core is UMD and keeps compose == direct render', () => {
+  const corePath = path.join(__dirname, '..', 'plugins', 'dungeon-game-editor', 'render-core.js');
+  const coreSource = fs.readFileSync(corePath, 'utf-8');
+  assert.doesNotMatch(coreSource, /^\s*import\s/m);
+  assert.doesNotMatch(coreSource, /^\s*export\s/m);
+  assert.doesNotMatch(coreSource, /require\(/);
+  assert.match(coreSource, /module\.exports = core/);
+  assert.match(coreSource, /globalThis\.DungeonRenderCore = core/);
+
+  const core = require(corePath);
+  const settings = { animation_frames: 3, turn_frames: 3 };
+  const spaces = core.buildEdgeSpaces(settings);
+  assert.ok(spaces.move.length > 20 && spaces.move.length <= core.MOVE_EDGE_LIMIT);
+  assert.ok(spaces.turn.length > spaces.move.length && spaces.turn.length <= core.TURN_EDGE_LIMIT);
+
+  /* 鏡像の対合性 */
+  spaces.turn.forEach((def, index) => {
+    const back = core.mirrorEdgeDef(spaces.turnMirrored[index]);
+    assert.deepEqual({ dd: back.dd, dl: back.dl, face: back.face }, { dd: def.dd, dl: def.dl, face: def.face });
+  });
+
+  const textures = core.normalizeTextures({});
+  const palette = core.buildViewPalette(textures);
+  assert.equal(palette.length, 16);
+  assert.deepEqual([palette[0].r, palette[0].g, palette[0].b], [0, 0, 0]);
+  const bands = core.buildBandTables(palette, textures);
+  const pool = core.makeTilePool();
+  const frames = core.buildFrames(settings);
+
+  const service = require('../plugins/dungeon-game-editor/dungeon-service');
+  const floor = service.makeGeneratedFloor({ width: 10, height: 10 });
+
+  const checks = [
+    { pose: frames.staticPose, defs: spaces.move },
+    { pose: frames.fwdPoses[0], defs: spaces.move },
+    { pose: frames.turnPoses[1], defs: spaces.turn },
+  ];
+  checks.forEach(({ pose, defs }) => {
+    const bake = core.bakeFrame(pose, defs, textures, palette, bands, pool);
+    assert.ok(bake.stats.nodeWords < 32768);
+    for (const [px, py, dir] of [[2, 2, 1], [5, 5, 0], [7, 3, 2], [3, 7, 3]]) {
+      const states = core.sampleEdgeStates(floor, px, py, dir, defs);
+      const composed = core.assembleTiles(bake, core.composeFromFrame(bake, states), pool);
+      const direct = core.renderView(pose, defs, states, textures, palette, bands);
+      let diff = 0;
+      for (let i = 0; i < composed.length; i++) {
+        if (composed[i] !== direct[i]) diff++;
+      }
+      /* 遠距離スライバー切り捨てによる差のみ許容 (全 25600px 中) */
+      assert.ok(diff <= 64, `composed view diverged from direct render: ${diff}px`);
+    }
+  });
+});
+
 test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK data', () => {
   const projectDir = path.join(makeTempDir('md-editor-dungeon-editor-'), 'demo');
   const plugin = require('../plugins/dungeon-game-editor');
   const context = { projectDir, logger: logger() };
+  writeFastSettings(projectDir);
 
   const generated = plugin.generateDungeonFloor({ width: 20, height: 18, name: 'Labyrinth' }, context);
   assert.equal(generated.ok, true);
@@ -113,6 +167,8 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.equal(listed.ok, true);
   assert.equal(listed.maxSize, 20);
   assert.equal(listed.floors.length, 1);
+  assert.equal(listed.settings.turn_frames, 3);
+  assert.match(listed.floors[0].assets.door_texture, /#door$/);
 
   const exported = plugin.exportDungeonData({}, context);
   assert.equal(exported.ok, true);
@@ -121,52 +177,78 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.equal(fs.existsSync(path.join(projectDir, 'inc', 'dungeon_patterns.h')), true);
   assert.equal(fs.existsSync(path.join(projectDir, 'src', 'dungeon_patterns.c')), true);
   assert.equal(fs.existsSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_view_tileset.png')), true);
-  assert.equal(fs.existsSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_view_map.png')), true);
+  assert.equal(fs.existsSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_bb_chest.png')), true);
+  assert.equal(fs.existsSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_bb_stairs_up.png')), true);
+  assert.equal(fs.existsSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_bb_stairs_down.png')), true);
+  /* 旧全画面パターン atlas は生成されない */
+  assert.equal(fs.existsSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_view_map.png')), false);
 
   const header = fs.readFileSync(path.join(projectDir, 'inc', 'dungeon_data.h'), 'utf-8');
   assert.match(header, /#define DUNGEON_FLOOR_COUNT 1/);
   const source = fs.readFileSync(path.join(projectDir, 'src', 'dungeon_data.c'), 'utf-8');
   assert.match(source, /const DungeonFloorData dungeon_floors/);
   assert.match(source, /dungeon_floor_1_edges/);
-  const serviceSource = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'dungeon-game-editor', 'dungeon-service.js'), 'utf-8');
+
   const patternHeader = fs.readFileSync(path.join(projectDir, 'inc', 'dungeon_patterns.h'), 'utf-8');
+  assert.match(patternHeader, /#define DUN_ANIMATION_FRAMES 3/);
+  assert.match(patternHeader, /#define DUN_TURN_ANIMATION_FRAMES 3/);
+  assert.match(patternHeader, /#define DUN_ANIMATION_STEP_VBLANKS 2/);
+  assert.match(patternHeader, /#define DUN_FWD_FRAMES 2/);
+  assert.match(patternHeader, /#define DUN_TURN_FRAMES 2/);
+  assert.match(patternHeader, /#define DUN_MOVE_EDGE_COUNT \d+/);
+  assert.match(patternHeader, /#define DUN_TURN_EDGE_COUNT \d+/);
+  assert.match(patternHeader, /#define DUN_TILESET_TILE_COUNT \d+/);
+  assert.match(patternHeader, /#define DUN_BB_CELL_COUNT \d+/);
+  assert.match(patternHeader, /typedef struct \{ s8 dd; s8 dl; u8 face; \} DunEdgeDef;/);
+  assert.match(patternHeader, /DunFrameTable/);
+  assert.match(patternHeader, /extern const u16 dun_palette_dark\[16\];/);
+  assert.doesNotMatch(patternHeader, /DUN_WALL_VIEW_COUNT/);
+  assert.doesNotMatch(patternHeader, /DUN_VIEW_PATTERN_COLUMNS/);
+  assert.doesNotMatch(patternHeader, /dungeon_view_pattern_count/);
+
   const patternSource = fs.readFileSync(path.join(projectDir, 'src', 'dungeon_patterns.c'), 'utf-8');
+  assert.match(patternSource, /const DunEdgeDef dun_edges_move\[/);
+  assert.match(patternSource, /const DunEdgeDef dun_edges_turn_mirrored\[/);
+  assert.match(patternSource, /const DunFrameTable dun_frame_static/);
+  assert.match(patternSource, /const DunFrameTable dun_frames_fwd\[DUN_FWD_FRAMES\]/);
+  assert.match(patternSource, /const DunFrameTable dun_frames_turn\[DUN_TURN_FRAMES\]/);
+  assert.match(patternSource, /const DunBBCell dun_bb_cells\[/);
+  assert.match(patternSource, /const DunBBPose dun_bb_turn\[DUN_TURN_FRAMES\]/);
+  assert.match(patternSource, /const u16 dun_palette_dark\[16\]/);
+  assert.doesNotMatch(patternSource, /dungeon_view_pattern_count/);
+
+  const tileCount = Number(patternHeader.match(/#define DUN_TILESET_TILE_COUNT (\d+)/)?.[1] || 0);
+  assert.ok(tileCount > 100);
+  assert.equal(exported.patternTileCount, tileCount);
+  assert.ok(exported.budget && exported.budget.tileCount === tileCount);
+  assert.ok(Array.isArray(exported.warnings));
+
+  /* ビュータイルセット: index0 = 黒 / ビルボード: index0 = マゼンタ */
+  const tileset = readIndexedPng(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_view_tileset.png'));
+  assert.deepEqual(Array.from(tileset.plte.subarray(0, 3)), [0, 0, 0]);
+  const chestSheet = readIndexedPng(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_bb_chest.png'));
+  assert.deepEqual(Array.from(chestSheet.plte.subarray(0, 3)), [255, 0, 255]);
+  assert.equal(chestSheet.width, 48 * 8);
+  assert.equal(chestSheet.height, 48);
+  let chestPixels = 0;
+  for (let i = 0; i < chestSheet.pixels.length; i++) {
+    if (chestSheet.pixels[i] !== 0) chestPixels++;
+  }
+  assert.ok(chestPixels > 500);
+
   const resources = fs.readFileSync(path.join(projectDir, 'res', 'resources.res'), 'utf-8');
-  const tilesetPng = fs.readFileSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_view_tileset.png'));
-  const plteOffset = tilesetPng.indexOf(Buffer.from('PLTE'));
-  const patternMap = readIndexedPng(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_view_map.png'));
-  const frontPattern = (4 * 5);
-  const frontX = (frontPattern % 8) * 200;
-  const frontY = Math.floor(frontPattern / 8) * 128;
-  const deadEndPattern = (7 * 5);
-  const deadEndX = (deadEndPattern % 8) * 200;
-  const deadEndY = Math.floor(deadEndPattern / 8) * 128;
-  assert.match(patternHeader, /#define DUN_WALL_VIEW_COUNT 64/);
-  assert.match(patternHeader, /#define DUN_WALL_PHASE_COUNT 5/);
-  assert.match(patternHeader, /#define DUN_VIEW_PATTERN_COLUMNS 8/);
-  assert.match(patternHeader, /#define DUN_ANIMATION_STEP_VBLANKS 4/);
-  assert.match(patternHeader, /extern const u16 dungeon_view_pattern_count/);
-  assert.doesNotMatch(patternHeader, /extern const u32 dungeon_pattern_tiles/);
-  assert.match(patternSource, /const u16 dungeon_view_pattern_count/);
-  assert.doesNotMatch(patternSource, /const u32 dungeon_pattern_tiles/);
-  assert.doesNotMatch(patternSource, /const u16 dungeon_view_maps/);
-  assert.match(serviceSource, /PATTERN_TRANSPARENT_COLOR/);
-  assert.match(serviceSource, /buildPatternPalette/);
-  assert.match(serviceSource, /renderPatternPixels/);
-  assert.match(serviceSource, /rasterPatternTriangle/);
-  assert.match(serviceSource, /VIEW_CAMERA_BACKSTEP/);
-  assert.ok(plteOffset > 0);
-  assert.deepEqual(Array.from(tilesetPng.subarray(plteOffset + 4, plteOffset + 7)), [255, 0, 255]);
-  assert.ok(countNonTransparent(patternMap, frontX + 0, frontY + 30, 48, 68) > 40);
-  assert.ok(countNonTransparent(patternMap, frontX + 152, frontY + 30, 48, 68) > 40);
-  assert.ok(countNonTransparent(patternMap, deadEndX + 0, deadEndY + 30, 48, 68) > 80);
-  assert.ok(countNonTransparent(patternMap, deadEndX + 152, deadEndY + 30, 48, 68) > 80);
-  assert.ok(countNonTransparent(patternMap, deadEndX + 72, deadEndY + 36, 56, 56) > 300);
   assert.match(resources, /PALETTE dungeon_view_palette "dungeon\/generated\/dungeon_view_tileset\.png"/);
   assert.match(resources, /TILESET dungeon_view_tileset "dungeon\/generated\/dungeon_view_tileset\.png" NONE ALL/);
-  assert.match(resources, /TILEMAP dungeon_view_tilemap "dungeon\/generated\/dungeon_view_map\.png" dungeon_view_tileset NONE ALL 0/);
-  const tileCount = Number(patternHeader.match(/#define DUN_PATTERN_TILE_COUNT (\d+)/)?.[1] || 0);
-  assert.ok(tileCount > 12);
+  assert.match(resources, /PALETTE dungeon_bb_palette "dungeon\/generated\/dungeon_bb_chest\.png"/);
+  assert.match(resources, /SPRITE dungeon_bb_chest "dungeon\/generated\/dungeon_bb_chest\.png" 6 6 NONE 0/);
+  assert.match(resources, /SPRITE dungeon_bb_stairs_up /);
+  assert.match(resources, /SPRITE dungeon_bb_stairs_down /);
+  assert.doesNotMatch(resources, /TILEMAP /);
+
+  /* 2 回目のエクスポートは焼き込みキャッシュが効く */
+  const again = plugin.exportDungeonData({}, context);
+  assert.equal(again.ok, true);
+  assert.equal(again.cached, true);
 });
 
 test('dungeon-game-builder syncs engine, writes generated main, and build variables', () => {
@@ -174,6 +256,7 @@ test('dungeon-game-builder syncs engine, writes generated main, and build variab
   const builder = require('../plugins/dungeon-game-builder');
   const manifest = require('../plugins/dungeon-game-builder/manifest.json');
   const context = { projectDir, assets: [], logger: logger() };
+  writeFastSettings(projectDir);
 
   const generated = builder.generateSource([], context);
   assert.equal(generated.ok, true);
@@ -182,9 +265,12 @@ test('dungeon-game-builder syncs engine, writes generated main, and build variab
   assert.match(generated.sourceCode, /hasWallAt/);
   assert.match(generated.sourceCode, /DUN_USE_TEXT_HUD 1/);
   assert.match(generated.sourceCode, /pressedAction/);
-  assert.match(generated.sourceCode, /actionUsesWallAnimation/);
-  assert.match(generated.sourceCode, /turnTargetDir/);
-  assert.match(generated.sourceCode, /DUN_ACTION_TURN_L/);
+  assert.match(generated.sourceCode, /performAction/);
+  assert.match(generated.sourceCode, /DUN_playForward/);
+  assert.match(generated.sourceCode, /DUN_playBackward/);
+  assert.match(generated.sourceCode, /DUN_playTurn/);
+  assert.match(generated.sourceCode, /DUN_setDark/);
+  assert.match(generated.sourceCode, /SPR_update/);
   assert.match(generated.sourceCode, /canMove\(floor, player_x, player_y, player_dir\)/);
   assert.doesNotMatch(generated.sourceCode, /KDebug_Alert/);
   assert.equal(fs.existsSync(path.join(projectDir, 'src', 'dungeon_view.c')), true);
@@ -198,19 +284,19 @@ test('dungeon-game-builder syncs engine, writes generated main, and build variab
   const viewSource = fs.readFileSync(path.join(projectDir, 'src', 'dungeon_view.c'), 'utf-8');
   assert.match(viewSource, /DUN_VIEW_TILE_W/);
   assert.match(viewSource, /#include "resources\.h"/);
-  assert.match(viewSource, /DUN_TILE_CACHE_SIZE/);
-  assert.match(viewSource, /VDP_loadTileData/);
-  assert.match(viewSource, /VDP_setTileMapXY/);
-  assert.match(viewSource, /dungeon_view_tilemap\.tilemap/);
-  assert.match(viewSource, /hasWallOrDoorAt/);
-  assert.match(viewSource, /animationPhase/);
-  assert.match(viewSource, /DBG F:%u X:%02u Y:%02u DIR:%c\(%u\)/);
-  assert.doesNotMatch(viewSource, /VDP_loadTileSet\(&dungeon_view_tileset/);
-  assert.doesNotMatch(viewSource, /VDP_setTileMapEx/);
-  assert.doesNotMatch(viewSource, /VDP_loadTileData\(dungeon_pattern_tiles/);
+  assert.match(viewSource, /evaluateEdgeStates/);
+  assert.match(viewSource, /stageFrame/);
+  assert.match(viewSource, /VDP_loadTileData\(tile_staging/);
+  assert.match(viewSource, /DMA_QUEUE/);
+  assert.match(viewSource, /VDP_setTileMapDataRect/);
+  assert.match(viewSource, /dun_edges_turn_mirrored/);
+  assert.match(viewSource, /SPR_addSprite/);
+  assert.match(viewSource, /losVisible/);
+  assert.match(viewSource, /dun_palette_dark/);
+  assert.doesNotMatch(viewSource, /VDP_setTileMapXY/);
+  assert.doesNotMatch(viewSource, /loadCachedTile/);
+  assert.doesNotMatch(viewSource, /dungeon_view_tilemap/);
   assert.doesNotMatch(viewSource, /MAP_create/);
-  assert.doesNotMatch(viewSource, /dungeon_view_maps/);
-  assert.doesNotMatch(viewSource, /loadDungeonTiles/);
 
   const buildStart = builder.onBuildStart({ projectDir }, context);
   assert.equal(buildStart.ok, true);
@@ -221,30 +307,25 @@ test('dungeon-game-builder syncs engine, writes generated main, and build variab
   assert.equal(Object.hasOwn(buildStart.makeVariables, 'SRC_S'), false);
 });
 
-test('dungeon-game-editor renderer provides map tools, 3D preview, and activation refresh', () => {
+test('dungeon-game-editor renderer drives preview through the shared render core', () => {
   const rendererSource = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'dungeon-game-editor', 'renderer.js'), 'utf-8');
   const styleSource = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'dungeon-game-editor', 'style.css'), 'utf-8');
 
   assert.match(rendererSource, /3Dプレビュー/);
   assert.match(rendererSource, /data-tool="?\$\{tool\.id\}/);
   assert.match(rendererSource, /generateDungeonFloor/);
-  assert.match(rendererSource, /drawPreviewGeometry/);
-  assert.match(rendererSource, /VIEW_PROJECT_X/);
-  assert.match(rendererSource, /const VIEW_PROJECT_X = VIEW_PROJECT_Y/);
-  assert.match(rendererSource, /const VIEW_EYE_Z = 0\.42/);
-  assert.match(rendererSource, /VIEW_CAMERA_BACKSTEP/);
-  assert.match(rendererSource, /VIEW_DEPTH_EPSILON/);
-  assert.match(rendererSource, /WALL_SEGMENT_OVERLAP/);
-  assert.match(rendererSource, /PREVIEW_TRANSPARENT_KEY/);
-  assert.match(rendererSource, /drawPreviewWallModel/);
-  assert.match(rendererSource, /drawWallRuns/);
-  assert.match(rendererSource, /drawWallRun3D/);
-  assert.match(rendererSource, /edgeKindAtGrid/);
-  assert.match(rendererSource, /clipCameraPolygon/);
-  assert.match(rendererSource, /rasterTriangle/);
-  assert.match(rendererSource, /previewCameraPose/);
-  assert.match(rendererSource, /zBuffer = new Float32Array\(VIEW_W \* VIEW_H\)/);
-  assert.match(rendererSource, /renderPreviewMinimap/);
+  assert.match(rendererSource, /import\(new URL\('\.\/render-core\.js', import\.meta\.url\)\)/);
+  assert.match(rendererSource, /globalThis\.DungeonRenderCore/);
+  assert.match(rendererSource, /core\.renderView/);
+  assert.match(rendererSource, /core\.sampleEdgeStates/);
+  assert.match(rendererSource, /core\.buildEdgeSpaces/);
+  assert.match(rendererSource, /core\.buildBillboardTables/);
+  assert.match(rendererSource, /core\.losVisible/);
+  assert.match(rendererSource, /mirrorIndices/);
+  assert.match(rendererSource, /drawBillboardsInto/);
+  assert.match(rendererSource, /darkenPalette/);
+  assert.match(rendererSource, /FRAME_STEP_MS/);
+  assert.match(rendererSource, /door_texture/);
   assert.match(rendererSource, /drawPreviewMinimap/);
   assert.match(rendererSource, /readFileAsDataUrl/);
   assert.match(rendererSource, /cropAtlasTexture/);
@@ -273,6 +354,9 @@ test('dungeon template starts with valid settings and plugin roles', () => {
     builder: 'dungeon-game-builder',
     testplay: 'standard-emulator',
   });
-  assert.equal(fs.existsSync(path.join(templateDir, 'data', 'dungeon', 'floors', 'floor_001_template.json')), true);
+  const floorTemplate = JSON.parse(fs.readFileSync(path.join(templateDir, 'data', 'dungeon', 'floors', 'floor_001_template.json'), 'utf-8'));
+  assert.match(floorTemplate.assets.door_texture, /#door$/);
+  const settings = JSON.parse(fs.readFileSync(path.join(templateDir, 'data', 'dungeon', 'settings.json'), 'utf-8'));
+  assert.equal(settings.turn_frames, 8);
   assert.equal(fs.existsSync(path.join(templateDir, 'res', 'dungeon', 'textures', 'dungeon_texture_atlas.png')), true);
 });

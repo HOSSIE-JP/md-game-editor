@@ -11,6 +11,7 @@
   },
   "assets": {
     "wall_texture": "dungeon/textures/dungeon_texture_atlas.png#wall",
+    "door_texture": "dungeon/textures/dungeon_texture_atlas.png#door",
     "floor_texture": "dungeon/textures/dungeon_texture_atlas.png#floor",
     "ceiling_texture": "dungeon/textures/dungeon_texture_atlas.png#ceiling",
     "chest_texture": "dungeon/textures/dungeon_texture_atlas.png#chest",
