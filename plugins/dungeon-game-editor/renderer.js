@@ -37,6 +37,17 @@ const DEFAULT_ASSET_REFS = {
   stairs_up_texture: 'dungeon/textures/dungeon_texture_atlas.png#stairs_up',
   stairs_down_texture: 'dungeon/textures/dungeon_texture_atlas.png#stairs_down',
 };
+const ASSET_META = Object.freeze({
+  wall_texture: { label: '壁', kind: 'wall', fileName: 'wall', width: 96, height: 96, opaque: true },
+  door_texture: { label: '扉', kind: 'door', fileName: 'door', width: 96, height: 96, opaque: true },
+  floor_texture: { label: '床', kind: 'floor', fileName: 'floor', width: 32, height: 32, opaque: true },
+  ceiling_texture: { label: '天井', kind: 'ceiling', fileName: 'ceiling', width: 32, height: 32, opaque: true },
+  chest_texture: { label: '宝箱', kind: 'chest', fileName: 'chest', width: 48, height: 48, opaque: false },
+  stairs_up_texture: { label: '上り階段', kind: 'stairs_up', fileName: 'stairs_up', width: 48, height: 48, opaque: false },
+  stairs_down_texture: { label: '下り階段', kind: 'stairs_down', fileName: 'stairs_down', width: 48, height: 48, opaque: false },
+});
+const ASSET_KEYS = Object.freeze(Object.keys(ASSET_META));
+const MAX_ASSET_SETS = 255;
 const VIEW_W = 200;
 const VIEW_H = 128;
 /* 実機の 1 アニメフレーム = DUN_ANIMATION_STEP_VBLANKS(2) vblank ≒ 33ms */
@@ -57,8 +68,16 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     animation: null,
     animationFrame: 0,
     textureCache: new Map(),
+    textureCacheEpoch: 0,
     textures: null,
     viewModel: null,
+    assetEditorSetId: '',
+    assetTextures: null,
+    assetViewModel: null,
+    textureGeneration: 0,
+    assetTextureGeneration: 0,
+    assetCardsGeneration: 0,
+    committed: null,
     exportInfo: null,
     wasActive: root.classList.contains('active'),
     activationObserver: null,
@@ -85,6 +104,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
               <button class="dge-icon" data-action="move-down" title="下へ">↓</button>
             </div>
             <label class="dge-field">フロア名<input class="dge-floor-name" type="text"></label>
+            <label class="dge-field">素材セット<select class="dge-floor-asset-set"></select></label>
             <div class="dge-size-row">
               <label class="dge-field">幅<input class="dge-width" type="number" min="4" max="20"></label>
               <label class="dge-field">高さ<input class="dge-height" type="number" min="4" max="20"></label>
@@ -135,6 +155,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     status: root.querySelector('.dge-status'),
     dirty: root.querySelector('.dge-dirty'),
     floorSelect: root.querySelector('.dge-floor-select'),
+    floorAssetSet: root.querySelector('.dge-floor-asset-set'),
     name: root.querySelector('.dge-floor-name'),
     width: root.querySelector('.dge-width'),
     height: root.querySelector('.dge-height'),
@@ -147,6 +168,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     tabs: Array.from(root.querySelectorAll('[data-tab]')),
     panels: Array.from(root.querySelectorAll('[data-panel]')),
     minimap: root.querySelector('.dge-minimap'),
+    assetsView: null,
   };
   const mapCtx = ui.map.getContext('2d');
   const viewCtx = ui.view.getContext('2d');
@@ -169,7 +191,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       width,
       height,
       start: { x: 1, y: 1, dir: 1 },
-      assets: {},
+      asset_set_id: firstAssetSet()?.id || '',
       cells: Array.from({ length: height }, () => Array.from({ length: width }, () => blankCell(15))),
     };
   }
@@ -188,6 +210,58 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     ui.status.textContent = text || '';
   }
 
+  function cloneData(value) {
+    return value == null ? value : JSON.parse(JSON.stringify(value));
+  }
+
+  function assetSets() {
+    return Array.isArray(state.settings?.asset_sets) ? state.settings.asset_sets : [];
+  }
+
+  function firstAssetSet() {
+    return assetSets()[0] || null;
+  }
+
+  function assetSetById(id) {
+    return assetSets().find((set) => set.id === id) || null;
+  }
+
+  function selectedAssetSet() {
+    return assetSetById(state.assetEditorSetId) || firstAssetSet();
+  }
+
+  function normalizeAssetSetForUi(assetSet, index) {
+    const id = String(assetSet?.id || (index === 0 ? 'default' : `set-${index + 1}`)).trim();
+    const assets = {};
+    ASSET_KEYS.forEach((key) => {
+      assets[key] = String(assetSet?.assets?.[key] || state.defaultAssets[key] || DEFAULT_ASSET_REFS[key]);
+    });
+    return {
+      id,
+      name: String(assetSet?.name || id || `Set ${index + 1}`).trim(),
+      assets,
+    };
+  }
+
+  function normalizeSettingsForUi(settings) {
+    const source = settings && typeof settings === 'object' ? settings : {};
+    const hasSets = Array.isArray(source.asset_sets);
+    const rawSets = hasSets
+      ? source.asset_sets
+      : [{ id: 'default', name: 'Default', assets: state.defaultAssets }];
+    return {
+      ...source,
+      asset_sets: rawSets.map(normalizeAssetSetForUi),
+    };
+  }
+
+  function effectiveAssetsForFloor(floor) {
+    const set = assetSetById(floor?.asset_set_id);
+    if (set) return { ...state.defaultAssets, ...set.assets };
+    if (floor?.assets) return { ...state.defaultAssets, ...floor.assets };
+    return { ...state.defaultAssets };
+  }
+
   function normalizeFloorForUi(floor) {
     const width = Math.max(4, Math.min(MAX_SIZE, Number(floor?.width || 12)));
     const height = Math.max(4, Math.min(MAX_SIZE, Number(floor?.height || 12)));
@@ -201,7 +275,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       height,
       cells,
       start: { x: 1, y: 1, dir: 1, ...(floor?.start || {}) },
-      assets: { ...state.defaultAssets, ...(floor?.assets || {}) },
+      asset_set_id: String(floor?.asset_set_id || floor?.assetSetId || firstAssetSet()?.id || ''),
+      ...(floor?.assets ? { assets: { ...state.defaultAssets, ...floor.assets } } : {}),
     };
   }
 
@@ -210,6 +285,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     ui.name.value = state.current.name || '';
     ui.width.value = state.current.width;
     ui.height.value = state.current.height;
+    renderFloorAssetSetSelect();
+    if (!state.assetEditorSetId) state.assetEditorSetId = state.current.asset_set_id || firstAssetSet()?.id || '';
     state.preview = { ...state.current.start };
     stopPreviewAnimation();
     renderAll();
@@ -247,6 +324,19 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       `<option value="${escapeHtml(floor.id)}">${escapeHtml(floor.name || floor.id)}</option>`
     )).join('');
     if (state.current) ui.floorSelect.value = state.current.id;
+  }
+
+  function renderFloorAssetSetSelect() {
+    const selectedId = String(state.current?.asset_set_id || '');
+    const known = assetSets().some((set) => set.id === selectedId);
+    const missing = selectedId && !known
+      ? `<option value="${escapeHtml(selectedId)}">不明なセット (${escapeHtml(selectedId)})</option>`
+      : '';
+    ui.floorAssetSet.innerHTML = missing + assetSets().map((set) => (
+      `<option value="${escapeHtml(set.id)}">${escapeHtml(set.name || set.id)}</option>`
+    )).join('');
+    ui.floorAssetSet.value = selectedId;
+    ui.floorAssetSet.disabled = assetSets().length === 0;
   }
 
   function renderMap() {
@@ -338,20 +428,22 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
    * ビューモデル: エッジ集合・パレット・シェード帯・ビルボードテーブル。
    * テクスチャ / 設定が変わったときだけ再構築する。
    */
-  function getViewModel() {
-    if (state.viewModel) return state.viewModel;
+  function buildViewModel(sourceTextures) {
     const settings = state.settings || {};
-    const textures = core.normalizeTextures(state.textures || {});
+    const textures = core.normalizeTextures(sourceTextures || {});
     const palette = core.buildViewPalette(textures);
     const spaces = core.buildEdgeSpaces(settings);
     const spritePalette = core.buildSpritePalette(textures);
-    state.viewModel = {
+    const background = core.buildBandTables(palette, textures);
+    return {
       textures,
       settings,
       spaces,
       palette,
       darkPalette: core.darkenPalette(palette, DARK_PALETTE_SCALE),
-      bands: core.buildBandTables(palette, textures),
+      backdrop: core.buildBackdropSheet(palette, textures),
+      background,
+      transparentBackground: new Uint8Array(background.length),
       spritePalette,
       sheets: {
         chest: core.renderBillboardSheet(textures.chest, spritePalette),
@@ -360,11 +452,25 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       },
       billboards: core.buildBillboardTables(settings),
     };
+  }
+
+  function getViewModel(assetEditor = false) {
+    if (assetEditor) {
+      if (!state.assetViewModel) state.assetViewModel = buildViewModel(state.assetTextures || state.textures || {});
+      return state.assetViewModel;
+    }
+    if (!state.viewModel) state.viewModel = buildViewModel(state.textures || {});
     return state.viewModel;
   }
 
-  function invalidateViewModel() {
+  function invalidateViewModel(includeAssetEditor = true) {
     state.viewModel = null;
+    if (includeAssetEditor) state.assetViewModel = null;
+  }
+
+  function clearTextureCache() {
+    state.textureCacheEpoch++;
+    state.textureCache.clear();
   }
 
   /*
@@ -419,22 +525,42 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const floor = state.current;
     if (!floor) return;
     const model = getViewModel();
+    const image = composePreviewImage(model, floor);
+    viewCtx.putImageData(image, 0, 0);
+
+    if (ui.assetsView) {
+      const assetsContext = ui.assetsView.getContext('2d');
+      assetsContext.imageSmoothingEnabled = false;
+      const assetModel = getViewModel(true);
+      assetsContext.putImageData(composePreviewImage(assetModel, floor), 0, 0);
+    }
+
+    drawPreviewMinimap(floor, minimapPose());
+    ui.previewInfo.textContent = `X:${state.preview.x} Y:${state.preview.y} ${DIRS[state.preview.dir]?.label || 'E'}`;
+  }
+
+  function composePreviewImage(model, floor) {
     const frame = currentPreviewFrame(model);
     const states = core.sampleEdgeStates(floor, frame.base.x, frame.base.y, frame.base.dir, frame.defs);
     /* 左回転: 鏡像エッジで右回転テーブルを評価し、水平反転で合成する (実機と同一) */
     const defsForRender = frame.mirrored ? frame.turnDefs : frame.defs;
-    let indices = core.renderView(frame.pose, defsForRender, states, model.textures, model.palette, model.bands);
-    if (frame.mirrored) indices = mirrorIndices(indices);
+    let foreground = core.renderView(
+      frame.pose,
+      defsForRender,
+      states,
+      model.textures,
+      model.palette,
+      model.transparentBackground,
+    );
+    if (frame.mirrored) foreground = mirrorIndices(foreground);
+    const indices = core.compositeView(model.background, foreground);
 
     const cell = cellAt(state.preview.x, state.preview.y);
     const paletteForView = cell?.dark ? model.darkPalette : model.palette;
     const image = viewCtx.createImageData(VIEW_W, VIEW_H);
     core.indicesToRgba(indices, paletteForView, image.data);
     drawBillboardsInto(image.data, model, frame, floor);
-    viewCtx.putImageData(image, 0, 0);
-
-    drawPreviewMinimap(floor, minimapPose());
-    ui.previewInfo.textContent = `X:${state.preview.x} Y:${state.preview.y} ${DIRS[state.preview.dir]?.label || 'E'}`;
+    return image;
   }
 
   function mirrorIndices(indices) {
@@ -594,34 +720,68 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   async function loadTexturesForCurrent() {
     const floor = state.current;
     if (!floor) return;
+    const generation = ++state.textureGeneration;
+    const floorId = floor.id;
+    const setId = floor.asset_set_id;
     const projectDir = await refreshProjectDir();
-    const refs = { ...state.defaultAssets, ...(floor.assets || {}) };
-    const loaded = {};
-    await Promise.all(core.TEXTURE_KINDS.map(async (kind) => {
-      loaded[kind] = await loadTextureRef(refs[`${kind}_texture`], projectDir, kind);
-    }));
+    const refs = effectiveAssetsForFloor(floor);
+    const loaded = await loadTextureRefs(refs, projectDir);
+    if (generation !== state.textureGeneration || state.current?.id !== floorId || state.current?.asset_set_id !== setId) return;
     state.textures = loaded;
-    invalidateViewModel();
+    state.viewModel = null;
     renderPreview();
   }
 
-  async function loadTextureRef(ref, projectDir, kind) {
+  async function loadTexturesForAssetEditor() {
+    const set = selectedAssetSet();
+    if (!set) {
+      state.assetTextures = null;
+      state.assetViewModel = null;
+      renderPreview();
+      return;
+    }
+    const generation = ++state.assetTextureGeneration;
+    const setId = set.id;
+    const projectDir = await refreshProjectDir();
+    const loaded = await loadTextureRefs({ ...state.defaultAssets, ...set.assets }, projectDir);
+    if (generation !== state.assetTextureGeneration || selectedAssetSet()?.id !== setId) return;
+    state.assetTextures = loaded;
+    state.assetViewModel = null;
+    renderPreview();
+  }
+
+  async function loadTextureRefs(refs, projectDir) {
+    const loaded = {};
+    const cacheEpoch = state.textureCacheEpoch;
+    await Promise.all(core.TEXTURE_KINDS.map(async (kind) => {
+      loaded[kind] = await loadTextureRef(refs[`${kind}_texture`], projectDir, kind, cacheEpoch);
+    }));
+    return loaded;
+  }
+
+  async function loadTextureRef(ref, projectDir, kind, cacheEpoch = state.textureCacheEpoch) {
     const parsed = parseTextureRef(ref || DEFAULT_ASSET_REFS[`${kind}_texture`] || DEFAULT_ASSET_REFS.wall_texture);
-    const cacheKey = `${parsed.path}#${parsed.tag || kind}`;
+    const cacheKey = `${parsed.path}#${parsed.tag || '$whole'}`;
     if (state.textureCache.has(cacheKey)) return state.textureCache.get(cacheKey);
     const sourcePath = resolveAssetPath(parsed.path, projectDir);
     const read = sourcePath ? await api.electronAPI?.readFileAsDataUrl?.(sourcePath).catch(() => null) : null;
     if (!read?.ok || !read.dataUrl) return core.makeFallbackTexture(kind);
     const image = await loadImage(read.dataUrl).catch(() => null);
     if (!image) return core.makeFallbackTexture(kind);
-    const layout = await loadAtlasLayout(sourcePath);
-    const texture = cropAtlasTexture(image, parsed.tag || kind, layout) || core.makeFallbackTexture(kind);
-    state.textureCache.set(cacheKey, texture);
+    let texture = null;
+    if (parsed.tag) {
+      const layout = await loadAtlasLayout(sourcePath, cacheEpoch);
+      texture = cropAtlasTexture(image, parsed.tag, layout);
+    } else {
+      texture = wholeImageTexture(image);
+    }
+    texture ||= core.makeFallbackTexture(kind);
+    if (cacheEpoch === state.textureCacheEpoch) state.textureCache.set(cacheKey, texture);
     return texture;
   }
 
   /* アトラスサイドカー <atlas>.json ({"columns":4,"rows":2}) を読む */
-  async function loadAtlasLayout(imagePath) {
+  async function loadAtlasLayout(imagePath, cacheEpoch = state.textureCacheEpoch) {
     const sidecarPath = imagePath.replace(/\.png$/i, '.json');
     const cacheKey = `layout:${sidecarPath}`;
     if (state.textureCache.has(cacheKey)) return state.textureCache.get(cacheKey);
@@ -636,7 +796,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         layout = core.ATLAS_LAYOUT_LEGACY;
       }
     }
-    state.textureCache.set(cacheKey, layout);
+    if (cacheEpoch === state.textureCacheEpoch) state.textureCache.set(cacheKey, layout);
     return layout;
   }
 
@@ -648,9 +808,16 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   function resolveAssetPath(assetPath, projectDir) {
     const clean = String(assetPath || '').replace(/\\/g, '/').replace(/^res\//, '');
     if (!clean) return '';
-    if (/^\/|^[A-Za-z]:\//.test(clean)) return clean;
     if (!projectDir) return '';
-    return `${projectDir.replace(/\/$/, '')}/res/${clean}`;
+    const rootPath = String(projectDir).replace(/\\/g, '/').replace(/\/$/, '');
+    if (/^\/|^[A-Za-z]:\//.test(clean)) {
+      const absolute = clean.replace(/\/$/, '');
+      const foldedRoot = rootPath.toLowerCase();
+      const foldedAbsolute = absolute.toLowerCase();
+      return foldedAbsolute === foldedRoot || foldedAbsolute.startsWith(`${foldedRoot}/`) ? absolute : '';
+    }
+    if (clean.split('/').some((part) => part === '..') || clean.includes('\0')) return '';
+    return `${rootPath}/res/${clean.replace(/^\/+/, '')}`;
   }
 
   function loadImage(dataUrl) {
@@ -673,6 +840,17 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const ctx = canvas.getContext('2d');
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(image, coords[0] * cellW, coords[1] * cellH, cellW, cellH, 0, 0, cellW, cellH);
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    return { width: canvas.width, height: canvas.height, data: data.data };
+  }
+
+  function wholeImageTexture(image) {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, image.naturalWidth || image.width || 1);
+    canvas.height = Math.max(1, image.naturalHeight || image.height || 1);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(image, 0, 0);
     const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
     return { width: canvas.width, height: canvas.height, data: data.data };
   }
@@ -701,25 +879,111 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
    * ------------------------------------------------------------------ */
 
   function renderAssets() {
-    const floor = state.current;
-    if (!floor) return;
-    const keys = [
-      ['wall_texture', '壁'],
-      ['door_texture', '扉'],
-      ['floor_texture', '床'],
-      ['ceiling_texture', '天井'],
-      ['chest_texture', '宝箱'],
-      ['stairs_up_texture', '上り階段'],
-      ['stairs_down_texture', '下り階段'],
-    ];
-    ui.assets.innerHTML = keys.map(([key, label]) => `
-      <label class="dge-field">${label}<input data-asset="${key}" type="text" value="${escapeHtml(floor.assets?.[key] || '')}"></label>
-    `).join('') + renderGeneratedAssets();
+    const sets = assetSets();
+    if (!assetSetById(state.assetEditorSetId)) state.assetEditorSetId = state.current?.asset_set_id || sets[0]?.id || '';
+    if (!assetSetById(state.assetEditorSetId)) state.assetEditorSetId = sets[0]?.id || '';
+    const set = selectedAssetSet();
+    const referenceCount = set ? countSetReferences(set.id) : 0;
+    const deleteBlocked = !set || sets.length <= 1 || referenceCount > 0;
+    const setList = sets.map((entry) => {
+      const references = countSetReferences(entry.id);
+      return `
+        <button type="button" class="dge-set-item ${entry.id === set?.id ? 'active' : ''}" data-set-select="${escapeHtml(entry.id)}">
+          <span>${escapeHtml(entry.name || entry.id)}</span>
+          <small>${references ? `${references} floor` : '未使用'}</small>
+        </button>
+      `;
+    }).join('');
+
+    const content = set ? `
+      <section class="dge-set-editor">
+        <header class="dge-set-header">
+          <div>
+            <h2>${escapeHtml(set.name)}</h2>
+            <code>${escapeHtml(set.id)}</code>
+          </div>
+          <div class="dge-set-actions">
+            <button type="button" data-action="set-rename">名前変更</button>
+            <button type="button" data-action="set-delete" class="danger" ${deleteBlocked ? 'disabled' : ''}
+              title="${deleteBlocked ? escapeHtml(sets.length <= 1 ? '最後の素材セットは削除できません' : `${referenceCount}フロアから参照されています`) : '素材セットを削除'}">削除</button>
+          </div>
+        </header>
+        <div class="dge-assets-workspace">
+          <div class="dge-asset-card-grid">
+            ${ASSET_KEYS.map((key) => renderAssetCard(set, key)).join('')}
+          </div>
+          <aside class="dge-assets-preview-pane">
+            <div class="dge-mini-title">実機相当3Dプレビュー</div>
+            <canvas class="dge-assets-view" width="200" height="128"></canvas>
+            <p>${escapeHtml(state.current?.name || 'フロア未選択')} の視点で素材を確認します。</p>
+            ${renderGeneratedAssets()}
+          </aside>
+        </div>
+      </section>
+    ` : `
+      <div class="dge-assets-empty">
+        <p>素材セットがありません。「新規」で作成してください。</p>
+      </div>
+    `;
+
+    ui.assets.innerHTML = `
+      <div class="dge-assets-layout">
+        <aside class="dge-set-list-pane">
+          <header>
+            <strong>素材セット</strong>
+            <span>${sets.length}/${MAX_ASSET_SETS}</span>
+          </header>
+          <div class="dge-set-list">${setList || '<p>未定義</p>'}</div>
+          <div class="dge-set-list-actions">
+            <button type="button" data-action="set-new" ${sets.length >= MAX_ASSET_SETS ? 'disabled' : ''}>新規</button>
+            <button type="button" data-action="set-duplicate" ${!set || sets.length >= MAX_ASSET_SETS ? 'disabled' : ''}>複製</button>
+          </div>
+        </aside>
+        ${content}
+      </div>
+    `;
+    ui.assetsView = ui.assets.querySelector('.dge-assets-view');
+    if (ui.assetsView) ui.assetsView.getContext('2d').imageSmoothingEnabled = false;
+    const generation = ++state.assetCardsGeneration;
+    if (set) ASSET_KEYS.forEach((key) => void loadAssetCardPreview(set.id, key, generation));
+  }
+
+  function renderAssetCard(set, key) {
+    const meta = ASSET_META[key];
+    const ref = String(set.assets?.[key] || state.defaultAssets[key] || DEFAULT_ASSET_REFS[key]);
+    const isDefault = ref === String(state.defaultAssets[key] || DEFAULT_ASSET_REFS[key]);
+    return `
+      <article class="dge-asset-card" data-asset-card="${key}">
+        <header>
+          <strong>${escapeHtml(meta.label)}</strong>
+          <span>${meta.width}×${meta.height} / 16色${meta.opaque ? ' / 不透明' : ' / 透過可'}</span>
+        </header>
+        <div class="dge-asset-thumb"><img alt="${escapeHtml(meta.label)} preview"></div>
+        <label>保存先<input type="text" readonly value="${escapeHtml(ref)}" title="${escapeHtml(ref)}"></label>
+        <div class="dge-asset-facts">
+          <span data-asset-dimensions>読込中...</span>
+          <span data-asset-colors>- colors</span>
+        </div>
+        <div class="dge-asset-validation pending" data-asset-validation>検証中...</div>
+        <div class="dge-asset-actions">
+          <button type="button" data-action="asset-import" data-asset-key="${key}">${isDefault ? '選択' : '置換'}</button>
+          <button type="button" data-action="asset-default" data-asset-key="${key}" ${isDefault ? 'disabled' : ''}>既定に戻す</button>
+        </div>
+      </article>
+    `;
   }
 
   function renderGeneratedAssets() {
     const exportInfo = state.exportInfo || {};
     const tileCount = exportInfo.patternTileCount ? `${exportInfo.patternTileCount} tiles` : '-';
+    const setStats = Array.isArray(exportInfo.sets)
+      ? exportInfo.sets
+      : (Array.isArray(exportInfo.assetSets) ? exportInfo.assetSets : []);
+    const perSet = setStats.length ? `
+      <div class="dge-export-set-stats">
+        ${setStats.map((entry) => `<div>${escapeHtml(entry.name || entry.id || 'set')}: ${escapeHtml(entry.tileCount ?? entry.patternTileCount ?? '-')} tiles / ${escapeHtml(entry.budget?.totalBytes ?? entry.bytes ?? entry.romBytes ?? '-')} bytes${entry.cached ? ' (cache)' : ''}</div>`).join('')}
+      </div>
+    ` : '';
     const warnings = Array.isArray(exportInfo.warnings) && exportInfo.warnings.length
       ? `<div class="dge-export-warnings">${exportInfo.warnings.map((w) => `⚠ ${escapeHtml(w)}`).join('<br>')}</div>`
       : '';
@@ -729,6 +993,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         <div>Tileset: ${escapeHtml(shortProjectPath(exportInfo.patternTilesetPath || 'res/dungeon/generated/dungeon_view_tileset.png'))}</div>
         <div>Res: ${escapeHtml(shortProjectPath(exportInfo.resourcePath || 'res/resources.res'))}</div>
         <div>${escapeHtml(tileCount)}</div>
+        ${perSet}
         ${warnings}
       </div>
     `;
@@ -739,12 +1004,448 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     return String(filePath).startsWith(state.projectDir) ? String(filePath).slice(state.projectDir.length + 1) : filePath;
   }
 
+  function countSetReferences(setId) {
+    return state.floors.reduce((count, floor) => count + (floor.asset_set_id === setId ? 1 : 0), 0);
+  }
+
+  function makeUniqueSetId(name) {
+    const stem = String(name || 'set')
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 32) || `set-${Date.now().toString(36)}`;
+    const used = new Set(assetSets().map((set) => set.id));
+    let id = stem;
+    let suffix = 2;
+    while (used.has(id)) id = `${stem}-${suffix++}`;
+    return id;
+  }
+
+  async function createAssetSet({ duplicate = false } = {}) {
+    if (assetSets().length >= MAX_ASSET_SETS) {
+      setStatus(`素材セットは${MAX_ASSET_SETS}件までです`);
+      return;
+    }
+    if (!await guardUnsaved('新しい素材セットを作成')) return;
+    const source = duplicate ? selectedAssetSet() : null;
+    const initialName = source ? `${source.name} コピー` : `素材セット ${assetSets().length + 1}`;
+    const name = await requestTextModal(duplicate ? '素材セットを複製' : '素材セットを作成', 'セット名', initialName, duplicate ? '複製' : '作成');
+    if (!name) return;
+    const set = {
+      id: makeUniqueSetId(name),
+      name,
+      assets: cloneData(source?.assets || state.defaultAssets),
+    };
+    state.settings.asset_sets.push(normalizeAssetSetForUi(set, assetSets().length));
+    state.assetEditorSetId = set.id;
+    setDirty(true);
+    setStatus(`素材セット「${name}」を追加しました`);
+    renderAll();
+    void loadTexturesForAssetEditor();
+  }
+
+  async function renameAssetSet() {
+    const set = selectedAssetSet();
+    if (!set) return;
+    const name = await requestTextModal('素材セット名を変更', 'セット名', set.name, '変更');
+    if (!name || name === set.name) return;
+    set.name = name;
+    setDirty(true);
+    setStatus(`素材セット名を「${name}」へ変更しました`);
+    renderAll();
+  }
+
+  function deleteAssetSet() {
+    const set = selectedAssetSet();
+    if (!set) return;
+    if (assetSets().length <= 1) {
+      setStatus('最後の素材セットは削除できません');
+      return;
+    }
+    const references = countSetReferences(set.id);
+    if (references > 0) {
+      setStatus(`${references}フロアから参照されているため削除できません`);
+      return;
+    }
+    state.settings.asset_sets = assetSets().filter((entry) => entry.id !== set.id);
+    state.assetEditorSetId = firstAssetSet()?.id || '';
+    state.assetTextures = null;
+    state.assetViewModel = null;
+    setDirty(true);
+    setStatus(`素材セット「${set.name}」を削除しました`);
+    renderAll();
+    void loadTexturesForAssetEditor();
+  }
+
+  async function selectAssetEditorSet(setId) {
+    if (!assetSetById(setId) || setId === state.assetEditorSetId) return;
+    if (!await guardUnsaved('別の素材セットへ切り替え')) {
+      renderAssets();
+      renderPreview();
+      return;
+    }
+    state.assetEditorSetId = setId;
+    state.assetTextures = null;
+    state.assetViewModel = null;
+    renderAll();
+    await loadTexturesForAssetEditor();
+  }
+
+  function requestTextModal(title, label, initialValue, submitText) {
+    return new Promise((resolve) => {
+      const html = `
+        <header class="dge-modal-header"><h2>${escapeHtml(title)}</h2></header>
+        <form class="dge-modal-form">
+          <label>${escapeHtml(label)}<input type="text" value="${escapeHtml(initialValue)}" maxlength="80" required></label>
+          <div class="dge-modal-actions">
+            <button type="button" data-decision="cancel">キャンセル</button>
+            <button type="submit" class="primary">${escapeHtml(submitText)}</button>
+          </div>
+        </form>
+      `;
+      const modal = api.createModal({
+        id: `${plugin.id}-text-modal`,
+        panelClassName: 'app-panel app-panel-sm dge-modal-panel',
+        html,
+      });
+      const form = modal.panel.querySelector('form');
+      const input = modal.panel.querySelector('input');
+      let finished = false;
+      const onKeyDown = (event) => {
+        if (event.key === 'Escape') finish(null);
+      };
+      const finish = (value) => {
+        if (finished) return;
+        finished = true;
+        document.removeEventListener('keydown', onKeyDown);
+        modal.close();
+        modal.destroy();
+        resolve(value);
+      };
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        finish(String(input.value || '').trim() || null);
+      }, { once: true });
+      modal.panel.querySelector('[data-decision="cancel"]')?.addEventListener('click', () => finish(null), { once: true });
+      modal.modal.querySelector('[data-modal-close]')?.addEventListener('click', () => finish(null), { once: true });
+      document.addEventListener('keydown', onKeyDown);
+      modal.open();
+      setTimeout(() => { input.focus(); input.select(); }, 0);
+    });
+  }
+
+  async function loadAssetCardPreview(setId, key, generation) {
+    const set = assetSetById(setId);
+    const meta = ASSET_META[key];
+    if (!set || !meta) return;
+    const ref = String(set.assets?.[key] || state.defaultAssets[key] || DEFAULT_ASSET_REFS[key]);
+    const parsed = parseTextureRef(ref);
+    const projectDir = await refreshProjectDir();
+    const sourcePath = resolveAssetPath(parsed.path, projectDir);
+    const read = sourcePath ? await api.electronAPI?.readFileAsDataUrl?.(sourcePath).catch(() => null) : null;
+    if (!read?.ok || !read.dataUrl) {
+      if (parsed.tag) {
+        const texture = core.makeFallbackTexture(meta.kind);
+        const pixels = inspectPixels(texture.data);
+        updateAssetCard(setId, key, generation, {
+          dataUrl: textureToDataUrl(texture),
+          width: texture.width,
+          height: texture.height,
+          colors: pixels.colors,
+          legacy: true,
+          status: `互換参照 #${parsed.tag}（既定描画へフォールバック）`,
+        });
+        return;
+      }
+      updateAssetCard(setId, key, generation, { error: read?.error || '画像を読み込めません' });
+      return;
+    }
+    try {
+      const image = await loadImage(read.dataUrl);
+      if (parsed.tag) {
+        const layout = await loadAtlasLayout(sourcePath);
+        const cropped = cropAtlasTexture(image, parsed.tag, layout);
+        const texture = cropped || core.makeFallbackTexture(meta.kind);
+        const pixels = inspectPixels(texture.data);
+        updateAssetCard(setId, key, generation, {
+          dataUrl: textureToDataUrl(texture),
+          width: texture.width,
+          height: texture.height,
+          colors: pixels.colors,
+          legacy: true,
+          status: cropped ? `互換アトラス #${parsed.tag}` : `互換アトラス #${parsed.tag}（既定描画へフォールバック）`,
+        });
+        return;
+      }
+      const inspection = await inspectImageDataUrl(read.dataUrl);
+      const validation = validateAssetInspection(inspection, meta);
+      updateAssetCard(setId, key, generation, {
+        dataUrl: read.dataUrl,
+        width: inspection.width,
+        height: inspection.height,
+        colors: inspection.colors,
+        ok: validation.ok,
+        status: validation.message,
+      });
+    } catch (err) {
+      updateAssetCard(setId, key, generation, { error: String(err?.message || err) });
+    }
+  }
+
+  function updateAssetCard(setId, key, generation, details) {
+    if (generation !== state.assetCardsGeneration || selectedAssetSet()?.id !== setId) return;
+    const card = ui.assets.querySelector(`[data-asset-card="${key}"]`);
+    if (!card) return;
+    const image = card.querySelector('img');
+    const dimensions = card.querySelector('[data-asset-dimensions]');
+    const colors = card.querySelector('[data-asset-colors]');
+    const validation = card.querySelector('[data-asset-validation]');
+    if (details.dataUrl) image.src = details.dataUrl;
+    else image.removeAttribute('src');
+    dimensions.textContent = details.width && details.height ? `${details.width}×${details.height}` : '-';
+    colors.textContent = Number.isFinite(details.colors) ? `${details.colors} colors` : '- colors';
+    validation.className = `dge-asset-validation ${details.error ? 'error' : (details.legacy || details.ok ? 'ok' : 'error')}`;
+    validation.textContent = details.error || details.status || '検証できません';
+  }
+
+  function textureToDataUrl(texture) {
+    const canvas = document.createElement('canvas');
+    canvas.width = texture.width;
+    canvas.height = texture.height;
+    const ctx = canvas.getContext('2d');
+    const image = ctx.createImageData(texture.width, texture.height);
+    image.data.set(texture.data);
+    ctx.putImageData(image, 0, 0);
+    return canvas.toDataURL('image/png');
+  }
+
+  async function importAssetForSet(key) {
+    const set = selectedAssetSet();
+    const meta = ASSET_META[key];
+    if (!set || !meta) return;
+    const picked = await api.electronAPI.pickFile({
+      title: `${meta.label}画像を選択`,
+      properties: ['openFile'],
+      filters: [
+        { name: 'PNG / BMP', extensions: ['png', 'bmp'] },
+        { name: 'PNG', extensions: ['png'] },
+        { name: 'BMP', extensions: ['bmp'] },
+      ],
+    });
+    if (picked?.canceled || !picked?.sourcePath) return;
+
+    const pipeline = api.capabilities.get('image-import-pipeline')
+      || await api.capabilities.require?.('image-import-pipeline', 1000);
+    if (!pipeline?.convertToIndexed16) {
+      setStatus('画像インポート機能が無効です（Asset Manager / Resize / Quantize を確認してください）');
+      return;
+    }
+
+    setStatus(`${meta.label}を変換中...`);
+    const converted = await pipeline.convertToIndexed16({
+      sourcePath: picked.sourcePath,
+      targetSize: { width: meta.width, height: meta.height },
+    }).catch((err) => ({ canceled: true, warning: String(err?.message || err) }));
+    if (converted?.canceled) {
+      setStatus(converted?.warning || '画像変換をキャンセルしました');
+      return;
+    }
+
+    let ext = String(converted?.targetExtension || '.png').trim().toLowerCase();
+    if (!ext.startsWith('.')) ext = `.${ext}`;
+    if (ext !== '.png') {
+      setStatus(`保存形式が不正です: ${ext}（8bit Indexed PNGのみ使用できます）`);
+      return;
+    }
+
+    let dataUrl = converted?.convertedDataUrl || converted?.originalDataUrl || '';
+    if (!dataUrl) {
+      const read = await api.electronAPI.readFileAsDataUrl(picked.sourcePath).catch(() => null);
+      dataUrl = read?.dataUrl || '';
+    }
+    if (!dataUrl) {
+      setStatus('変換画像を読み込めません');
+      return;
+    }
+
+    try {
+      let inspection = await inspectImageDataUrl(dataUrl);
+      if (!isRequiredIndexedPng(inspection.png)) {
+        const encoder = api.capabilities.get('image-quantize')?.imageDataToIndexedPng || api.imageDataToIndexedPng;
+        if (!encoder) throw new Error('8bit Indexed PNGへ再エンコードできません');
+        dataUrl = await encoder(inspection.imageData);
+        inspection = await inspectImageDataUrl(dataUrl);
+      }
+      const validation = validateAssetInspection(inspection, meta);
+      if (!validation.ok) throw new Error(validation.message);
+
+      const safeSetId = safePathPart(set.id);
+      const targetSubdir = `dungeon/textures/${safeSetId}`;
+      const targetFileName = `${meta.fileName}${ext}`;
+      const written = await api.electronAPI.writeAssetFile({
+        sourcePath: picked.sourcePath,
+        targetSubdir,
+        targetFileName,
+        dataUrl,
+      });
+      if (!written?.ok) throw new Error(written?.error || '画像の保存に失敗しました');
+      if (selectedAssetSet()?.id !== set.id) return;
+      const relativePath = normalizeSavedAssetPath(written.relativePath || `${targetSubdir}/${targetFileName}`);
+      set.assets[key] = relativePath;
+      setDirty(true);
+      setStatus(`${meta.label}を設定しました${converted.warning ? ` / ${converted.warning}` : ''}`);
+      refreshTextureConsumers(set.id);
+    } catch (err) {
+      setStatus(`${meta.label}: ${String(err?.message || err)}`);
+      renderAssets();
+      renderPreview();
+    }
+  }
+
+  function resetAssetToDefault(key) {
+    const set = selectedAssetSet();
+    if (!set || !ASSET_META[key]) return;
+    set.assets[key] = String(state.defaultAssets[key] || DEFAULT_ASSET_REFS[key]);
+    setDirty(true);
+    setStatus(`${ASSET_META[key].label}を既定素材へ戻しました`);
+    refreshTextureConsumers(set.id);
+  }
+
+  function refreshTextureConsumers(changedSetId) {
+    clearTextureCache();
+    state.viewModel = null;
+    state.assetViewModel = null;
+    state.assetTextures = null;
+    renderAll();
+    if (state.current?.asset_set_id === changedSetId) void loadTexturesForCurrent();
+    void loadTexturesForAssetEditor();
+  }
+
+  function normalizeSavedAssetPath(value) {
+    return String(value || '')
+      .replace(/\\/g, '/')
+      .replace(/^\.\//, '')
+      .replace(/^res\//i, '');
+  }
+
+  function safePathPart(value) {
+    const raw = String(value || '').toLowerCase();
+    const safe = raw
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 40) || 'set';
+    if (safe === raw && /^[a-z0-9_-]+$/.test(raw)) return safe;
+    let hash = 2166136261;
+    for (let index = 0; index < raw.length; index++) {
+      hash ^= raw.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `${safe}-${(hash >>> 0).toString(16).padStart(8, '0').slice(0, 8)}`;
+  }
+
+  function inspectPixels(data) {
+    const colors = new Set();
+    let hasTransparency = false;
+    for (let index = 0; index < data.length; index += 4) {
+      const alpha = data[index + 3];
+      if (alpha < 255) hasTransparency = true;
+      colors.add(`${data[index]},${data[index + 1]},${data[index + 2]},${alpha}`);
+    }
+    return { colors: colors.size, hasTransparency };
+  }
+
+  async function inspectImageDataUrl(dataUrl) {
+    const image = await loadImage(dataUrl);
+    const width = image.naturalWidth || image.width;
+    const height = image.naturalHeight || image.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(image, 0, 0);
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const pixels = inspectPixels(imageData.data);
+    const png = inspectPng(dataUrl);
+    return {
+      width,
+      height,
+      colors: Math.max(pixels.colors, Number(png?.paletteEntries || 0)),
+      hasTransparency: pixels.hasTransparency,
+      imageData,
+      png,
+    };
+  }
+
+  function validateAssetInspection(inspection, meta) {
+    const errors = [];
+    if (inspection.width !== meta.width || inspection.height !== meta.height) {
+      errors.push(`サイズは${meta.width}×${meta.height}が必要です（現在${inspection.width}×${inspection.height}）`);
+    }
+    if (inspection.colors > 16) errors.push(`色数が16色を超えています（${inspection.colors}色）`);
+    if (meta.opaque && inspection.hasTransparency) errors.push('透過ピクセルは使用できません');
+    if (!isRequiredIndexedPng(inspection.png)) errors.push('8bit・非interlaceのIndexed PNGではありません');
+    return {
+      ok: errors.length === 0,
+      message: errors.length ? errors.join(' / ') : '有効: 8bit Indexed PNG',
+    };
+  }
+
+  function isRequiredIndexedPng(png) {
+    return Boolean(png
+      && png.bitDepth === 8
+      && png.colorType === 3
+      && png.interlace === 0
+      && png.paletteEntries > 0
+      && png.paletteEntries <= 16);
+  }
+
+  function inspectPng(dataUrl) {
+    try {
+      const comma = String(dataUrl || '').indexOf(',');
+      if (comma < 0 || !/image\/png/i.test(String(dataUrl).slice(0, comma))) return null;
+      const binary = atob(String(dataUrl).slice(comma + 1));
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      if (bytes.length < 33 || bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71) return null;
+      const result = {
+        width: readU32Be(bytes, 16),
+        height: readU32Be(bytes, 20),
+        bitDepth: bytes[24],
+        colorType: bytes[25],
+        interlace: bytes[28],
+        paletteEntries: 0,
+      };
+      let offset = 8;
+      while (offset + 12 <= bytes.length) {
+        const length = readU32Be(bytes, offset);
+        const type = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
+        if (type === 'PLTE') result.paletteEntries = Math.floor(length / 3);
+        offset += 12 + length;
+        if (type === 'IDAT' || type === 'IEND') break;
+      }
+      return result;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function readU32Be(bytes, offset) {
+    return (((bytes[offset] << 24) >>> 0)
+      | (bytes[offset + 1] << 16)
+      | (bytes[offset + 2] << 8)
+      | bytes[offset + 3]) >>> 0;
+  }
+
   function renderAll() {
     renderToolButtons();
     renderFloorSelect();
+    renderFloorAssetSetSelect();
     renderMap();
-    renderPreview();
     renderAssets();
+    renderPreview();
   }
 
   /* ------------------------------------------------------------------
@@ -823,14 +1524,17 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   }
 
   /* 階段バンプ: 前のフロアの下り階段の隣 / 次のフロアの上り階段の隣へ */
-  function previewGoStairs(kind) {
+  async function previewGoStairs(kind) {
     const currentOrder = Number(state.current?.order || 1);
     const targetOrder = kind === 'up' ? currentOrder - 1 : currentOrder + 1;
-    const target = state.floors.find((floor) => Number(floor.order) === targetOrder);
+    let target = state.floors.find((floor) => Number(floor.order) === targetOrder);
     if (!target) {
       setStatus(kind === 'up' ? 'これより上のフロアはありません' : 'これより下のフロアはありません');
       return;
     }
+    if (!await guardUnsaved('階段で別フロアへ移動する')) return;
+    target = state.floors.find((floor) => Number(floor.order) === targetOrder);
+    if (!target) return;
     const arrival = core.stairsArrival(target, kind === 'up' ? 'down' : 'up');
     state.current = target;
     state.preview = arrival
@@ -864,7 +1568,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         const cell = cellAt(state.preview.x, state.preview.y);
         const target = cellAt(state.preview.x + dir.dx, state.preview.y + dir.dy);
         if (cell && target && !(cell.walls & dir.bit) && core.cellIsSolid(target)) {
-          previewGoStairs(target.stairs);
+          void previewGoStairs(target.stairs);
           return;
         }
       }
@@ -911,52 +1615,162 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
    * フロア CRUD / フック連携
    * ------------------------------------------------------------------ */
 
-  async function refresh() {
+  function captureCommittedState() {
+    state.committed = {
+      floors: cloneData(state.floors),
+      settings: cloneData(state.settings),
+      currentId: state.current?.id || '',
+      assetEditorSetId: state.assetEditorSetId,
+    };
+  }
+
+  function restoreCommittedState() {
+    if (!state.committed) return;
+    state.settings = cloneData(state.committed.settings);
+    state.floors = cloneData(state.committed.floors);
+    state.current = state.floors.find((floor) => floor.id === state.committed.currentId)
+      || state.floors[0]
+      || blankFloor(1);
+    state.assetEditorSetId = assetSetById(state.committed.assetEditorSetId)
+      ? state.committed.assetEditorSetId
+      : (state.current.asset_set_id || firstAssetSet()?.id || '');
+    clearTextureCache();
+    state.textures = null;
+    state.assetTextures = null;
+    invalidateViewModel();
+    setDirty(false);
+    syncForm();
+    void loadTexturesForCurrent();
+    void loadTexturesForAssetEditor();
+  }
+
+  function askUnsavedDecision(actionLabel) {
+    return new Promise((resolve) => {
+      const html = `
+        <header class="dge-modal-header"><h2>未保存の変更</h2></header>
+        <div class="dge-modal-form">
+          <p>${escapeHtml(actionLabel)}前に、変更を保存するか破棄してください。</p>
+          <div class="dge-modal-actions">
+            <button type="button" data-decision="cancel">キャンセル</button>
+            <button type="button" data-decision="discard" class="danger">破棄</button>
+            <button type="button" data-decision="save" class="primary">保存</button>
+          </div>
+        </div>
+      `;
+      const modal = api.createModal({
+        id: `${plugin.id}-unsaved-modal`,
+        panelClassName: 'app-panel app-panel-sm dge-modal-panel',
+        html,
+      });
+      let finished = false;
+      const onKeyDown = (event) => {
+        if (event.key === 'Escape') finish('cancel');
+      };
+      const finish = (decision) => {
+        if (finished) return;
+        finished = true;
+        document.removeEventListener('keydown', onKeyDown);
+        modal.close();
+        modal.destroy();
+        resolve(decision);
+      };
+      modal.panel.querySelectorAll('[data-decision]').forEach((button) => {
+        button.addEventListener('click', () => finish(button.dataset.decision || 'cancel'), { once: true });
+      });
+      modal.modal.querySelector('[data-modal-close]')?.addEventListener('click', () => finish('cancel'), { once: true });
+      document.addEventListener('keydown', onKeyDown);
+      modal.open();
+    });
+  }
+
+  async function guardUnsaved(actionLabel) {
+    if (!state.dirty) return true;
+    const decision = await askUnsavedDecision(actionLabel);
+    if (decision === 'cancel') return false;
+    if (decision === 'save') return saveCurrent();
+    restoreCommittedState();
+    return true;
+  }
+
+  async function refresh({ guard = false, preferredFloorId = '' } = {}) {
+    if (guard && !await guardUnsaved('再読み込みする')) return false;
+    const previousFloorId = preferredFloorId || state.current?.id || '';
     state.projectDir = '';
     await refreshProjectDir();
     const result = await api.plugins.invokeHook(plugin.id, 'listDungeonFloors', {});
     if (!result?.ok) {
       setStatus(result?.error || '読み込みに失敗しました');
-      return;
+      return false;
     }
     state.defaultAssets = { ...DEFAULT_ASSET_REFS, ...(result.defaultAssets || {}) };
+    state.settings = normalizeSettingsForUi(result.settings);
     state.floors = (result.floors || []).map(normalizeFloorForUi);
-    state.settings = result.settings || null;
-    state.current = state.floors[0] || blankFloor(1);
+    state.current = state.floors.find((floor) => floor.id === previousFloorId) || state.floors[0] || blankFloor(1);
+    state.assetEditorSetId = assetSetById(state.current.asset_set_id)
+      ? state.current.asset_set_id
+      : (firstAssetSet()?.id || '');
+    clearTextureCache();
+    state.textures = null;
+    state.assetTextures = null;
     invalidateViewModel();
     syncForm();
-    await loadTexturesForCurrent();
+    await Promise.all([loadTexturesForCurrent(), loadTexturesForAssetEditor()]);
     state.exportInfo = null;
     setDirty(false);
+    captureCommittedState();
     setStatus(`${state.floors.length} floor`);
+    return true;
   }
 
   async function saveCurrent() {
-    if (!state.current) return;
+    if (!state.current) return false;
     readFormIntoCurrent();
-    const result = await api.plugins.invokeHook(plugin.id, 'saveDungeonFloor', { floor: state.current });
+    const floor = cloneData(state.current);
+    delete floor.assets;
+    const result = await api.plugins.invokeHook(plugin.id, 'saveDungeonState', {
+      floor,
+      settings: cloneData(state.settings),
+    });
     if (!result?.ok) {
       setStatus(result?.error || '保存に失敗しました');
-      return;
+      return false;
     }
-    state.current = normalizeFloorForUi(result.floor);
-    const index = state.floors.findIndex((floor) => floor.id === state.current.id);
-    if (index >= 0) state.floors[index] = state.current;
-    else state.floors.push(state.current);
+    state.settings = normalizeSettingsForUi(result.settings || state.settings);
+    if (Array.isArray(result.floors)) {
+      state.floors = result.floors.map(normalizeFloorForUi);
+    }
+    const savedFloor = normalizeFloorForUi(result.floor || floor);
+    const index = state.floors.findIndex((entry) => entry.id === savedFloor.id);
+    if (index >= 0) state.floors[index] = savedFloor;
+    else state.floors.push(savedFloor);
+    state.current = state.floors.find((entry) => entry.id === savedFloor.id) || savedFloor;
+    if (!assetSetById(state.assetEditorSetId)) state.assetEditorSetId = state.current.asset_set_id || firstAssetSet()?.id || '';
     setDirty(false);
     state.exportInfo = result.export || state.exportInfo;
+    captureCommittedState();
     setStatus('保存しました');
     syncForm();
-    void loadTexturesForCurrent();
+    void Promise.all([loadTexturesForCurrent(), loadTexturesForAssetEditor()]);
+    return true;
   }
 
   async function createFloor() {
+    if (!await guardUnsaved('新しいフロアを作成する')) return;
     const floor = blankFloor(state.floors.length + 1);
-    const result = await api.plugins.invokeHook(plugin.id, 'saveDungeonFloor', { create: true, floor });
-    if (result?.ok) await refresh();
+    const result = await api.plugins.invokeHook(plugin.id, 'saveDungeonState', {
+      create: true,
+      floor,
+      settings: cloneData(state.settings),
+    });
+    if (!result?.ok) {
+      setStatus(result?.error || 'フロア作成に失敗しました');
+      return;
+    }
+    await refresh({ preferredFloorId: result.floor?.id || '' });
   }
 
   async function deleteFloor() {
+    if (!await guardUnsaved('フロアを削除する')) return;
     if (!state.current?.id) return;
     const result = await api.plugins.invokeHook(plugin.id, 'deleteDungeonFloor', { id: state.current.id });
     if (result?.ok) await refresh();
@@ -964,26 +1778,32 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   }
 
   async function moveFloor(direction) {
+    if (!await guardUnsaved('フロア順を変更する')) return;
     if (!state.current?.id) return;
+    const id = state.current.id;
     const result = await api.plugins.invokeHook(plugin.id, 'moveDungeonFloor', { id: state.current.id, direction });
-    if (result?.ok) await refresh();
+    if (result?.ok) await refresh({ preferredFloorId: id });
   }
 
   async function generateFloor() {
+    if (!await guardUnsaved('ランダムフロアを作成する')) return;
     const width = Number(ui.width.value || state.current?.width || 12);
     const height = Number(ui.height.value || state.current?.height || 12);
-    const result = await api.plugins.invokeHook(plugin.id, 'generateDungeonFloor', { width, height, name: ui.name.value || undefined });
+    const result = await api.plugins.invokeHook(plugin.id, 'generateDungeonFloor', {
+      width,
+      height,
+      name: ui.name.value || undefined,
+      asset_set_id: state.current?.asset_set_id || firstAssetSet()?.id || '',
+    });
     if (!result?.ok) {
       setStatus(result?.error || '生成に失敗しました');
       return;
     }
-    await refresh();
-    state.current = state.floors.find((floor) => floor.id === result.floor.id) || state.current;
-    syncForm();
+    await refresh({ preferredFloorId: result.floor?.id || '' });
   }
 
   async function exportAssets() {
-    if (state.dirty) await saveCurrent();
+    if (state.dirty && !await saveCurrent()) return;
     setStatus('SGDKアセット生成中...');
     const result = await api.plugins.invokeHook(plugin.id, 'exportDungeonData', {});
     if (!result?.ok) {
@@ -1001,22 +1821,28 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     ui.tabs.forEach((button) => button.classList.toggle('active', button.dataset.tab === tab));
     ui.panels.forEach((panel) => panel.classList.toggle('active', panel.dataset.panel === tab));
     renderAll();
+    if (tab === 'assets') void loadTexturesForAssetEditor();
   }
 
   function observePageActivation() {
     state.activationObserver = new MutationObserver(() => {
       const active = root.classList.contains('active');
-      if (active && !state.wasActive) void refresh();
+      if (active && !state.wasActive) void refresh({ guard: true });
       state.wasActive = active;
     });
     state.activationObserver.observe(root, { attributes: true, attributeFilter: ['class'] });
   }
 
   root.addEventListener('click', (event) => {
-    const action = event.target?.dataset?.action;
-    const tab = event.target?.dataset?.tab;
-    const tool = event.target?.dataset?.tool;
-    const preview = event.target?.dataset?.preview;
+    const actionTarget = event.target?.closest?.('[data-action]');
+    const tabTarget = event.target?.closest?.('[data-tab]');
+    const toolTarget = event.target?.closest?.('[data-tool]');
+    const previewTarget = event.target?.closest?.('[data-preview]');
+    const setTarget = event.target?.closest?.('[data-set-select]');
+    const action = actionTarget?.dataset?.action;
+    const tab = tabTarget?.dataset?.tab;
+    const tool = toolTarget?.dataset?.tool;
+    const preview = previewTarget?.dataset?.preview;
     if (tab) switchTab(tab);
     if (tool) {
       state.tool = tool;
@@ -1030,36 +1856,61 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (action === 'move-down') void moveFloor('down');
     if (action === 'generate') void generateFloor();
     if (action === 'export-assets') void exportAssets();
+    if (action === 'set-new') void createAssetSet();
+    if (action === 'set-duplicate') void createAssetSet({ duplicate: true });
+    if (action === 'set-rename') void renameAssetSet();
+    if (action === 'set-delete') deleteAssetSet();
+    if (action === 'asset-import') void importAssetForSet(actionTarget.dataset.assetKey);
+    if (action === 'asset-default') resetAssetToDefault(actionTarget.dataset.assetKey);
+    if (setTarget?.dataset?.setSelect) void selectAssetEditorSet(setTarget.dataset.setSelect);
   });
   ui.map.addEventListener('click', handleMapClick);
-  ui.floorSelect.addEventListener('change', () => {
-    state.current = state.floors.find((floor) => floor.id === ui.floorSelect.value) || state.floors[0] || null;
+  ui.floorSelect.addEventListener('change', async () => {
+    const requestedId = ui.floorSelect.value;
+    const previousId = state.current?.id || '';
+    ui.floorSelect.value = previousId;
+    if (!await guardUnsaved('別のフロアへ切り替える')) return;
+    state.current = state.floors.find((floor) => floor.id === requestedId) || state.floors[0] || null;
+    if (!state.current) return;
+    state.assetEditorSetId = assetSetById(state.current.asset_set_id)
+      ? state.current.asset_set_id
+      : (firstAssetSet()?.id || '');
+    state.textures = null;
+    state.assetTextures = null;
     invalidateViewModel();
     syncForm();
-    void loadTexturesForCurrent();
+    void Promise.all([loadTexturesForCurrent(), loadTexturesForAssetEditor()]);
+  });
+  ui.floorAssetSet.addEventListener('change', () => {
+    if (!state.current) return;
+    state.current.asset_set_id = ui.floorAssetSet.value;
+    delete state.current.assets;
+    state.assetEditorSetId = state.current.asset_set_id;
+    clearTextureCache();
+    state.textures = null;
+    state.assetTextures = null;
+    invalidateViewModel();
+    setDirty(true);
+    setStatus(`素材セットを「${assetSetById(state.current.asset_set_id)?.name || state.current.asset_set_id}」へ変更しました`);
+    renderAll();
+    void Promise.all([loadTexturesForCurrent(), loadTexturesForAssetEditor()]);
   });
   [ui.name, ui.width, ui.height].forEach((input) => input.addEventListener('input', () => {
     readFormIntoCurrent();
     setDirty(true);
     renderAll();
   }));
-  ui.assets.addEventListener('input', (event) => {
-    const key = event.target?.dataset?.asset;
-    if (!key || !state.current) return;
-    state.current.assets[key] = event.target.value;
-    setDirty(true);
-    void loadTexturesForCurrent();
-  });
   root.addEventListener('keydown', (event) => {
+    if (event.target?.matches?.('input, select, textarea, button')) return;
     if (event.key === 'ArrowUp') movePreview('forward');
     if (event.key === 'ArrowDown') movePreview('back');
     if (event.key === 'ArrowLeft') movePreview('turn-left');
     if (event.key === 'ArrowRight') movePreview('turn-right');
   });
 
-  registerCapability('dungeon-game-editor', { root, refresh });
+  registerCapability('dungeon-game-editor', { root, refresh: () => refresh({ guard: true }) });
   observePageActivation();
-  void refresh();
+  void refresh({ guard: false });
 
   return {
     deactivate() {

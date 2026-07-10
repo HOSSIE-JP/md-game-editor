@@ -70,8 +70,14 @@ test('dungeon plugins declare MD editor and builder capabilities', () => {
   assert.equal(editor.hasRenderer, true);
   assert.equal(editor.renderer.page, 'dungeon-game-editor');
   assert.deepEqual(editor.renderer.capabilities, ['page', 'dungeon-game-editor']);
+  assert.equal(editor.version, '1.1.0');
+  assert.ok(editor.permissions.includes('dialog.openFile'));
+  assert.ok(editor.dependencies.includes('asset-manager'));
+  assert.ok(editor.dependencies.includes('image-resize-converter'));
+  assert.ok(editor.dependencies.includes('image-quantize-converter'));
   assert.deepEqual(editor.mainApi.hooks, [
     'listDungeonFloors',
+    'saveDungeonState',
     'saveDungeonFloor',
     'deleteDungeonFloor',
     'moveDungeonFloor',
@@ -87,6 +93,17 @@ test('dungeon plugins declare MD editor and builder capabilities', () => {
   assert.deepEqual(builder.dependencies, ['dungeon-game-editor']);
   assert.equal(builder.roles.length, 1);
   assert.equal(builder.roles[0].id, 'builder');
+
+  const rendererSource = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'dungeon-game-editor', 'renderer.js'), 'utf-8');
+  assert.match(rendererSource, /saveDungeonState/);
+  assert.match(rendererSource, /pickFile/);
+  assert.match(rendererSource, /convertToIndexed16/);
+  assert.match(rendererSource, /targetExtension/);
+  assert.match(rendererSource, /writeAssetFile/);
+  assert.match(rendererSource, /isRequiredIndexedPng/);
+  assert.match(rendererSource, /textureCacheEpoch/);
+  assert.match(rendererSource, /guardUnsaved/);
+  assert.match(rendererSource, /core\.compositeView/);
 });
 
 test('dungeon render core is UMD and keeps compose == direct render', () => {
@@ -141,6 +158,9 @@ test('dungeon render core is UMD and keeps compose == direct render', () => {
   assert.equal(palette.length, 16);
   assert.deepEqual([palette[0].r, palette[0].g, palette[0].b], [0, 0, 0]);
   const bands = core.buildBandTables(palette, textures);
+  assert.equal(bands.length, core.VIEW_W * core.VIEW_H);
+  const backdrop = core.buildBackdropSheet(palette, textures);
+  assert.deepEqual([backdrop.width, backdrop.height], [32, 64]);
   const pool = core.makeTilePool();
   const frames = core.buildFrames(settings);
 
@@ -157,7 +177,8 @@ test('dungeon render core is UMD and keeps compose == direct render', () => {
     assert.ok(bake.stats.nodeWords < 32768);
     for (const [px, py, dir] of [[2, 2, 1], [5, 5, 0], [7, 3, 2], [3, 7, 3]]) {
       const states = core.sampleEdgeStates(floor, px, py, dir, defs);
-      const composed = core.assembleTiles(bake, core.composeFromFrame(bake, states), pool);
+      const foreground = core.assembleTiles(bake, core.composeFromFrame(bake, states), pool);
+      const composed = core.compositeView(core.buildBackground(bands), foreground);
       const direct = core.renderView(pose, defs, states, textures, palette, bands);
       let diff = 0;
       for (let i = 0; i < composed.length; i++) {
@@ -196,7 +217,8 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.equal(listed.maxSize, 20);
   assert.equal(listed.floors.length, 1);
   assert.equal(listed.settings.turn_frames, 3);
-  assert.match(listed.floors[0].assets.door_texture, /#door$/);
+  assert.equal(listed.floors[0].asset_set_id, 'default');
+  assert.match(listed.settings.asset_sets[0].assets.door_texture, /#door$/);
 
   const exported = plugin.exportDungeonData({}, context);
   assert.equal(exported.ok, true);
@@ -204,10 +226,13 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.equal(fs.existsSync(path.join(projectDir, 'src', 'dungeon_data.c')), true);
   assert.equal(fs.existsSync(path.join(projectDir, 'inc', 'dungeon_patterns.h')), true);
   assert.equal(fs.existsSync(path.join(projectDir, 'src', 'dungeon_patterns.c')), true);
-  assert.equal(fs.existsSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_view_tileset.png')), true);
-  assert.equal(fs.existsSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_bb_chest.png')), true);
-  assert.equal(fs.existsSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_bb_stairs_up.png')), true);
-  assert.equal(fs.existsSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_bb_stairs_down.png')), true);
+  assert.equal(exported.assetSets.length, 1);
+  const generatedSet = exported.assetSets[0];
+  assert.equal(fs.existsSync(path.join(projectDir, 'res', generatedSet.paths.tileset)), true);
+  assert.equal(fs.existsSync(path.join(projectDir, 'res', generatedSet.paths.background)), true);
+  assert.equal(fs.existsSync(path.join(projectDir, 'res', generatedSet.paths.billboards.chest)), true);
+  assert.equal(fs.existsSync(path.join(projectDir, 'res', generatedSet.paths.billboards.stairs_up)), true);
+  assert.equal(fs.existsSync(path.join(projectDir, 'res', generatedSet.paths.billboards.stairs_down)), true);
   /* 旧全画面パターン atlas は生成されない */
   assert.equal(fs.existsSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_view_map.png')), false);
 
@@ -226,11 +251,14 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.match(patternHeader, /#define DUN_MOVE_EDGE_COUNT \d+/);
   assert.match(patternHeader, /#define DUN_TURN_EDGE_COUNT \d+/);
   assert.match(patternHeader, /#define DUN_EDGE_STATE_COUNT 5/);
+  assert.match(patternHeader, /#define DUN_VIEW_SET_COUNT 1/);
+  assert.match(patternHeader, /#define DUN_BACKGROUND_TILE_COUNT 32/);
   assert.match(patternHeader, /#define DUN_TILESET_TILE_COUNT \d+/);
   assert.match(patternHeader, /#define DUN_BB_CELL_COUNT \d+/);
   assert.match(patternHeader, /typedef struct \{ s8 dd; s8 dl; u8 face; \} DunEdgeDef;/);
   assert.match(patternHeader, /DunFrameTable/);
-  assert.match(patternHeader, /extern const u16 dun_palette_dark\[16\];/);
+  assert.match(patternHeader, /typedef struct \{[\s\S]*const TileSet \*background_tileset;[\s\S]*\} DunViewSet;/);
+  assert.match(patternHeader, /extern const DunViewSet dun_view_sets\[DUN_VIEW_SET_COUNT\];/);
   assert.doesNotMatch(patternHeader, /DUN_WALL_VIEW_COUNT/);
   assert.doesNotMatch(patternHeader, /DUN_VIEW_PATTERN_COLUMNS/);
   assert.doesNotMatch(patternHeader, /dungeon_view_pattern_count/);
@@ -238,12 +266,13 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   const patternSource = fs.readFileSync(path.join(projectDir, 'src', 'dungeon_patterns.c'), 'utf-8');
   assert.match(patternSource, /const DunEdgeDef dun_edges_move\[/);
   assert.match(patternSource, /const DunEdgeDef dun_edges_turn_mirrored\[/);
-  assert.match(patternSource, /const DunFrameTable dun_frame_static/);
-  assert.match(patternSource, /const DunFrameTable dun_frames_fwd\[DUN_FWD_FRAMES\]/);
-  assert.match(patternSource, /const DunFrameTable dun_frames_turn\[DUN_TURN_FRAMES\]/);
+  assert.match(patternSource, /frame_static/);
+  assert.match(patternSource, /frames_fwd\[DUN_FWD_FRAMES\]/);
+  assert.match(patternSource, /frames_turn\[DUN_TURN_FRAMES\]/);
   assert.match(patternSource, /const DunBBCell dun_bb_cells\[/);
   assert.match(patternSource, /const DunBBPose dun_bb_turn\[DUN_TURN_FRAMES\]/);
-  assert.match(patternSource, /const u16 dun_palette_dark\[16\]/);
+  assert.match(patternSource, /palette_dark\[16\]/);
+  assert.match(patternSource, /const DunViewSet dun_view_sets\[DUN_VIEW_SET_COUNT\]/);
   assert.doesNotMatch(patternSource, /dungeon_view_pattern_count/);
 
   const tileCount = Number(patternHeader.match(/#define DUN_TILESET_TILE_COUNT (\d+)/)?.[1] || 0);
@@ -253,9 +282,11 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.ok(Array.isArray(exported.warnings));
 
   /* ビュータイルセット: index0 = 黒 / ビルボード: index0 = マゼンタ */
-  const tileset = readIndexedPng(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_view_tileset.png'));
+  const tileset = readIndexedPng(path.join(projectDir, 'res', generatedSet.paths.tileset));
   assert.deepEqual(Array.from(tileset.plte.subarray(0, 3)), [0, 0, 0]);
-  const chestSheet = readIndexedPng(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_bb_chest.png'));
+  const background = readIndexedPng(path.join(projectDir, 'res', generatedSet.paths.background));
+  assert.deepEqual([background.width, background.height], [32, 64]);
+  const chestSheet = readIndexedPng(path.join(projectDir, 'res', generatedSet.paths.billboards.chest));
   assert.deepEqual(Array.from(chestSheet.plte.subarray(0, 3)), [255, 0, 255]);
   assert.equal(chestSheet.width, 48 * 8);
   assert.equal(chestSheet.height, 48);
@@ -266,18 +297,167 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.ok(chestPixels > 500);
 
   const resources = fs.readFileSync(path.join(projectDir, 'res', 'resources.res'), 'utf-8');
-  assert.match(resources, /PALETTE dungeon_view_palette "dungeon\/generated\/dungeon_view_tileset\.png"/);
-  assert.match(resources, /TILESET dungeon_view_tileset "dungeon\/generated\/dungeon_view_tileset\.png" NONE ALL/);
-  assert.match(resources, /PALETTE dungeon_bb_palette "dungeon\/generated\/dungeon_bb_chest\.png"/);
-  assert.match(resources, /SPRITE dungeon_bb_chest "dungeon\/generated\/dungeon_bb_chest\.png" 6 6 NONE 0/);
-  assert.match(resources, /SPRITE dungeon_bb_stairs_up /);
-  assert.match(resources, /SPRITE dungeon_bb_stairs_down /);
+  assert.match(resources, /PALETTE dun_[a-z0-9_]+_view_palette /);
+  assert.match(resources, /TILESET dun_[a-z0-9_]+_view_tileset .* NONE ALL/);
+  assert.match(resources, /TILESET dun_[a-z0-9_]+_background_tileset .* NONE NONE/);
+  assert.match(resources, /PALETTE dun_[a-z0-9_]+_bb_palette /);
+  assert.match(resources, /SPRITE dun_[a-z0-9_]+_bb_chest .* 6 6 NONE 0/);
+  assert.match(resources, /SPRITE dun_[a-z0-9_]+_bb_stairs_up /);
+  assert.match(resources, /SPRITE dun_[a-z0-9_]+_bb_stairs_down /);
   assert.doesNotMatch(resources, /TILEMAP /);
 
   /* 2 回目のエクスポートは焼き込みキャッシュが効く */
   const again = plugin.exportDungeonData({}, context);
   assert.equal(again.ok, true);
   assert.equal(again.cached, true);
+});
+
+test('dungeon asset sets migrate legacy floors and export per-set resources with selective cache', () => {
+  const projectDir = path.join(makeTempDir('md-editor-dungeon-sets-'), 'demo');
+  const service = require('../plugins/dungeon-game-editor/dungeon-service');
+  const plugin = require('../plugins/dungeon-game-editor');
+  const dungeonDir = path.join(projectDir, 'data', 'dungeon');
+  const floorsDir = path.join(dungeonDir, 'floors');
+  fs.mkdirSync(floorsDir, { recursive: true });
+
+  const legacyAssets = { ...service.DEFAULT_ASSETS, wall_texture: 'dungeon/textures/legacy.png#wall' };
+  const legacyFloor = service.makeGeneratedFloor({
+    id: 'legacy-floor',
+    name: 'Legacy',
+    order: 1,
+    width: 8,
+    height: 8,
+    assets: legacyAssets,
+  });
+  delete legacyFloor.asset_set_id;
+  fs.writeFileSync(path.join(floorsDir, 'floor_001_legacy.json'), `${JSON.stringify(legacyFloor, null, 2)}\n`);
+  fs.writeFileSync(path.join(dungeonDir, 'settings.json'), JSON.stringify({ animation_frames: 3, turn_frames: 3 }));
+
+  const listed = plugin.listDungeonFloors({}, { projectDir, logger: logger() });
+  assert.equal(listed.ok, true);
+  assert.match(listed.floors[0].asset_set_id, /^legacy-/);
+  assert.equal(listed.settings.asset_sets.length, 2);
+  const stillLegacy = JSON.parse(fs.readFileSync(path.join(floorsDir, 'floor_001_legacy.json'), 'utf-8'));
+  assert.ok(stillLegacy.assets);
+  assert.equal(Object.hasOwn(stillLegacy, 'asset_set_id'), false);
+
+  const migrated = plugin.saveDungeonState({ floor: listed.floors[0], settings: listed.settings }, { projectDir, logger: logger() });
+  assert.equal(migrated.ok, true);
+  const migratedFloor = JSON.parse(fs.readFileSync(path.join(floorsDir, 'floor_001_legacy.json'), 'utf-8'));
+  assert.equal(Object.hasOwn(migratedFloor, 'assets'), false);
+  assert.match(migratedFloor.asset_set_id, /^legacy-/);
+
+  const settings = migrated.settings;
+  settings.asset_sets.push({
+    id: 'lava',
+    name: 'Lava',
+    assets: { ...service.DEFAULT_ASSETS, wall_texture: 'dungeon/textures/lava.png#wall' },
+  });
+  const second = service.makeGeneratedFloor({
+    id: 'lava-floor',
+    name: 'Lava Floor',
+    order: 2,
+    width: 8,
+    height: 8,
+    asset_set_id: 'lava',
+  });
+  const saved = plugin.saveDungeonState({ create: true, floor: second, settings }, { projectDir, logger: logger() });
+  assert.equal(saved.ok, true);
+  assert.equal(saved.export.assetSets.length, 2);
+  const resources = fs.readFileSync(path.join(projectDir, 'res', 'resources.res'), 'utf-8');
+  assert.equal((resources.match(/_background_tileset /g) || []).length, 2);
+  const dataSource = fs.readFileSync(path.join(projectDir, 'src', 'dungeon_data.c'), 'utf-8');
+  assert.match(dataSource, /\{ 8, 8, \d+, \d+, \d+, 0, dungeon_floor_1_edges/);
+  assert.match(dataSource, /\{ 8, 8, \d+, \d+, \d+, 1, dungeon_floor_2_edges/);
+
+  const cached = plugin.exportDungeonData({}, { projectDir, logger: logger() });
+  assert.equal(cached.cached, true);
+  const nextSettings = JSON.parse(fs.readFileSync(path.join(dungeonDir, 'settings.json'), 'utf-8'));
+  nextSettings.asset_sets.find((set) => set.id === 'lava').assets.wall_texture = 'dungeon/textures/lava-2.png#wall';
+  fs.writeFileSync(path.join(dungeonDir, 'settings.json'), `${JSON.stringify(nextSettings, null, 2)}\n`);
+  const changed = plugin.exportDungeonData({}, { projectDir, logger: logger() });
+  assert.equal(changed.cached, false);
+  assert.equal(changed.assetSets.find((set) => set.id === migratedFloor.asset_set_id).cached, true);
+  assert.equal(changed.assetSets.find((set) => set.id === 'lava').cached, false);
+});
+
+test('dungeon tagless texture validation enforces indexed dimensions and colors', () => {
+  const projectDir = path.join(makeTempDir('md-editor-dungeon-validate-'), 'demo');
+  const service = require('../plugins/dungeon-game-editor/dungeon-service');
+  const textureDir = path.join(projectDir, 'res', 'dungeon', 'textures', 'test');
+  const palette = [
+    { r: 0, g: 0, b: 0 },
+    { r: 224, g: 224, b: 224 },
+  ];
+  const validPixels = new Uint8Array(96 * 96);
+  validPixels.fill(1);
+  service.writeIndexedPng(path.join(textureDir, 'wall.png'), 96, 96, palette, validPixels);
+  assert.equal(service.validateTextureRef(projectDir, 'wall_texture', 'dungeon/textures/test/wall.png').ok, true);
+
+  service.writeIndexedPng(path.join(textureDir, 'small.png'), 32, 32, palette, new Uint8Array(32 * 32));
+  assert.throws(
+    () => service.validateTextureRef(projectDir, 'wall_texture', 'dungeon/textures/test/small.png'),
+    /96x96px/,
+  );
+
+  const manyPalette = Array.from({ length: 17 }, (_, index) => ({ r: index * 12, g: index * 8, b: index * 4 }));
+  const manyPixels = new Uint8Array(96 * 96);
+  manyPixels.fill(1);
+  service.writeIndexedPng(path.join(textureDir, 'many.png'), 96, 96, manyPalette, manyPixels);
+  assert.throws(
+    () => service.validateTextureRef(projectDir, 'wall_texture', 'dungeon/textures/test/many.png'),
+    /16色以下/,
+  );
+
+  const outsidePath = path.join(makeTempDir('md-editor-dungeon-outside-'), 'wall.png');
+  service.writeIndexedPng(outsidePath, 96, 96, palette, validPixels);
+  assert.throws(
+    () => service.validateTextureRef(projectDir, 'wall_texture', outsidePath),
+    /画像が見つかりません/,
+  );
+
+  assert.throws(() => service.validateProjectState([], { asset_sets: [] }), /1件以上/);
+  assert.throws(
+    () => service.validateProjectState([], { asset_sets: [service.DEFAULT_ASSET_SET, service.DEFAULT_ASSET_SET] }),
+    /重複/,
+  );
+  assert.throws(
+    () => service.validateProjectState([{ name: 'Broken', asset_set_id: 'missing' }], { asset_sets: [service.DEFAULT_ASSET_SET] }),
+    /存在しません/,
+  );
+});
+
+test('dungeon state save rejects invalid set assets before persisting settings', () => {
+  const projectDir = path.join(makeTempDir('md-editor-dungeon-preflight-'), 'demo');
+  const service = require('../plugins/dungeon-game-editor/dungeon-service');
+  writeFastSettings(projectDir);
+  const floor = service.makeGeneratedFloor({
+    id: 'floor-1',
+    name: 'Floor 1',
+    order: 1,
+    width: 8,
+    height: 8,
+    asset_set_id: 'default',
+  });
+  const first = service.saveState(projectDir, { create: true, floor });
+  assert.equal(first.ok, true);
+
+  const invalidDir = path.join(projectDir, 'res', 'dungeon', 'textures', 'default');
+  service.writeIndexedPng(
+    path.join(invalidDir, 'wall.png'),
+    32,
+    32,
+    [{ r: 0, g: 0, b: 0 }, { r: 224, g: 224, b: 224 }],
+    new Uint8Array(32 * 32),
+  );
+  const invalidSettings = JSON.parse(JSON.stringify(first.settings));
+  invalidSettings.asset_sets[0].assets.wall_texture = 'dungeon/textures/default/wall.png';
+  assert.throws(
+    () => service.saveState(projectDir, { floor: first.floor, settings: invalidSettings }),
+    /96x96px/,
+  );
+  const persisted = JSON.parse(fs.readFileSync(path.join(projectDir, 'data', 'dungeon', 'settings.json'), 'utf-8'));
+  assert.match(persisted.asset_sets[0].assets.wall_texture, /#wall$/);
 });
 
 test('dungeon-game-builder syncs engine, writes generated main, and build variables', () => {
@@ -299,6 +479,7 @@ test('dungeon-game-builder syncs engine, writes generated main, and build variab
   assert.match(generated.sourceCode, /DUN_playBackward/);
   assert.match(generated.sourceCode, /DUN_playTurn/);
   assert.match(generated.sourceCode, /DUN_setDark/);
+  assert.match(generated.sourceCode, /DUN_applyViewSet/);
   assert.match(generated.sourceCode, /DUN_drawMinimap/);
   assert.match(generated.sourceCode, /DUN_ACTION_STAIRS/);
   assert.match(generated.sourceCode, /goStairs/);
@@ -332,7 +513,10 @@ test('dungeon-game-builder syncs engine, writes generated main, and build variab
   assert.match(viewSource, /cellIsSolidAt/);
   assert.match(viewSource, /DUN_drawMinimap/);
   assert.match(viewSource, /dun_mm_palette/);
-  assert.match(viewSource, /dun_palette_dark/);
+  assert.match(viewSource, /active_view_set->dark_palette/);
+  assert.match(viewSource, /active_view_set->view_tileset/);
+  assert.match(viewSource, /active_view_set->background_tileset/);
+  assert.match(viewSource, /VDP_setTileMapDataRect\(BG_B/);
   assert.doesNotMatch(viewSource, /VDP_setTileMapXY/);
   assert.doesNotMatch(viewSource, /loadCachedTile/);
   assert.doesNotMatch(viewSource, /dungeon_view_tilemap/);
@@ -395,7 +579,8 @@ test('dungeon template starts with valid settings and plugin roles', () => {
     testplay: 'standard-emulator',
   });
   const floorTemplate = JSON.parse(fs.readFileSync(path.join(templateDir, 'data', 'dungeon', 'floors', 'floor_001_template.json'), 'utf-8'));
-  assert.match(floorTemplate.assets.door_texture, /#door$/);
+  assert.equal(floorTemplate.asset_set_id, 'default');
+  assert.equal(Object.hasOwn(floorTemplate, 'assets'), false);
   /* 階段セルはソリッドのため開始セルとは別に配置される */
   assert.equal(floorTemplate.cells[floorTemplate.start.y][floorTemplate.start.x].stairs, '');
   const templateCells = floorTemplate.cells.flat();
@@ -403,5 +588,7 @@ test('dungeon template starts with valid settings and plugin roles', () => {
   assert.ok(templateCells.some((cell) => cell.stairs === 'down'));
   const settings = JSON.parse(fs.readFileSync(path.join(templateDir, 'data', 'dungeon', 'settings.json'), 'utf-8'));
   assert.equal(settings.turn_frames, 8);
+  assert.equal(settings.asset_sets[0].id, 'default');
+  assert.match(settings.asset_sets[0].assets.door_texture, /#door$/);
   assert.equal(fs.existsSync(path.join(templateDir, 'res', 'dungeon', 'textures', 'dungeon_texture_atlas.png')), true);
 });

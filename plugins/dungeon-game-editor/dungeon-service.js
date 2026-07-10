@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const v8 = require('v8');
 const zlib = require('zlib');
 const core = require('./render-core.js');
 
@@ -22,14 +23,6 @@ const CELL_FLAGS = {
   stairs_up: 4,
   stairs_down: 8,
 };
-const DEFAULT_SETTINGS = {
-  animation_frames: 8,
-  turn_frames: 8,
-  view_tile_width: 25,
-  view_tile_height: 16,
-  view_pixel_width: 200,
-  view_pixel_height: 128,
-};
 const DEFAULT_ASSETS = {
   wall_texture: 'dungeon/textures/dungeon_texture_atlas.png#wall',
   door_texture: 'dungeon/textures/dungeon_texture_atlas.png#door',
@@ -39,11 +32,36 @@ const DEFAULT_ASSETS = {
   stairs_up_texture: 'dungeon/textures/dungeon_texture_atlas.png#stairs_up',
   stairs_down_texture: 'dungeon/textures/dungeon_texture_atlas.png#stairs_down',
 };
+const ASSET_KEYS = Object.freeze(Object.keys(DEFAULT_ASSETS));
+const ASSET_CONSTRAINTS = Object.freeze({
+  wall_texture: { width: 96, height: 96, opaque: true },
+  door_texture: { width: 96, height: 96, opaque: true },
+  floor_texture: { width: 32, height: 32, opaque: true },
+  ceiling_texture: { width: 32, height: 32, opaque: true },
+  chest_texture: { width: 48, height: 48, opaque: false },
+  stairs_up_texture: { width: 48, height: 48, opaque: false },
+  stairs_down_texture: { width: 48, height: 48, opaque: false },
+});
+const DEFAULT_ASSET_SET = Object.freeze({
+  id: 'default',
+  name: 'Default',
+  assets: Object.freeze({ ...DEFAULT_ASSETS }),
+});
+const DEFAULT_SETTINGS = {
+  animation_frames: 8,
+  turn_frames: 8,
+  view_tile_width: 25,
+  view_tile_height: 16,
+  view_pixel_width: 200,
+  view_pixel_height: 128,
+  asset_sets: [DEFAULT_ASSET_SET],
+};
 const DUN_ANIMATION_STEP_VBLANKS = 2;
 const TILESET_TILES_PER_ROW = 32;
 const PATTERN_TEXTURE_MAX_SIZE = 96;
 const GENERATED_RESOURCE_BEGIN = '// DUNGEON_GENERATED_BEGIN';
 const GENERATED_RESOURCE_END = '// DUNGEON_GENERATED_END';
+const GENERATED_SET_DIR_REL = 'dungeon/generated/sets';
 const GENERATED_TILESET_REL = 'dungeon/generated/dungeon_view_tileset.png';
 const GENERATED_LEGACY_MAP_REL = 'dungeon/generated/dungeon_view_map.png';
 const GENERATED_BB_SHEETS = {
@@ -161,21 +179,44 @@ function normalizeFloor(floor = {}, fallbackOrder = 1, fallbackName = `Floor ${f
   const cells = Array.from({ length: height }, (_, y) => (
     Array.from({ length: width }, (_, x) => normalizeCell(Array.isArray(floor.cells?.[y]) ? floor.cells[y][x] : null))
   ));
-  return {
+  const normalized = {
     id: normalizeId(floor.id, 'floor'),
     name: String(floor.name || fallbackName),
     order,
     width,
     height,
     start: normalizeStart(floor.start || {}, width, height),
-    assets: { ...DEFAULT_ASSETS, ...(floor.assets && typeof floor.assets === 'object' ? floor.assets : {}) },
+    asset_set_id: String(floor.asset_set_id || floor.assetSetId || '').trim(),
     cells,
+  };
+  if (floor.assets && typeof floor.assets === 'object') {
+    normalized.assets = { ...DEFAULT_ASSETS, ...floor.assets };
+  }
+  return normalized;
+}
+
+function normalizeAssetSet(assetSet = {}, index = 0) {
+  const source = assetSet && typeof assetSet === 'object' ? assetSet : {};
+  const hasExplicitId = Object.prototype.hasOwnProperty.call(source, 'id');
+  const id = String(hasExplicitId ? source.id : (index === 0 ? 'default' : `set-${index + 1}`)).trim();
+  const assets = {};
+  ASSET_KEYS.forEach((key) => {
+    assets[key] = String(source.assets?.[key] || DEFAULT_ASSETS[key]).trim();
+  });
+  return {
+    id,
+    name: String(Object.prototype.hasOwnProperty.call(source, 'name') ? source.name : (id || `Set ${index + 1}`)).trim(),
+    assets,
   };
 }
 
 function normalizeSettings(settings = {}) {
   const incoming = settings && typeof settings === 'object' ? settings : {};
   const animationFrames = clampInt(incoming.animation_frames, 2, 8, DEFAULT_SETTINGS.animation_frames);
+  const hasAssetSets = Array.isArray(incoming.asset_sets || incoming.assetSets);
+  const assetSets = hasAssetSets
+    ? (incoming.asset_sets || incoming.assetSets).map(normalizeAssetSet)
+    : DEFAULT_SETTINGS.asset_sets.map(normalizeAssetSet);
   return {
     animation_frames: animationFrames,
     turn_frames: clampInt(incoming.turn_frames, 2, 8, animationFrames),
@@ -183,6 +224,7 @@ function normalizeSettings(settings = {}) {
     view_tile_height: DEFAULT_SETTINGS.view_tile_height,
     view_pixel_width: DEFAULT_SETTINGS.view_pixel_width,
     view_pixel_height: DEFAULT_SETTINGS.view_pixel_height,
+    asset_sets: assetSets,
   };
 }
 
@@ -204,6 +246,73 @@ function loadFloors(projectDir) {
       floor: normalizeFloor(entry.floor, index + 1, `Floor ${index + 1}`),
     }))
     .sort((left, right) => left.floor.order - right.floor.order || left.floor.name.localeCompare(right.floor.name));
+}
+
+function assetSignature(assets = {}) {
+  return JSON.stringify(ASSET_KEYS.map((key) => String(assets[key] || DEFAULT_ASSETS[key])));
+}
+
+function makeLegacySetId(signature, usedIds) {
+  const base = `legacy-${crypto.createHash('sha1').update(signature).digest('hex').slice(0, 8)}`;
+  let id = base;
+  let suffix = 2;
+  while (usedIds.has(id)) id = `${base}-${suffix++}`;
+  return id;
+}
+
+function resolveEffectiveState(floorsInput, settingsInput) {
+  const settings = normalizeSettings(settingsInput);
+  const assetSets = settings.asset_sets.map(normalizeAssetSet);
+  const usedIds = new Set(assetSets.map((set) => set.id));
+  const bySignature = new Map(assetSets.map((set) => [assetSignature(set.assets), set]));
+  const floors = floorsInput.map((floor, index) => {
+    const next = normalizeFloor(floor, index + 1, floor.name || `Floor ${index + 1}`);
+    if (next.asset_set_id) return next;
+    if (next.assets) {
+      const signature = assetSignature(next.assets);
+      let set = bySignature.get(signature);
+      if (!set) {
+        const id = makeLegacySetId(signature, usedIds);
+        usedIds.add(id);
+        set = normalizeAssetSet({ id, name: `Legacy - ${next.name}`, assets: next.assets }, assetSets.length);
+        assetSets.push(set);
+        bySignature.set(signature, set);
+      }
+      next.asset_set_id = set.id;
+    } else if (assetSets[0]) {
+      next.asset_set_id = assetSets[0].id;
+    }
+    return next;
+  });
+  return { floors, settings: { ...settings, asset_sets: assetSets } };
+}
+
+function validateProjectState(floors, settings) {
+  const sets = Array.isArray(settings?.asset_sets) ? settings.asset_sets : [];
+  if (sets.length === 0) throw new Error('素材セットを1件以上定義してください');
+  if (sets.length > 255) throw new Error('素材セットは255件以下にしてください');
+  const ids = new Set();
+  sets.forEach((set, index) => {
+    const id = String(set?.id || '').trim();
+    if (!id) throw new Error(`素材セット ${index + 1} のIDが空です`);
+    if (ids.has(id)) throw new Error(`素材セットIDが重複しています: ${id}`);
+    ids.add(id);
+    if (!String(set?.name || '').trim()) throw new Error(`素材セット ${id} の名前が空です`);
+    ASSET_KEYS.forEach((key) => {
+      if (!String(set?.assets?.[key] || '').trim()) throw new Error(`素材セット ${id} の ${key} が未設定です`);
+    });
+  });
+  floors.forEach((floor) => {
+    if (!ids.has(String(floor.asset_set_id || ''))) {
+      throw new Error(`フロア「${floor.name || floor.id}」の素材セットが存在しません: ${floor.asset_set_id || '(未設定)'}`);
+    }
+  });
+  return true;
+}
+
+function persistedFloor(floor) {
+  const { assets: _legacyAssets, ...next } = floor;
+  return next;
 }
 
 function floorFilePath(projectDir, floor, existingFilePath) {
@@ -411,7 +520,8 @@ function makeGeneratedFloor(payload = {}) {
     width,
     height,
     start: { x: startX, y: startY, dir: 1 },
-    assets: payload.assets || {},
+    asset_set_id: payload.asset_set_id || payload.assetSetId || '',
+    ...(payload.assets && typeof payload.assets === 'object' ? { assets: payload.assets } : {}),
     cells,
   }, payload.order || 1, payload.name || 'Generated Floor');
   placeStairs(floor);
@@ -545,7 +655,7 @@ function parsePng(filePath) {
     }
   }
 
-  return { width, height, data: pixels };
+  return { width, height, data: pixels, bitDepth, colorType, paletteSize: palette?.length || 0 };
 }
 
 const PNG_SIGNATURE = Buffer.from('89504e470d0a1a0a', 'hex');
@@ -626,6 +736,45 @@ function paethPredictor(a, b, c) {
 function parseTextureRef(ref) {
   const [pathPart, tagPart] = String(ref || '').split('#');
   return { assetPath: String(pathPart || '').trim(), tag: String(tagPart || '').trim() };
+}
+
+function textureColorCount(texture) {
+  const colors = new Set();
+  for (let i = 0; i < texture.data.length; i += 4) {
+    colors.add(`${texture.data[i]},${texture.data[i + 1]},${texture.data[i + 2]},${texture.data[i + 3]}`);
+    if (colors.size > 16) break;
+  }
+  return colors.size;
+}
+
+function validateTextureRef(projectDir, key, ref) {
+  const parsed = parseTextureRef(ref);
+  const imagePath = resolveAssetPath(projectDir, parsed.assetPath);
+  if (!imagePath || !fs.existsSync(imagePath)) {
+    if (parsed.tag) return { ok: true, legacyFallback: true, imagePath: '' };
+    throw new Error(`${key}: 画像が見つかりません: ${parsed.assetPath}`);
+  }
+  const texture = parsePng(imagePath);
+  if (parsed.tag) return { ok: true, legacy: true, imagePath, texture };
+  const constraint = ASSET_CONSTRAINTS[key];
+  if (!constraint) throw new Error(`unknown dungeon asset key: ${key}`);
+  if (texture.width !== constraint.width || texture.height !== constraint.height) {
+    throw new Error(`${key}: ${constraint.width}x${constraint.height}px の画像が必要です (${texture.width}x${texture.height}px)`);
+  }
+  if (texture.colorType !== 3 || texture.bitDepth !== 8) {
+    throw new Error(`${key}: 8bit indexed PNG が必要です`);
+  }
+  if (texture.paletteSize < 1 || texture.paletteSize > 16) {
+    throw new Error(`${key}: palette を16色以下にしてください (${texture.paletteSize}色)`);
+  }
+  const colors = textureColorCount(texture);
+  if (colors > 16) throw new Error(`${key}: 使用色を16色以下にしてください (${colors}色)`);
+  if (constraint.opaque) {
+    for (let i = 3; i < texture.data.length; i += 4) {
+      if (texture.data[i] !== 255) throw new Error(`${key}: 透過ピクセルは使用できません`);
+    }
+  }
+  return { ok: true, imagePath, texture, colors };
 }
 
 function resolveAssetPath(projectDir, assetPath) {
@@ -709,12 +858,15 @@ function resizeTextureForPatterns(texture, maxSize = PATTERN_TEXTURE_MAX_SIZE) {
  * <atlas>.json ({"columns":4,"rows":2}) があれば扉付きレイアウトで切り出す。
  * タグ未定義 (旧 3x2 アトラスの door 等) は手続き生成にフォールバックする。
  */
-function loadViewTextures(projectDir, floor) {
-  const refs = { ...DEFAULT_ASSETS, ...(floor?.assets || {}) };
+function loadViewTextures(projectDir, source, options = {}) {
+  const refs = { ...DEFAULT_ASSETS, ...(source?.assets || {}) };
   const atlasCache = new Map();
   const textures = {};
   core.TEXTURE_KINDS.forEach((kind) => {
-    const ref = parseTextureRef(refs[`${kind}_texture`] || DEFAULT_ASSETS[`${kind}_texture`]);
+    const key = `${kind}_texture`;
+    const refValue = refs[key] || DEFAULT_ASSETS[key];
+    if (options.validate !== false) validateTextureRef(projectDir, key, refValue);
+    const ref = parseTextureRef(refValue);
     const imagePath = resolveAssetPath(projectDir, ref.assetPath);
     let texture = null;
     if (imagePath && fs.existsSync(imagePath)) {
@@ -727,9 +879,14 @@ function loadViewTextures(projectDir, floor) {
           };
           atlasCache.set(imagePath, atlas);
         }
-        const cropped = cropTexture(atlas.image, ref.tag || kind, atlas.layout);
-        if (cropped) texture = resizeTextureForPatterns(cropped);
-      } catch (_) {
+        if (ref.tag) {
+          const cropped = cropTexture(atlas.image, ref.tag, atlas.layout);
+          if (cropped) texture = resizeTextureForPatterns(cropped);
+        } else {
+          texture = atlas.image;
+        }
+      } catch (err) {
+        if (options.strict) throw err;
         texture = null;
       }
     }
@@ -781,7 +938,7 @@ function cArray(values, indent = '    ') {
   return values.map((value, index) => `${index % 12 === 0 ? indent : ''}${value}${index === values.length - 1 ? '' : ','}`).join('\n');
 }
 
-function exportSource(projectDir, floors) {
+function exportSource(projectDir, floors, setIndexById = new Map()) {
   const outPath = path.join(projectDir, 'src', 'dungeon_data.c');
   const chunks = [
     '/* Generated by dungeon-game-editor */',
@@ -804,7 +961,9 @@ function exportSource(projectDir, floors) {
   chunks.push(`const DungeonFloorData dungeon_floors[DUNGEON_FLOOR_COUNT] = {`);
   floors.forEach((floor, index) => {
     const startDir = clampInt(floor.start.dir, 0, 3, 1);
-    chunks.push(`    { ${floor.width}, ${floor.height}, ${floor.start.x}, ${floor.start.y}, ${startDir}, dungeon_floor_${index + 1}_edges, dungeon_floor_${index + 1}_flags },`);
+    const viewSet = setIndexById.get(floor.asset_set_id);
+    if (!Number.isInteger(viewSet)) throw new Error(`unknown asset set for floor ${floor.name}: ${floor.asset_set_id}`);
+    chunks.push(`    { ${floor.width}, ${floor.height}, ${floor.start.x}, ${floor.start.y}, ${startDir}, ${viewSet}, dungeon_floor_${index + 1}_edges, dungeon_floor_${index + 1}_flags },`);
   });
   chunks.push('};', '');
   ensureDir(path.dirname(outPath));
@@ -820,6 +979,7 @@ function buildViewExport(settings, textures) {
   const spaces = core.buildEdgeSpaces(settings);
   const palette = core.buildViewPalette(textures);
   const bands = core.buildBandTables(palette, textures);
+  const backdrop = core.buildBackdropSheet(palette, textures);
   const pool = core.makeTilePool();
   const warnings = [];
 
@@ -846,7 +1006,8 @@ function buildViewExport(settings, textures) {
     sum + (frame.offsets.length + frame.nodes.length + frame.tileMap.length) * 2 + frame.tileMap.length
   ), 0);
   const tileBytes = pool.count * 32;
-  const totalBytes = tileBytes + tableBytes;
+  const backgroundTileBytes = 32 * 32;
+  const totalBytes = tileBytes + backgroundTileBytes + tableBytes;
 
   if (pool.count > BUDGET_TILE_WARN) {
     warnings.push(`タイル数が多すぎます (${pool.count} > ${BUDGET_TILE_WARN})。テクスチャを単純化するかフレーム数を減らしてください。`);
@@ -863,6 +1024,7 @@ function buildViewExport(settings, textures) {
     spaces,
     palette,
     bands,
+    backdrop,
     pool,
     staticFrame,
     fwdFrames,
@@ -873,6 +1035,7 @@ function buildViewExport(settings, textures) {
     budget: {
       tileCount: pool.count,
       tileBytes,
+      backgroundTileBytes,
       nodeWordsMax,
       nodeWordsTotal,
       tableBytes,
@@ -887,7 +1050,7 @@ function tilePaletteIndex(tileRows, tileIndex, px, py) {
   return (rows[py] >>> ((7 - px) * 4)) & 15;
 }
 
-function writeTilesetAtlas(projectDir, pool, palette) {
+function writeTilesetAtlas(projectDir, pool, palette, relativePath = GENERATED_TILESET_REL) {
   const width = TILESET_TILES_PER_ROW * 8;
   const rows = Math.max(1, Math.ceil(pool.count / TILESET_TILES_PER_ROW));
   const height = rows * 8;
@@ -901,14 +1064,20 @@ function writeTilesetAtlas(projectDir, pool, palette) {
       }
     }
   });
-  const outPath = path.join(projectDir, 'res', GENERATED_TILESET_REL);
+  const outPath = path.join(projectDir, 'res', relativePath);
   writeIndexedPng(outPath, width, height, palette, pixels);
   return outPath;
 }
 
-function writeBillboardSheets(projectDir, sheets, spritePalette) {
+function writeBackdropTileset(projectDir, backdrop, palette, relativePath) {
+  const outPath = path.join(projectDir, 'res', relativePath);
+  writeIndexedPng(outPath, backdrop.width, backdrop.height, palette, backdrop.pixels);
+  return outPath;
+}
+
+function writeBillboardSheets(projectDir, sheets, spritePalette, relativePaths = GENERATED_BB_SHEETS) {
   const paths = {};
-  Object.entries(GENERATED_BB_SHEETS).forEach(([kind, rel]) => {
+  Object.entries(relativePaths).forEach(([kind, rel]) => {
     const sheet = sheets[kind];
     const outPath = path.join(projectDir, 'res', rel);
     writeIndexedPng(outPath, sheet.width, sheet.height, spritePalette, sheet.pixels);
@@ -917,18 +1086,22 @@ function writeBillboardSheets(projectDir, sheets, spritePalette) {
   return paths;
 }
 
-function updateGeneratedResources(projectDir) {
+function updateGeneratedResources(projectDir, setExports = []) {
   const resPath = ensureResourcesFile(projectDir);
-  const generatedLines = [
-    GENERATED_RESOURCE_BEGIN,
-    `PALETTE dungeon_view_palette "${GENERATED_TILESET_REL}"`,
-    `TILESET dungeon_view_tileset "${GENERATED_TILESET_REL}" NONE ALL`,
-    `PALETTE dungeon_bb_palette "${GENERATED_BB_SHEETS.chest}"`,
-    `SPRITE dungeon_bb_chest "${GENERATED_BB_SHEETS.chest}" ${core.BB_FRAME_TILES} ${core.BB_FRAME_TILES} NONE 0`,
-    `SPRITE dungeon_bb_stairs_up "${GENERATED_BB_SHEETS.stairs_up}" ${core.BB_FRAME_TILES} ${core.BB_FRAME_TILES} NONE 0`,
-    `SPRITE dungeon_bb_stairs_down "${GENERATED_BB_SHEETS.stairs_down}" ${core.BB_FRAME_TILES} ${core.BB_FRAME_TILES} NONE 0`,
-    GENERATED_RESOURCE_END,
-  ];
+  const generatedLines = [GENERATED_RESOURCE_BEGIN];
+  setExports.forEach((entry) => {
+    const { symbols, paths } = entry;
+    generatedLines.push(
+      `PALETTE ${symbols.viewPalette} "${paths.tileset}"`,
+      `TILESET ${symbols.viewTileset} "${paths.tileset}" NONE ALL`,
+      `TILESET ${symbols.backgroundTileset} "${paths.background}" NONE NONE`,
+      `PALETTE ${symbols.billboardPalette} "${paths.billboards.chest}"`,
+      `SPRITE ${symbols.chest} "${paths.billboards.chest}" ${core.BB_FRAME_TILES} ${core.BB_FRAME_TILES} NONE 0`,
+      `SPRITE ${symbols.stairsUp} "${paths.billboards.stairs_up}" ${core.BB_FRAME_TILES} ${core.BB_FRAME_TILES} NONE 0`,
+      `SPRITE ${symbols.stairsDown} "${paths.billboards.stairs_down}" ${core.BB_FRAME_TILES} ${core.BB_FRAME_TILES} NONE 0`,
+    );
+  });
+  generatedLines.push(GENERATED_RESOURCE_END);
   const current = fs.existsSync(resPath) ? fs.readFileSync(resPath, 'utf-8') : '';
   const blockPattern = new RegExp(`${escapeForRegExp(GENERATED_RESOURCE_BEGIN)}[\\s\\S]*?${escapeForRegExp(GENERATED_RESOURCE_END)}\\n?`, 'm');
   const nextBlock = `${generatedLines.join('\n')}\n`;
@@ -941,6 +1114,41 @@ function updateGeneratedResources(projectDir) {
 
 function escapeForRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function assetSetKey(id) {
+  const slug = safeFilePart(id).replace(/-/g, '_').replace(/[^a-z0-9_]/g, '_').slice(0, 24) || 'set';
+  const hash = crypto.createHash('sha1').update(String(id)).digest('hex').slice(0, 8);
+  return `${slug}_${hash}`;
+}
+
+function generatedSetDescriptor(assetSet) {
+  const key = assetSetKey(assetSet.id);
+  const dir = `${GENERATED_SET_DIR_REL}/${key}`;
+  const prefix = `dun_${key}`;
+  return {
+    id: assetSet.id,
+    key,
+    symbols: {
+      viewPalette: `${prefix}_view_palette`,
+      viewTileset: `${prefix}_view_tileset`,
+      backgroundTileset: `${prefix}_background_tileset`,
+      billboardPalette: `${prefix}_bb_palette`,
+      chest: `${prefix}_bb_chest`,
+      stairsUp: `${prefix}_bb_stairs_up`,
+      stairsDown: `${prefix}_bb_stairs_down`,
+    },
+    paths: {
+      tileset: `${dir}/view_tileset.png`,
+      background: `${dir}/background_tileset.png`,
+      billboards: {
+        chest: `${dir}/bb_chest.png`,
+        stairs_up: `${dir}/bb_stairs_up.png`,
+        stairs_down: `${dir}/bb_stairs_down.png`,
+      },
+      cache: `${dir}/bake.bin`,
+    },
+  };
 }
 
 /* ==================================================================
@@ -989,13 +1197,16 @@ function emitBillboardPoseRows(poses) {
   return poses.map((pose) => `{ ${pose.x}, ${pose.y}, ${pose.frame} }`).join(', ');
 }
 
-function exportPatternFiles(projectDir, view) {
+function exportPatternFiles(projectDir, setEntries) {
   const headerPath = path.join(projectDir, 'inc', 'dungeon_patterns.h');
   const sourcePath = path.join(projectDir, 'src', 'dungeon_patterns.c');
+  if (!setEntries.length) throw new Error('referenced dungeon asset set is required');
+  const view = setEntries[0].view;
   const { spaces, billboards, settings } = view;
   const fwdCount = view.fwdFrames.length;
   const turnCount = view.turnFrames.length;
   const bbCells = billboards.cells;
+  const totalTileCount = setEntries.reduce((sum, entry) => sum + entry.view.pool.count, 0);
 
   const headerLines = [
     '/* Generated by dungeon-game-editor */',
@@ -1018,7 +1229,9 @@ function exportPatternFiles(projectDir, view) {
     `#define DUN_TURN_EDGE_COUNT ${spaces.turn.length}`,
     '#define DUN_EDGE_STATE_MAX 128',
     `#define DUN_EDGE_STATE_COUNT ${core.EDGE_STATE_COUNT}`,
-    `#define DUN_TILESET_TILE_COUNT ${view.pool.count}`,
+    `#define DUN_VIEW_SET_COUNT ${setEntries.length}`,
+    `#define DUN_TILESET_TILE_COUNT ${totalTileCount}`,
+    '#define DUN_BACKGROUND_TILE_COUNT 32',
     `#define DUN_BB_CELL_COUNT ${bbCells.length}`,
     `#define DUN_BB_FRAME_TILES ${core.BB_FRAME_TILES}`,
     `#define DUN_BB_FRAME_COUNT ${core.BB_BUCKET_HEIGHTS.length}`,
@@ -1033,17 +1246,28 @@ function exportPatternFiles(projectDir, view) {
     '    const u8 *tile_flips;  /* ローカルID → bit0=HFLIP, bit1=VFLIP */',
     '} DunFrameTable;',
     '',
+    'typedef struct {',
+    '    const TileSet *view_tileset;',
+    '    const TileSet *background_tileset;',
+    '    const Palette *view_palette;',
+    '    const Palette *billboard_palette;',
+    '    const SpriteDefinition *chest;',
+    '    const SpriteDefinition *stairs_up;',
+    '    const SpriteDefinition *stairs_down;',
+    '    const u16 *dark_palette;',
+    '    const DunFrameTable *frame_static;',
+    '    const DunFrameTable *frames_fwd;',
+    '    const DunFrameTable *frames_turn;',
+    '} DunViewSet;',
+    '',
     'extern const DunEdgeDef dun_edges_move[DUN_MOVE_EDGE_COUNT];',
     'extern const DunEdgeDef dun_edges_turn[DUN_TURN_EDGE_COUNT];',
     'extern const DunEdgeDef dun_edges_turn_mirrored[DUN_TURN_EDGE_COUNT];',
-    'extern const DunFrameTable dun_frame_static;',
-    'extern const DunFrameTable dun_frames_fwd[DUN_FWD_FRAMES];',
-    'extern const DunFrameTable dun_frames_turn[DUN_TURN_FRAMES];',
     'extern const DunBBCell dun_bb_cells[DUN_BB_CELL_COUNT];',
     'extern const DunBBPose dun_bb_static[DUN_BB_CELL_COUNT];',
     'extern const DunBBPose dun_bb_fwd[DUN_FWD_FRAMES][DUN_BB_CELL_COUNT];',
     'extern const DunBBPose dun_bb_turn[DUN_TURN_FRAMES][DUN_BB_CELL_COUNT];',
-    'extern const u16 dun_palette_dark[16];',
+    'extern const DunViewSet dun_view_sets[DUN_VIEW_SET_COUNT];',
     '',
     '#endif /* _DUNGEON_PATTERNS_H_ */',
     '',
@@ -1052,6 +1276,7 @@ function exportPatternFiles(projectDir, view) {
   const lines = [
     '/* Generated by dungeon-game-editor */',
     '#include "dungeon_patterns.h"',
+    '#include "resources.h"',
     '',
   ];
 
@@ -1059,19 +1284,6 @@ function exportPatternFiles(projectDir, view) {
   lines.push(...cEdgeDefArray('dun_edges_turn', spaces.turn));
   lines.push(...cEdgeDefArray('dun_edges_turn_mirrored', spaces.turnMirrored));
   lines.push('');
-
-  const staticRef = emitFrameTable(lines, 'dun_dt_static', view.staticFrame);
-  lines.push(`const DunFrameTable dun_frame_static = ${staticRef};`, '');
-
-  const fwdRefs = view.fwdFrames.map((frame, index) => emitFrameTable(lines, `dun_dt_fwd_${index}`, frame));
-  lines.push(`const DunFrameTable dun_frames_fwd[DUN_FWD_FRAMES] = {`);
-  fwdRefs.forEach((ref, index) => lines.push(`    ${ref}${index === fwdRefs.length - 1 ? '' : ','}`));
-  lines.push('};', '');
-
-  const turnRefs = view.turnFrames.map((frame, index) => emitFrameTable(lines, `dun_dt_turn_${index}`, frame));
-  lines.push(`const DunFrameTable dun_frames_turn[DUN_TURN_FRAMES] = {`);
-  turnRefs.forEach((ref, index) => lines.push(`    ${ref}${index === turnRefs.length - 1 ? '' : ','}`));
-  lines.push('};', '');
 
   lines.push(`const DunBBCell dun_bb_cells[DUN_BB_CELL_COUNT] = {`);
   bbCells.forEach((cell, index) => {
@@ -1095,9 +1307,33 @@ function exportPatternFiles(projectDir, view) {
   });
   lines.push('};', '');
 
-  const darkColors = core.paletteToVdpColors(core.darkenPalette(view.palette, DARK_PALETTE_SCALE));
-  lines.push(...cHexU16Array('dun_palette_dark', darkColors, false));
-  lines.push('');
+  const registry = [];
+  setEntries.forEach((entry) => {
+    const prefix = `dun_${entry.descriptor.key}`;
+    const setView = entry.view;
+    const staticRef = emitFrameTable(lines, `${prefix}_dt_static`, setView.staticFrame);
+    lines.push(`static const DunFrameTable ${prefix}_frame_static = ${staticRef};`, '');
+
+    const fwdRefs = setView.fwdFrames.map((frame, index) => emitFrameTable(lines, `${prefix}_dt_fwd_${index}`, frame));
+    lines.push(`static const DunFrameTable ${prefix}_frames_fwd[DUN_FWD_FRAMES] = {`);
+    fwdRefs.forEach((ref, index) => lines.push(`    ${ref}${index === fwdRefs.length - 1 ? '' : ','}`));
+    lines.push('};', '');
+
+    const turnRefs = setView.turnFrames.map((frame, index) => emitFrameTable(lines, `${prefix}_dt_turn_${index}`, frame));
+    lines.push(`static const DunFrameTable ${prefix}_frames_turn[DUN_TURN_FRAMES] = {`);
+    turnRefs.forEach((ref, index) => lines.push(`    ${ref}${index === turnRefs.length - 1 ? '' : ','}`));
+    lines.push('};', '');
+
+    const darkColors = core.paletteToVdpColors(core.darkenPalette(setView.palette, DARK_PALETTE_SCALE));
+    lines.push(...cHexU16Array(`${prefix}_palette_dark`, darkColors));
+    lines.push('');
+    const s = entry.descriptor.symbols;
+    registry.push(`    { &${s.viewTileset}, &${s.backgroundTileset}, &${s.viewPalette}, &${s.billboardPalette}, &${s.chest}, &${s.stairsUp}, &${s.stairsDown}, ${prefix}_palette_dark, &${prefix}_frame_static, ${prefix}_frames_fwd, ${prefix}_frames_turn }`);
+  });
+
+  lines.push('const DunViewSet dun_view_sets[DUN_VIEW_SET_COUNT] = {');
+  registry.forEach((row, index) => lines.push(`${row}${index === registry.length - 1 ? '' : ','}`));
+  lines.push('};', '');
 
   ensureDir(path.dirname(headerPath));
   ensureDir(path.dirname(sourcePath));
@@ -1110,15 +1346,15 @@ function exportPatternFiles(projectDir, view) {
  * ビューエクスポート統括 (キャッシュ付き)
  * ================================================================== */
 
-function computeBakeHash(projectDir, floor, settings) {
+function computeBakeHash(projectDir, assetSet, settings) {
   const hash = crypto.createHash('sha1');
   hash.update(`core:${core.version}`);
   hash.update(JSON.stringify({
     animation_frames: settings.animation_frames,
     turn_frames: settings.turn_frames,
   }));
-  hash.update(JSON.stringify(floor?.assets || {}));
-  const refs = { ...DEFAULT_ASSETS, ...(floor?.assets || {}) };
+  hash.update(JSON.stringify(assetSet?.assets || {}));
+  const refs = { ...DEFAULT_ASSETS, ...(assetSet?.assets || {}) };
   const seen = new Set();
   Object.values(refs).forEach((ref) => {
     const imagePath = resolveAssetPath(projectDir, parseTextureRef(ref).assetPath);
@@ -1135,68 +1371,150 @@ function computeBakeHash(projectDir, floor, settings) {
   return hash.digest('hex');
 }
 
-function viewOutputPaths(projectDir) {
+function viewOutputPaths(projectDir, descriptor) {
   return [
     path.join(projectDir, 'inc', 'dungeon_patterns.h'),
     path.join(projectDir, 'src', 'dungeon_patterns.c'),
-    path.join(projectDir, 'res', GENERATED_TILESET_REL),
-    ...Object.values(GENERATED_BB_SHEETS).map((rel) => path.join(projectDir, 'res', rel)),
+    path.join(projectDir, 'res', descriptor.paths.tileset),
+    path.join(projectDir, 'res', descriptor.paths.background),
+    ...Object.values(descriptor.paths.billboards).map((rel) => path.join(projectDir, 'res', rel)),
   ];
 }
 
-function exportViewAssets(projectDir, floors) {
-  const settings = readSettings(projectDir);
-  const floor = floors[0];
-  const bakeHash = computeBakeHash(projectDir, floor, settings);
-  const cachePath = path.join(projectDir, 'res', BAKE_CACHE_REL);
-  const cached = readJson(cachePath, null);
-  const outputsExist = viewOutputPaths(projectDir).every((filePath) => fs.existsSync(filePath));
-  if (cached && cached.hash === bakeHash && cached.summary && outputsExist) {
-    updateGeneratedResources(projectDir);
-    return { ...cached.summary, cached: true };
-  }
+function cacheableView(view) {
+  return { ...view, pool: { rows: view.pool.rows, count: view.pool.count } };
+}
 
-  const textures = loadViewTextures(projectDir, floor);
-  const view = buildViewExport(settings, textures);
-  const tilesetPath = writeTilesetAtlas(projectDir, view.pool, view.palette);
-  const sheetPaths = writeBillboardSheets(projectDir, view.sheets, view.spritePalette);
-  const { headerPath, sourcePath } = exportPatternFiles(projectDir, view);
-  const resourcePath = updateGeneratedResources(projectDir);
+function writeSetArtifacts(projectDir, entry) {
+  const { descriptor, view } = entry;
+  const tilesetPath = writeTilesetAtlas(projectDir, view.pool, view.palette, descriptor.paths.tileset);
+  const backgroundPath = writeBackdropTileset(projectDir, view.backdrop, view.palette, descriptor.paths.background);
+  const sheetPaths = writeBillboardSheets(projectDir, view.sheets, view.spritePalette, descriptor.paths.billboards);
+  return { tilesetPath, backgroundPath, sheetPaths };
+}
+
+function referencedAssetSets(floors, settings) {
+  const referenced = new Set(floors.map((floor) => floor.asset_set_id));
+  return settings.asset_sets.filter((set) => referenced.has(set.id));
+}
+
+function validateAssetSetTextures(projectDir, assetSets) {
+  assetSets.forEach((assetSet) => {
+    ASSET_KEYS.forEach((key) => {
+      validateTextureRef(projectDir, key, assetSet.assets[key]);
+    });
+  });
+}
+
+function validateReferencedAssetTextures(projectDir, floors, settings) {
+  validateAssetSetTextures(projectDir, referencedAssetSets(floors, settings));
+}
+
+function exportViewAssets(projectDir, floors, settingsInput = readSettings(projectDir)) {
+  const settings = normalizeSettings(settingsInput);
+  const assetSets = referencedAssetSets(floors, settings);
+  if (!assetSets.length) throw new Error('参照されている素材セットがありません');
+  validateAssetSetTextures(projectDir, assetSets);
+  const cachePath = path.join(projectDir, 'res', BAKE_CACHE_REL);
+  const cache = readJson(cachePath, { version: 2, entries: {} });
+  const nextCache = { version: 2, entries: {} };
+  let rebuilt = 0;
+  const entries = assetSets.map((assetSet) => {
+    const descriptor = generatedSetDescriptor(assetSet);
+    const hash = computeBakeHash(projectDir, assetSet, settings);
+    const cacheEntry = cache?.version === 2 ? cache.entries?.[assetSet.id] : null;
+    const cacheAbsolute = path.join(projectDir, 'res', descriptor.paths.cache);
+    let view = null;
+    let cached = false;
+    if (cacheEntry?.hash === hash && fs.existsSync(cacheAbsolute)) {
+      try {
+        view = v8.deserialize(fs.readFileSync(cacheAbsolute));
+        cached = true;
+      } catch (_) {
+        view = null;
+      }
+    }
+    if (!view) {
+      const textures = loadViewTextures(projectDir, assetSet, { validate: true, strict: true });
+      view = buildViewExport(settings, textures);
+      ensureDir(path.dirname(cacheAbsolute));
+      fs.writeFileSync(cacheAbsolute, v8.serialize(cacheableView(view)));
+      rebuilt++;
+    }
+    const entry = { assetSet, descriptor, view, hash, cached };
+    const outputsExist = viewOutputPaths(projectDir, descriptor).slice(2).every((filePath) => fs.existsSync(filePath));
+    if (!cached || !outputsExist) writeSetArtifacts(projectDir, entry);
+    nextCache.entries[assetSet.id] = { hash, key: descriptor.key, budget: view.budget };
+    return entry;
+  });
+
+  const { headerPath, sourcePath } = exportPatternFiles(projectDir, entries);
+  const resourcePath = updateGeneratedResources(projectDir, entries.map((entry) => entry.descriptor));
 
   try {
     const legacyPath = path.join(projectDir, 'res', GENERATED_LEGACY_MAP_REL);
     if (fs.existsSync(legacyPath)) fs.rmSync(legacyPath);
   } catch (_) { /* 旧ファイル削除は失敗しても致命的でない */ }
 
+  const setSummaries = entries.map((entry) => ({
+    id: entry.assetSet.id,
+    name: entry.assetSet.name,
+    key: entry.descriptor.key,
+    cached: entry.cached,
+    tileCount: entry.view.pool.count,
+    budget: entry.view.budget,
+    warnings: entry.view.warnings,
+    paths: entry.descriptor.paths,
+  }));
+  const budget = {
+    tileCount: setSummaries.reduce((sum, set) => sum + set.budget.tileCount, 0),
+    tileBytes: setSummaries.reduce((sum, set) => sum + set.budget.tileBytes, 0),
+    backgroundTileBytes: setSummaries.reduce((sum, set) => sum + set.budget.backgroundTileBytes, 0),
+    nodeWordsMax: Math.max(...setSummaries.map((set) => set.budget.nodeWordsMax)),
+    nodeWordsTotal: setSummaries.reduce((sum, set) => sum + set.budget.nodeWordsTotal, 0),
+    tableBytes: setSummaries.reduce((sum, set) => sum + set.budget.tableBytes, 0),
+    totalBytes: setSummaries.reduce((sum, set) => sum + set.budget.totalBytes, 0),
+  };
+  const warnings = setSummaries.flatMap((set) => set.warnings.map((warning) => `${set.name}: ${warning}`));
+  const first = entries[0];
   const summary = {
     headerPath,
     sourcePath,
-    tilesetPath,
-    sheetPaths,
+    tilesetPath: path.join(projectDir, 'res', first.descriptor.paths.tileset),
+    backgroundPath: path.join(projectDir, 'res', first.descriptor.paths.background),
+    sheetPaths: Object.fromEntries(Object.entries(first.descriptor.paths.billboards).map(([key, rel]) => [key, path.join(projectDir, 'res', rel)])),
     resourcePath,
-    tileCount: view.pool.count,
-    moveEdgeCount: view.spaces.move.length,
-    turnEdgeCount: view.spaces.turn.length,
-    fwdFrameCount: view.fwdFrames.length,
-    turnFrameCount: view.turnFrames.length,
-    budget: view.budget,
-    warnings: view.warnings,
+    tileCount: budget.tileCount,
+    moveEdgeCount: first.view.spaces.move.length,
+    turnEdgeCount: first.view.spaces.turn.length,
+    fwdFrameCount: first.view.fwdFrames.length,
+    turnFrameCount: first.view.turnFrames.length,
+    assetSets: setSummaries,
+    budget,
+    warnings,
   };
-  writeJson(cachePath, { hash: bakeHash, summary });
-  return { ...summary, cached: false };
+  writeJson(cachePath, nextCache);
+  return { ...summary, cached: rebuilt === 0 };
 }
 
 function exportDungeonData(projectDir) {
   ensureDir(getFloorsDir(projectDir));
   ensureResourcesFile(projectDir);
-  let floors = loadFloors(projectDir).map((entry) => entry.floor);
+  let rawFloors = loadFloors(projectDir).map((entry) => entry.floor);
+  let effective = resolveEffectiveState(rawFloors, readSettings(projectDir));
+  let floors = effective.floors;
   if (!floors.length) {
-    floors = [makeGeneratedFloor({ width: 12, height: 12, name: 'Floor 1', order: 1 })];
-    writeJson(floorFilePath(projectDir, floors[0]), floors[0]);
+    const firstSet = effective.settings.asset_sets[0];
+    floors = [makeGeneratedFloor({ width: 12, height: 12, name: 'Floor 1', order: 1, asset_set_id: firstSet?.id || '' })];
+    validateProjectState(floors, effective.settings);
+    writeJson(floorFilePath(projectDir, floors[0]), persistedFloor(floors[0]));
   }
+  validateProjectState(floors, effective.settings);
+  const usedSets = referencedAssetSets(floors, effective.settings);
+  const setIndexById = new Map(usedSets.map((set, index) => [set.id, index]));
   const headerPath = exportHeader(projectDir, floors);
-  const sourcePath = exportSource(projectDir, floors);
-  const view = exportViewAssets(projectDir, floors);
+  const sourcePath = exportSource(projectDir, floors, setIndexById);
+  const view = exportViewAssets(projectDir, floors, effective.settings);
   return {
     ok: true,
     floorCount: floors.length,
@@ -1206,7 +1524,9 @@ function exportDungeonData(projectDir) {
     patternSourcePath: view.sourcePath,
     patternTileCount: view.tileCount,
     patternTilesetPath: view.tilesetPath,
+    patternBackgroundPath: view.backgroundPath,
     resourcePath: view.resourcePath,
+    assetSets: view.assetSets,
     budget: view.budget,
     warnings: view.warnings,
     cached: view.cached,
@@ -1220,39 +1540,72 @@ function exportDungeonData(projectDir) {
 function listFloors(projectDir) {
   ensureDir(getFloorsDir(projectDir));
   ensureResourcesFile(projectDir);
+  const effective = resolveEffectiveState(loadFloors(projectDir).map((entry) => entry.floor), readSettings(projectDir));
   return {
     ok: true,
-    floors: loadFloors(projectDir).map((entry) => entry.floor),
-    settings: readSettings(projectDir),
+    floors: effective.floors,
+    settings: effective.settings,
     maxSize: MAX_SIZE,
     defaultAssets: DEFAULT_ASSETS,
   };
 }
 
-function saveFloor(projectDir, payload = {}) {
+function saveState(projectDir, payload = {}) {
   ensureDir(getFloorsDir(projectDir));
-  const current = loadFloors(projectDir).map((entry) => entry.floor);
-  const isCreate = Boolean(payload.create) || !payload.floor?.id;
-  const nextOrder = current.length + 1;
-  const fallbackName = isCreate ? makeNextFloorName(current) : `Floor ${payload.floor?.order || nextOrder}`;
-  const floor = normalizeFloor(payload.floor || {}, payload.floor?.order || nextOrder, fallbackName);
-  if (isCreate && (!payload.floor?.name || /Floor\s*\d+$/i.test(String(payload.floor.name)))) floor.name = fallbackName;
-  if (isCreate && !payload.floor?.order) floor.order = nextOrder;
-  const existing = findFloorFile(projectDir, floor.id);
-  const filePath = floorFilePath(projectDir, floor, existing);
-  writeJson(filePath, floor);
-  return { ok: true, floor, filePath, export: exportDungeonData(projectDir) };
+  const entries = loadFloors(projectDir);
+  const effective = resolveEffectiveState(entries.map((entry) => entry.floor), readSettings(projectDir));
+  const incomingSettings = payload.settings && typeof payload.settings === 'object' ? payload.settings : null;
+  const settings = normalizeSettings(incomingSettings
+    ? { ...effective.settings, ...incomingSettings }
+    : effective.settings);
+  let floors = effective.floors.slice();
+  let savedFloor = null;
+  const isCreate = Boolean(payload.create) || (payload.floor && !payload.floor.id);
+  if (payload.floor) {
+    const nextOrder = floors.length + 1;
+    const fallbackName = isCreate ? makeNextFloorName(floors) : `Floor ${payload.floor.order || nextOrder}`;
+    savedFloor = normalizeFloor(payload.floor, payload.floor.order || nextOrder, fallbackName);
+    if (!savedFloor.asset_set_id) savedFloor.asset_set_id = settings.asset_sets[0]?.id || '';
+    if (isCreate && (!payload.floor.name || /Floor\s*\d+$/i.test(String(payload.floor.name)))) savedFloor.name = fallbackName;
+    if (isCreate && !payload.floor.order) savedFloor.order = nextOrder;
+    const found = floors.findIndex((floor) => floor.id === savedFloor.id);
+    if (found >= 0) floors[found] = savedFloor;
+    else floors.push(savedFloor);
+  }
+  floors = floors
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
+    .map((floor, index) => ({ ...floor, order: index + 1 }));
+  if (savedFloor) savedFloor = floors.find((floor) => floor.id === savedFloor.id) || savedFloor;
+  validateProjectState(floors, settings);
+  /* 不正なtagless素材は設定・フロアを書き込む前にservice側でも拒否する。 */
+  validateAssetSetTextures(projectDir, settings.asset_sets);
+  writeJson(getSettingsPath(projectDir), settings);
+  const existingFiles = new Map(entries.map((entry) => [entry.floor.id, entry.filePath]));
+  floors.forEach((floor) => {
+    writeJson(floorFilePath(projectDir, floor, existingFiles.get(floor.id)), persistedFloor(floor));
+  });
+  const filePath = savedFloor ? floorFilePath(projectDir, savedFloor, existingFiles.get(savedFloor.id)) : '';
+  return { ok: true, floor: savedFloor, floors: floors.map(persistedFloor), settings, filePath, export: exportDungeonData(projectDir) };
+}
+
+function saveFloor(projectDir, payload = {}) {
+  return saveState(projectDir, payload);
 }
 
 function deleteFloor(projectDir, payload = {}) {
   const id = String(payload.id || payload.floorId || '').trim();
   if (!id) return { ok: false, error: 'floor id is required' };
   const entries = loadFloors(projectDir);
+  const effective = resolveEffectiveState(entries.map((entry) => entry.floor), readSettings(projectDir));
   const target = entries.find((entry) => entry.floor.id === id);
   if (!target) return { ok: false, error: `floor not found: ${id}` };
   fs.unlinkSync(target.filePath);
-  loadFloors(projectDir).forEach((entry, index) => {
-    writeJson(entry.filePath, { ...entry.floor, order: index + 1 });
+  const remaining = effective.floors.filter((floor) => floor.id !== id);
+  validateProjectState(remaining, effective.settings);
+  writeJson(getSettingsPath(projectDir), effective.settings);
+  remaining.forEach((floor, index) => {
+    const filePath = entries.find((entry) => entry.floor.id === floor.id)?.filePath || floorFilePath(projectDir, floor);
+    writeJson(filePath, persistedFloor({ ...floor, order: index + 1 }));
   });
   return { ok: true, deletedId: id, export: exportDungeonData(projectDir) };
 }
@@ -1263,46 +1616,56 @@ function moveFloor(projectDir, payload = {}) {
   if (!id) return { ok: false, error: 'floor id is required' };
   if (direction !== 'up' && direction !== 'down') return { ok: false, error: 'direction must be up or down' };
   const entries = loadFloors(projectDir);
-  const fromIndex = entries.findIndex((entry) => entry.floor.id === id);
+  const effective = resolveEffectiveState(entries.map((entry) => entry.floor), readSettings(projectDir));
+  const fromIndex = effective.floors.findIndex((floor) => floor.id === id);
   if (fromIndex < 0) return { ok: false, error: `floor not found: ${id}` };
   const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
-  if (toIndex < 0 || toIndex >= entries.length) return { ok: true, moved: false, floor: entries[fromIndex].floor };
-  const nextEntries = entries.slice();
+  if (toIndex < 0 || toIndex >= effective.floors.length) return { ok: true, moved: false, floor: effective.floors[fromIndex] };
+  const nextEntries = effective.floors.slice();
   const [moved] = nextEntries.splice(fromIndex, 1);
   nextEntries.splice(toIndex, 0, moved);
-  let movedFloor = moved.floor;
-  nextEntries.forEach((entry, index) => {
-    const next = { ...entry.floor, order: index + 1 };
-    if (entry.floor.id === id) movedFloor = next;
-    writeJson(entry.filePath, next);
+  let movedFloor = moved;
+  writeJson(getSettingsPath(projectDir), effective.settings);
+  nextEntries.forEach((floor, index) => {
+    const next = { ...floor, order: index + 1 };
+    if (floor.id === id) movedFloor = next;
+    const filePath = entries.find((entry) => entry.floor.id === floor.id)?.filePath || floorFilePath(projectDir, floor);
+    writeJson(filePath, persistedFloor(next));
   });
   return { ok: true, moved: true, floor: movedFloor, export: exportDungeonData(projectDir) };
 }
 
 function generateFloor(projectDir, payload = {}) {
-  const current = loadFloors(projectDir).map((entry) => entry.floor);
+  const effective = resolveEffectiveState(loadFloors(projectDir).map((entry) => entry.floor), readSettings(projectDir));
+  const current = effective.floors;
   const order = clampInt(payload.order, 1, 999, current.length + 1);
   const floor = makeGeneratedFloor({
     ...payload,
     order,
     name: payload.name || makeNextFloorName(current),
+    asset_set_id: payload.asset_set_id || effective.settings.asset_sets[0]?.id || '',
   });
   const filePath = floorFilePath(projectDir, floor, findFloorFile(projectDir, floor.id));
-  writeJson(filePath, floor);
+  validateProjectState([...current, floor], effective.settings);
+  writeJson(getSettingsPath(projectDir), effective.settings);
+  current.forEach((currentFloor) => {
+    const existingPath = findFloorFile(projectDir, currentFloor.id);
+    if (existingPath) writeJson(existingPath, persistedFloor(currentFloor));
+  });
+  writeJson(filePath, persistedFloor(floor));
   return { ok: true, floor, filePath, export: exportDungeonData(projectDir) };
 }
 
 function listSettings(projectDir) {
   ensureDir(getDungeonDir(projectDir));
   ensureResourcesFile(projectDir);
-  return { ok: true, settings: readSettings(projectDir), defaultAssets: DEFAULT_ASSETS };
+  const effective = resolveEffectiveState(loadFloors(projectDir).map((entry) => entry.floor), readSettings(projectDir));
+  return { ok: true, settings: effective.settings, defaultAssets: DEFAULT_ASSETS };
 }
 
 function saveSettings(projectDir, payload = {}) {
   const incoming = payload.settings && typeof payload.settings === 'object' ? payload.settings : payload;
-  const settings = normalizeSettings({ ...readSettings(projectDir), ...incoming });
-  writeJson(getSettingsPath(projectDir), settings);
-  return { ok: true, settings, export: exportDungeonData(projectDir) };
+  return saveState(projectDir, { settings: incoming });
 }
 
 module.exports = {
@@ -1310,13 +1673,25 @@ module.exports = {
   MIN_SIZE,
   DIRS,
   DIR_INDEX,
+  ASSET_KEYS,
+  ASSET_CONSTRAINTS,
   DEFAULT_ASSETS,
+  DEFAULT_ASSET_SET,
   DEFAULT_SETTINGS,
   normalizeFloor,
+  normalizeAssetSet,
   normalizeSettings,
+  resolveEffectiveState,
+  validateProjectState,
+  validateTextureRef,
+  validateAssetSetTextures,
+  validateReferencedAssetTextures,
+  parsePng,
+  writeIndexedPng,
   makeGeneratedFloor,
   listFloors,
   saveFloor,
+  saveState,
   deleteFloor,
   moveFloor,
   generateFloor,

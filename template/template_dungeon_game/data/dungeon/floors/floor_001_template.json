@@ -9,15 +9,7 @@
     "y": 1,
     "dir": 1
   },
-  "assets": {
-    "wall_texture": "dungeon/textures/dungeon_texture_atlas.png#wall",
-    "door_texture": "dungeon/textures/dungeon_texture_atlas.png#door",
-    "floor_texture": "dungeon/textures/dungeon_texture_atlas.png#floor",
-    "ceiling_texture": "dungeon/textures/dungeon_texture_atlas.png#ceiling",
-    "chest_texture": "dungeon/textures/dungeon_texture_atlas.png#chest",
-    "stairs_up_texture": "dungeon/textures/dungeon_texture_atlas.png#stairs_up",
-    "stairs_down_texture": "dungeon/textures/dungeon_texture_atlas.png#stairs_down"
-  },
+  "asset_set_id": "default",
   "cells": [
     [
       {

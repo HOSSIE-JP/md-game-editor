@@ -246,6 +246,17 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 - 再生・停止・先頭・末尾・loop は icon button を使う。select の表示は `1 (4 frames)` のように、周辺文脈と重複しない短い表記にする。
 - SPRITE preview はスプライトシート全体ではなく、RESCOMP 定義の frame size / ROW animation / time / collision を反映する。`time=0` は SGDK に合わせて再生停止として扱い、canvas では `imageSmoothingEnabled = false` を指定する。
 
+### Dungeon game v1.1 素材セット
+
+- `settings.json.asset_sets` に、安定した `id`、表示用 `name`、壁・扉・床・天井・宝箱・上り階段・下り階段の7参照を持つ素材セットを1～255件、順序付きで保存する。フロアはinline素材を持たず `asset_set_id` で参照する。
+- 重複ID、存在しない参照、セット0件、255件超過は保存/ビルドエラーにする。最後のセットと参照中セットは削除させない。旧 `floor.assets` は開くだけでは書き換えず、最初の明示保存時に同一内容を重複排除して全フロアを一括移行する。
+- フロアと設定を一度に更新するときは `saveDungeonState({ floor, settings })` を使い、exportを1回だけ行う。既存の個別保存hookは後方互換のため維持する。
+- 素材UIはplugin renderer内に置き、`dialog.openFile`、`image-import-pipeline.convertToIndexed16()`、`writeAssetFile()` を利用する。結果の `targetExtension` を尊重し、project内の `res/dungeon/textures/<set-id>/` だけへ保存する。
+- 変換後は8bit・非interlace・16色以下のindexed PNGであることをrenderer/serviceの双方で検証する。壁/扉は96x96・不透明、床/天井は32x32・不透明、宝箱/上下階段は48x48・透過可。エラー時は設定を更新しない。
+- 各素材カードはcontain表示、pixel smoothingなしのpreviewと、寸法・色数・保存先・検証結果を表示する。上書き後はtexture cacheを破棄し、非同期読込結果には世代番号を持たせる。新規タグなし画像は全体、旧 `path#tag` は3x2/4x2アトラス要素として扱う。
+- 床/天井の32x32パターンはBG_Bの下半分/上半分（各200x64）へ固定反復配置し、decision tableへ焼き込まない。壁/扉はpalette index 0が透明なBG_A動的タイルとして重ねる。previewとgeneratorは共有render coreで同じ合成を行う。
+- 参照中の素材セットごとにSGDK tileset/background/palette/billboard sprite/decision tableを生成し、フロアの素材セットindexと `DunViewSet` registryで初期表示・フロア遷移時に切り替える。未使用セットをROMへ含めず、cacheとbudgetはセット単位に管理する。
+
 ---
 
 ## フック早見表
@@ -301,7 +312,7 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 
 ---
 
-*Last Updated: 2026-06 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins / Dungeon generated wall patterns / Dungeon SGDK TILESET/TILEMAP assets / Dungeon template / Editor UX guardrails / Bundled WASM split metadata*
+*Last Updated: 2026-07 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.1 / Dungeon reusable seven-element asset sets / Indexed image import and validation / Fixed BG_B floor-ceiling + transparent BG_A walls / Per-set SGDK resources / Dungeon template / Editor UX guardrails / Bundled WASM split metadata*
 
 
 ## MD/PCE split note

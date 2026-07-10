@@ -111,6 +111,7 @@ static void applyCellDarkness(const DungeonFloorData *floor)
 
 static void drawCurrentView(const DungeonFloorData *floor)
 {
+    DUN_applyViewSet(floor->view_set);
     applyCellDarkness(floor);
     DUN_drawStatic(floor, player_x, player_y, player_dir);
     DUN_drawMinimap(floor, player_x, player_y, player_dir);

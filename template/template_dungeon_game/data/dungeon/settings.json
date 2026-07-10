@@ -4,5 +4,20 @@
   "view_tile_width": 25,
   "view_tile_height": 16,
   "view_pixel_width": 200,
-  "view_pixel_height": 128
+  "view_pixel_height": 128,
+  "asset_sets": [
+    {
+      "id": "default",
+      "name": "Default",
+      "assets": {
+        "wall_texture": "dungeon/textures/dungeon_texture_atlas.png#wall",
+        "door_texture": "dungeon/textures/dungeon_texture_atlas.png#door",
+        "floor_texture": "dungeon/textures/dungeon_texture_atlas.png#floor",
+        "ceiling_texture": "dungeon/textures/dungeon_texture_atlas.png#ceiling",
+        "chest_texture": "dungeon/textures/dungeon_texture_atlas.png#chest",
+        "stairs_up_texture": "dungeon/textures/dungeon_texture_atlas.png#stairs_up",
+        "stairs_down_texture": "dungeon/textures/dungeon_texture_atlas.png#stairs_down"
+      }
+    }
+  ]
 }

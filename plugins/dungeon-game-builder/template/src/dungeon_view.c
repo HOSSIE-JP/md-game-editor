@@ -6,11 +6,12 @@
  * ROM 上のタイルセットから 400 タイルを VRAM のダブルバッファへ
  * DMA ストリーミングして 25x16 のビューを合成する。
  *
- *  - 前進/後退: dun_frames_fwd を順再生/逆再生
- *  - 右回転:   dun_frames_turn を再生
+ *  - 前進/後退: 選択素材セットの frames_fwd を順再生/逆再生
+ *  - 右回転:   選択素材セットの frames_turn を再生
  *  - 左回転:   右回転テーブルを鏡像評価 (dun_edges_turn_mirrored) し
  *              水平反転で合成する
- *  - 宝箱/階段: プリスケール済みビルボードスプライト (dun_bb_*)
+ *  - 床/天井:  選択素材セットの 32x32 パターンを BG_B へ反復配置
+ *  - 宝箱/階段: 選択素材セットのプリスケール済みビルボードスプライト
  * ============================================================= */
 #include "dungeon_view.h"
 #include "dungeon_patterns.h"
@@ -34,6 +35,7 @@ static u32 tile_staging[DUN_BANK_TILES * 8];
 static u16 map_staging[DUN_VIEW_TILE_COUNT];
 static u8 back_bank;
 static bool view_dark;
+static const DunViewSet *active_view_set;
 static Sprite *bb_sprites[DUN_SPRITE_COUNT];
 
 /* ミニマップ (ビュー右の余白, BG_A + PAL2, 4px/セル) */
@@ -44,8 +46,10 @@ static Sprite *bb_sprites[DUN_SPRITE_COUNT];
 #define DUN_MM_X 30
 #define DUN_MM_Y 4
 #define DUN_MM_CELL 4
+#define DUN_BACKGROUND_BASE (DUN_MM_BASE + (DUN_MM_TILES_W * DUN_MM_TILES_H))
 
 static u32 mm_tiles[DUN_MM_TILES_W * DUN_MM_TILES_H * 8];
+static u16 background_map[DUN_VIEW_TILE_COUNT];
 static const u16 dun_mm_palette[16] = {
     0x0000, /* 0: 未使用 */
     0x0222, /* 1: 背景 */
@@ -61,18 +65,50 @@ static const u16 dun_mm_palette[16] = {
 };
 static void mmWriteTileMap(void);
 
+static void writeBackground(void)
+{
+    u16 x;
+    u16 y;
+    for (y = 0; y < DUN_VIEW_TILE_H; y++)
+    {
+        const u16 pattern_base = (y < 8) ? 0 : (DUN_BACKGROUND_TILE_COUNT / 2);
+        const u16 pattern_row = (u16)((y & 3) * 4);
+        for (x = 0; x < DUN_VIEW_TILE_W; x++)
+        {
+            const u16 tile = (u16)(pattern_base + pattern_row + (x & 3));
+            background_map[(y * DUN_VIEW_TILE_W) + x] =
+                TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, DUN_BACKGROUND_BASE + tile);
+        }
+    }
+    VDP_loadTileSet(active_view_set->background_tileset, DUN_BACKGROUND_BASE, CPU);
+    VDP_setTileMapDataRect(BG_B, background_map, DUN_VIEW_X, DUN_VIEW_Y,
+                           DUN_VIEW_TILE_W, DUN_VIEW_TILE_H, DUN_VIEW_TILE_W, CPU);
+}
+
+void DUN_applyViewSet(u8 view_set)
+{
+    if (view_set >= DUN_VIEW_SET_COUNT) view_set = 0;
+    if (active_view_set == &dun_view_sets[view_set]) return;
+
+    active_view_set = &dun_view_sets[view_set];
+    if (view_dark) PAL_setColors(0, active_view_set->dark_palette, 16, CPU);
+    else PAL_setPalette(PAL0, active_view_set->view_palette->data, CPU);
+    PAL_setPalette(PAL1, active_view_set->billboard_palette->data, CPU);
+    writeBackground();
+}
+
 void DUN_initView(void)
 {
     u16 i;
     VDP_clearPlane(BG_A, TRUE);
     VDP_clearPlane(BG_B, TRUE);
-    PAL_setPalette(PAL0, dungeon_view_palette.data, CPU);
-    PAL_setPalette(PAL1, dungeon_bb_palette.data, CPU);
     PAL_setColors(32, dun_mm_palette, 16, CPU);
     SPR_init();
     for (i = 0; i < DUN_SPRITE_COUNT; i++) bb_sprites[i] = NULL;
     back_bank = 0;
     view_dark = FALSE;
+    active_view_set = NULL;
+    DUN_applyViewSet(0);
     mmWriteTileMap();
 }
 
@@ -80,8 +116,8 @@ void DUN_setDark(bool dark)
 {
     if (dark == view_dark) return;
     view_dark = dark;
-    if (dark) PAL_setColors(0, dun_palette_dark, 16, CPU);
-    else PAL_setPalette(PAL0, dungeon_view_palette.data, CPU);
+    if (dark) PAL_setColors(0, active_view_set->dark_palette, 16, CPU);
+    else PAL_setPalette(PAL0, active_view_set->view_palette->data, CPU);
 }
 
 /* ------------------------------------------------------------
@@ -177,7 +213,7 @@ static void stageFrame(const DunFrameTable *table, bool mirrored)
         global = table->tile_map[local];
         flips = table->tile_flips[local];
         if (mirrored) flips ^= 1;
-        src = &dungeon_view_tileset.tiles[(u32)global * 8];
+        src = &active_view_set->view_tileset->tiles[(u32)global * 8];
         dest = &tile_staging[(u32)tile * 8];
         dest[0] = src[0];
         dest[1] = src[1];
@@ -282,9 +318,9 @@ static bool losVisible(const DungeonFloorData *floor, u8 x, u8 y, u8 dir, s8 dd,
 
 static const SpriteDefinition *billboardDefForFlags(u8 flags)
 {
-    if (flags & DUN_FLAG_CHEST) return &dungeon_bb_chest;
-    if (flags & DUN_FLAG_STAIRS_UP) return &dungeon_bb_stairs_up;
-    if (flags & DUN_FLAG_STAIRS_DOWN) return &dungeon_bb_stairs_down;
+    if (flags & DUN_FLAG_CHEST) return active_view_set->chest;
+    if (flags & DUN_FLAG_STAIRS_UP) return active_view_set->stairs_up;
+    if (flags & DUN_FLAG_STAIRS_DOWN) return active_view_set->stairs_down;
     return NULL;
 }
 
@@ -430,7 +466,7 @@ void DUN_drawMinimap(const DungeonFloorData *floor, u8 px, u8 py, u8 dir)
 void DUN_drawStatic(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
 {
     evaluateEdgeStates(floor, x, y, dir & 3, dun_edges_move, DUN_MOVE_EDGE_COUNT);
-    stageFrame(&dun_frame_static, FALSE);
+    stageFrame(active_view_set->frame_static, FALSE);
     updateBillboards(floor, x, y, dir & 3, dun_bb_static, FALSE);
     flushFrame();
 }
@@ -441,7 +477,7 @@ void DUN_playForward(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
     evaluateEdgeStates(floor, x, y, dir & 3, dun_edges_move, DUN_MOVE_EDGE_COUNT);
     for (frame = 0; frame < DUN_FWD_FRAMES; frame++)
     {
-        stageFrame(&dun_frames_fwd[frame], FALSE);
+        stageFrame(&active_view_set->frames_fwd[frame], FALSE);
         updateBillboards(floor, x, y, dir & 3, dun_bb_fwd[frame], FALSE);
         flushFrame();
     }
@@ -454,7 +490,7 @@ void DUN_playBackward(const DungeonFloorData *floor, u8 target_x, u8 target_y, u
     evaluateEdgeStates(floor, target_x, target_y, dir & 3, dun_edges_move, DUN_MOVE_EDGE_COUNT);
     for (frame = DUN_FWD_FRAMES; frame > 0; frame--)
     {
-        stageFrame(&dun_frames_fwd[frame - 1], FALSE);
+        stageFrame(&active_view_set->frames_fwd[frame - 1], FALSE);
         updateBillboards(floor, target_x, target_y, dir & 3, dun_bb_fwd[frame - 1], FALSE);
         flushFrame();
     }
@@ -468,7 +504,7 @@ void DUN_playTurn(const DungeonFloorData *floor, u8 x, u8 y, u8 dir, bool left)
     else evaluateEdgeStates(floor, x, y, dir & 3, dun_edges_turn, DUN_TURN_EDGE_COUNT);
     for (frame = 0; frame < DUN_TURN_FRAMES; frame++)
     {
-        stageFrame(&dun_frames_turn[frame], left);
+        stageFrame(&active_view_set->frames_turn[frame], left);
         updateBillboards(floor, x, y, dir & 3, dun_bb_turn[frame], left);
         flushFrame();
     }

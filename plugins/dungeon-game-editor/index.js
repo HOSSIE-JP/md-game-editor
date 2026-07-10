@@ -39,6 +39,14 @@ function saveDungeonFloor(payload, context = {}) {
   }
 }
 
+function saveDungeonState(payload, context = {}) {
+  try {
+    return dungeonService.saveState(getProjectDir(context), payload || {});
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
 function deleteDungeonFloor(payload, context = {}) {
   try {
     return dungeonService.deleteFloor(getProjectDir(context), payload || {});
@@ -94,6 +102,7 @@ module.exports = {
   onDeactivate,
   listDungeonFloors,
   saveDungeonFloor,
+  saveDungeonState,
   deleteDungeonFloor,
   moveDungeonFloor,
   generateDungeonFloor,

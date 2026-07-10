@@ -23,7 +23,11 @@
 .dge-save,
 .dge-wide,
 .dge-compass button,
-.dge-preview-controls button {
+.dge-preview-controls button,
+.dge-set-list-actions button,
+.dge-set-actions button,
+.dge-asset-actions button,
+.dge-modal-actions button {
   min-height: 30px;
   border: 1px solid #3e4946;
   border-radius: 4px;
@@ -125,6 +129,7 @@
 }
 
 .dge-field input,
+.dge-field select,
 .dge-floor-select {
   width: 100%;
   min-width: 0;
@@ -243,9 +248,316 @@
 }
 
 .dge-assets {
-  max-width: 760px;
-  padding: 18px;
-  width: min(760px, 100%);
+  min-width: 980px;
+  min-height: 100%;
+  width: 100%;
+  flex: 1 0 auto;
+}
+
+.dge-assets-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(720px, 1fr);
+  min-height: 100%;
+}
+
+.dge-set-list-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px;
+  border-right: 1px solid #2d3634;
+  background: #171d1c;
+}
+
+.dge-set-list-pane > header,
+.dge-set-header,
+.dge-asset-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dge-set-list-pane > header {
+  padding-bottom: 10px;
+  color: #bac7bf;
+  font-size: 12px;
+}
+
+.dge-set-list {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-height: 80px;
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+.dge-set-item {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 48px;
+  padding: 7px 9px;
+  border: 1px solid #36413e;
+  border-radius: 4px;
+  background: #111514;
+  color: #edf2e8;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dge-set-item small {
+  color: #8fa099;
+}
+
+.dge-set-item.active {
+  border-color: #7bd9a6;
+  background: #27483d;
+}
+
+.dge-set-list-actions,
+.dge-set-actions,
+.dge-asset-actions,
+.dge-modal-actions {
+  display: flex;
+  gap: 7px;
+}
+
+.dge-set-list-actions {
+  padding-top: 10px;
+}
+
+.dge-set-list-actions button {
+  flex: 1;
+}
+
+.dge-set-editor {
+  min-width: 0;
+  padding: 16px;
+}
+
+.dge-set-header {
+  margin-bottom: 14px;
+}
+
+.dge-set-header h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.dge-set-header code {
+  color: #8fa099;
+  font-size: 11px;
+}
+
+.dge-set-actions button,
+.dge-asset-actions button,
+.dge-modal-actions button {
+  padding: 0 10px;
+}
+
+.dge-set-actions button.danger,
+.dge-modal-actions button.danger {
+  color: #ffb7a5;
+  border-color: #704337;
+}
+
+.dge-set-actions button:disabled,
+.dge-set-list-actions button:disabled,
+.dge-asset-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dge-assets-workspace {
+  display: grid;
+  grid-template-columns: minmax(520px, 1fr) minmax(250px, 330px);
+  gap: 16px;
+  align-items: start;
+}
+
+.dge-asset-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(250px, 1fr));
+  gap: 12px;
+}
+
+.dge-asset-card {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 8px 10px;
+  padding: 10px;
+  border: 1px solid #36413e;
+  border-radius: 6px;
+  background: #171d1c;
+}
+
+.dge-asset-card > header {
+  grid-column: 1 / -1;
+}
+
+.dge-asset-card > header span {
+  color: #8fa099;
+  font-size: 10px;
+}
+
+.dge-asset-thumb {
+  grid-row: span 4;
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 96px;
+  overflow: hidden;
+  border: 1px solid #3d4945;
+  border-radius: 4px;
+  background-color: #0b0e0d;
+  background-image:
+    linear-gradient(45deg, #202624 25%, transparent 25%),
+    linear-gradient(-45deg, #202624 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #202624 75%),
+    linear-gradient(-45deg, transparent 75%, #202624 75%);
+  background-position: 0 0, 0 5px, 5px -5px, -5px 0;
+  background-size: 10px 10px;
+}
+
+.dge-asset-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.dge-asset-card label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: #8fa099;
+  font-size: 10px;
+}
+
+.dge-asset-card input {
+  min-width: 0;
+  width: 100%;
+  height: 27px;
+  padding: 0 7px;
+  border: 1px solid #36413e;
+  border-radius: 3px;
+  background: #0f1312;
+  color: #bac7bf;
+  text-overflow: ellipsis;
+}
+
+.dge-asset-facts {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  color: #bac7bf;
+  font-size: 10px;
+}
+
+.dge-asset-validation {
+  min-height: 30px;
+  padding: 5px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.dge-asset-validation.pending {
+  color: #aebbb5;
+  background: #202624;
+}
+
+.dge-asset-validation.ok {
+  color: #9ee8bd;
+  background: #173328;
+}
+
+.dge-asset-validation.error {
+  color: #ffb7a5;
+  background: #3b211c;
+}
+
+.dge-asset-actions {
+  align-self: end;
+}
+
+.dge-asset-actions button:first-child {
+  background: #28593e;
+}
+
+.dge-assets-preview-pane {
+  position: sticky;
+  top: 0;
+  padding: 12px;
+  border: 1px solid #36413e;
+  border-radius: 6px;
+  background: #171d1c;
+}
+
+.dge-assets-preview-pane p {
+  margin: 8px 0 0;
+  color: #8fa099;
+  font-size: 11px;
+}
+
+.dge-assets-view {
+  display: block;
+  width: 100%;
+  aspect-ratio: 200 / 128;
+  image-rendering: pixelated;
+  border: 1px solid #3d4945;
+  background: #050607;
+}
+
+.dge-assets-empty {
+  padding: 30px;
+  color: #bac7bf;
+}
+
+.dge-modal-panel {
+  color: #edf2e8;
+}
+
+.dge-modal-header {
+  padding: 16px 18px 8px;
+}
+
+.dge-modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.dge-modal-form {
+  display: grid;
+  gap: 16px;
+  padding: 10px 18px 18px;
+}
+
+.dge-modal-form label {
+  display: grid;
+  gap: 6px;
+  color: #bac7bf;
+  font-size: 12px;
+}
+
+.dge-modal-form input {
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid #3d4945;
+  border-radius: 4px;
+  background: #0f1312;
+  color: #edf2e8;
+}
+
+.dge-modal-actions {
+  justify-content: flex-end;
+}
+
+.dge-modal-actions button.primary {
+  background: #28593e;
+  border-color: #5ca77f;
 }
 
 .dge-generated-assets {
@@ -256,4 +568,20 @@
   font-size: 12px;
   line-height: 1.7;
   word-break: break-all;
+}
+
+.dge-export-set-stats {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid #2d3634;
+}
+
+@media (max-width: 1180px) {
+  .dge-assets-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .dge-assets-preview-pane {
+    position: static;
+  }
 }

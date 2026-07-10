@@ -226,6 +226,18 @@
     }
   }
 
+  function sampleTextureRawColors(texture, colors) {
+    const stepX = Math.max(1, Math.floor(texture.width / 32));
+    const stepY = Math.max(1, Math.floor(texture.height / 32));
+    for (let y = 0; y < texture.height; y += stepY) {
+      for (let x = 0; x < texture.width; x += stepX) {
+        const i = ((y * texture.width) + x) * 4;
+        if (texture.data[i + 3] < 16) continue;
+        colors.push({ r: texture.data[i], g: texture.data[i + 1], b: texture.data[i + 2] });
+      }
+    }
+  }
+
   function colorRange(colors) {
     const min = { r: 255, g: 255, b: 255 };
     const max = { r: 0, g: 0, b: 0 };
@@ -306,17 +318,8 @@
     const colors = [];
     sampleTextureColors(textures.wall, colors);
     sampleTextureColors(textures.door, colors);
-    const floorAvg = averageTextureColor(textures.floor);
-    const ceilingAvg = averageTextureColor(textures.ceiling);
-    for (let y = 0; y < VIEW_H; y++) {
-      const avg = y < VIEW_HORIZON ? ceilingAvg : floorAvg;
-      const shade = bandShade(bandDepthForRow(y));
-      colors.push({
-        r: clamp(Math.round(avg.r * shade), 0, 255),
-        g: clamp(Math.round(avg.g * shade), 0, 255),
-        b: clamp(Math.round(avg.b * shade), 0, 255),
-      });
-    }
+    sampleTextureRawColors(textures.floor, colors);
+    sampleTextureRawColors(textures.ceiling, colors);
     const quantized = quantizeColors(colors, 15);
     return [{ value: 0, r: 0, g: 0, b: 0 }, ...quantized];
   }
@@ -349,20 +352,40 @@
     return best;
   }
 
-  function buildBandTables(palette, texturesInput) {
+  function buildBackdropSheet(palette, texturesInput) {
     const textures = normalizeTextures(texturesInput);
-    const floorAvg = averageTextureColor(textures.floor);
-    const ceilingAvg = averageTextureColor(textures.ceiling);
-    const rows = new Uint8Array(VIEW_H);
-    for (let y = 0; y < VIEW_H; y++) {
-      const avg = y < VIEW_HORIZON ? ceilingAvg : floorAvg;
-      const shade = bandShade(bandDepthForRow(y));
-      rows[y] = nearestPalette(palette, avg.r * shade, avg.g * shade, avg.b * shade);
+    const width = 32;
+    const height = 64;
+    const pixels = new Uint8Array(width * height);
+    for (let y = 0; y < height; y++) {
+      const texture = y < 32 ? textures.ceiling : textures.floor;
+      const v = ((y & 31) + 0.5) / 32;
+      for (let x = 0; x < width; x++) {
+        const texel = sampleTexel(texture, (x + 0.5) / 32, v);
+        pixels[(y * width) + x] = nearestPalette(palette, texel.r, texel.g, texel.b);
+      }
     }
-    return rows;
+    return { width, height, pixels };
+  }
+
+  /*
+   * 互換名を維持する。旧実装は走査線ごとの単色帯だったが、v2.2 では
+   * BG_B に固定配置する 32x32 の床/天井パターンを 200x128 に展開する。
+   */
+  function buildBandTables(palette, texturesInput) {
+    const sheet = buildBackdropSheet(palette, texturesInput);
+    const out = new Uint8Array(VIEW_W * VIEW_H);
+    for (let y = 0; y < VIEW_H; y++) {
+      const sourceY = y < VIEW_HORIZON ? (y & 31) : (32 + ((y - VIEW_HORIZON) & 31));
+      for (let x = 0; x < VIEW_W; x++) {
+        out[(y * VIEW_W) + x] = sheet.pixels[(sourceY * sheet.width) + (x & 31)];
+      }
+    }
+    return out;
   }
 
   function buildBackground(bandRows) {
+    if (bandRows && bandRows.length === VIEW_W * VIEW_H) return Uint8Array.from(bandRows);
     const out = new Uint8Array(VIEW_W * VIEW_H);
     for (let y = 0; y < VIEW_H; y++) {
       out.fill(bandRows[y], y * VIEW_W, (y + 1) * VIEW_W);
@@ -727,9 +750,7 @@
   function renderView(pose, defs, states, texturesInput, palette, bandRows, out) {
     const textures = normalizeTextures(texturesInput);
     const pixels = out || new Uint8Array(VIEW_W * VIEW_H);
-    for (let y = 0; y < VIEW_H; y++) {
-      pixels.fill(bandRows[y], y * VIEW_W, (y + 1) * VIEW_W);
-    }
+    pixels.set(buildBackground(bandRows));
     const zBuffer = new Float32Array(VIEW_W * VIEW_H);
     zBuffer.fill(Number.POSITIVE_INFINITY);
     for (let i = 0; i < defs.length; i++) {
@@ -916,11 +937,10 @@
       frameStats.leafRenders++;
       const tx = tile % VIEW_TILE_W;
       const ty = Math.floor(tile / VIEW_TILE_W);
-      const band = bandRows;
       for (let py = 0; py < 8; py++) {
-        const rowValue = band[(ty * 8) + py];
         for (let px = 0; px < 8; px++) {
-          leafPixels[(py * 8) + px] = rowValue;
+          /* palette index 0 is transparent on BG_A; floor/ceiling live on BG_B. */
+          leafPixels[(py * 8) + px] = 0;
           leafZ[(py * 8) + px] = Number.POSITIVE_INFINITY;
         }
       }
@@ -1086,6 +1106,14 @@
           }
         }
       }
+    }
+    return pixels;
+  }
+
+  function compositeView(background, foreground, out) {
+    const pixels = out || new Uint8Array(VIEW_W * VIEW_H);
+    for (let i = 0; i < pixels.length; i++) {
+      pixels[i] = foreground[i] === 0 ? background[i] : foreground[i];
     }
     return pixels;
   }
@@ -1297,7 +1325,7 @@
   }
 
   const core = {
-    version: '2.1.0',
+    version: '2.2.0',
     VIEW_W,
     VIEW_H,
     VIEW_TILE_W,
@@ -1335,6 +1363,7 @@
     buildViewPalette,
     buildSpritePalette,
     buildBandTables,
+    buildBackdropSheet,
     buildBackground,
     nearestPalette,
     easeSmooth,
@@ -1352,6 +1381,7 @@
     makeTilePool,
     composeFromFrame,
     assembleTiles,
+    compositeView,
     tileRowsFromPixels,
     tileRowsKey,
     hflipTileRows,

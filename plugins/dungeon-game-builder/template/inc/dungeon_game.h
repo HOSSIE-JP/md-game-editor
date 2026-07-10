@@ -41,6 +41,7 @@ typedef struct DungeonFloorData
     u8 start_x;
     u8 start_y;
     u8 start_dir;
+    u8 view_set;
     const u16 *edges;
     const u8 *flags;
 } DungeonFloorData;

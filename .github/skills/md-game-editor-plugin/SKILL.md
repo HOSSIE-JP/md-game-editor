@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-07 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins / Dungeon decision-table view engine (render-core / 4-cell depth / door / billboards / dark palette) / Dungeon SGDK TILESET+SPRITE assets / Dungeon template / Editor UX guardrails / Bundled WASM split metadata
+> § Last Updated: 2026-07 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.1 / Dungeon reusable seven-element asset sets / Indexed image import and validation / Fixed BG_B floor-ceiling + transparent BG_A walls / Per-set SGDK resources / Dungeon template / Editor UX guardrails / Bundled WASM split metadata
 
 ---
 
@@ -343,13 +343,24 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `md-bgm-composer` | `editor`, `converter`, `asset` | Mega Drive 向け BGM tracker、MIDI import、VGM/XGM export、XGM2 アセット登録 |
 | `rhythm-game-editor` | `editor`, `asset` | Mega Drive 向けリズムゲームの楽曲/譜面/波形/アルバムアート/ムードスプライト/システムアセット設定 |
 | `rhythm-game-builder` | `build` | リズムゲームエンジン同期、譜面/RES/C データ生成、builder role による ROM ビルド連携 |
-| `dungeon-game-editor` | `editor` | Mega Drive 向け 3D ダンジョンの薄壁フロア編集、ランダム生成、共有レンダーコア (render-core.js) による実機一致 3D プレビュー (奥行き4マス/扉/ビルボード/暗闇)、デシジョンテーブル焼き込みと SGDK TILESET/SPRITE アセット生成 |
-| `dungeon-game-builder` | `build` | デシジョンテーブル評価 + VRAM ダブルバッファ DMA ストリーミングの 25x16 BG ダンジョンエンジン同期、前進/後退/回転の焼き込みアニメーション、宝箱/階段ビルボードスプライト、builder role による ROM ビルド連携 |
+| `dungeon-game-editor` | `editor` | Mega Drive向け3Dダンジョンの薄壁フロア編集、ランダム生成、フロア別に選べる7要素の再利用可能素材セット、標準SGDK画像pipelineによる取り込み/検証/個別preview、固定BG_B + 透明BG_Aを共有する実機一致3D preview、セット別リソース生成 |
+| `dungeon-game-builder` | `build` | 素材セット別 `DunViewSet` 切替、固定BG_Bの床/天井と透明BG_Aの壁/扉、デシジョンテーブル評価 + VRAMダブルバッファDMA、移動/旋回/階段/LOS/暗闇/ミニマップ、builder roleによるROMビルド連携 |
 | `standard-emulator` | `emulator` | WASM Mega Drive エミュレーター |
 | `standard-api-emulator` | `emulator`, `tool` | REST API Mega Drive エミュレーター |
 | `ai-control` | `editor`, `tool` | 外部 AI ツール向け localhost REST / MCP bridge |
 
 > 新しいプラグインが追加されたら、このテーブルに追記し § Last Updated を更新すること。
+
+### Dungeon game v1.1 素材セット規約
+
+- `data/dungeon/settings.json.asset_sets` は順序付きの1～255件で、各要素は安定した `id`、表示用 `name`、壁・扉・床・天井・宝箱・上り階段・下り階段の7参照を持つ `assets` から成る。重複ID、0件、255件超過は保存/ビルドエラーにする。
+- `data/dungeon/floors/*.json` はinline `assets` を複製せず `asset_set_id` で参照する。存在しない参照はエラーにし、最後のセットとフロア参照中のセットは削除させない。旧inline `assets` は読み込み/ビルド互換を保ち、最初の明示保存で内容ごとに重複排除して新形式へ移行する。
+- フロアと設定を同時保存する変更には `saveDungeonState({ floor, settings })` を使い、exportを1回にまとめる。既存のfloor/settings個別hookは後方互換のため残す。
+- rendererの素材選択は `dialog.openFile` → `image-import-pipeline.convertToIndexed16()` → `writeAssetFile()` を使い、変換結果の `targetExtension` を尊重して `res/dungeon/textures/<set-id>/` に保存する。raw pathは編集入力にせず読み取り専用表示とする。
+- 保存画像は8bit・非interlace・16色以下のindexed PNG。壁/扉は96x96・不透明、床/天井は32x32・不透明、宝箱/上下階段は48x48・透過可としてrenderer/serviceの両方で再検証する。カードpreviewはcontain表示、pixel smoothingなしで寸法・色数・保存先・検証結果を併記する。
+- 新規タグなし画像は全体を1要素として扱う。既存の `path#tag` は3x2/4x2アトラス互換として切り出す。上書き時はtexture cacheを無効化し、非同期previewは世代管理して別セットへ古い結果を反映しない。
+- 床/天井の32x32パターンはデシジョンタイルへ焼き込まず、BG_Bの下半分/上半分（各200x64）へ固定反復配置する。壁/扉はpalette index 0を透明にしたBG_A動的タイルとして重ね、rendererとserviceは同じ合成順でWYSIWYGを保つ。
+- ビルドは参照中セットごとに壁/扉tileset、床/天井background tileset、通常/暗闇palette、ビルボードpalette + sprite sheet、decision tableを生成し、`DunViewSet`レジストリとフロアのセットindexで切り替える。未参照セットはROMへ出力せず、cache/budget/warningはセット別と合計で返す。
 
 ### 分離後の標準エミュレーター同梱
 

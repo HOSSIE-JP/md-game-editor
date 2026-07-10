@@ -4,6 +4,7 @@
 #include "dungeon_game.h"
 
 void DUN_initView(void);
+void DUN_applyViewSet(u8 view_set);
 void DUN_setDark(bool dark);
 void DUN_drawStatic(const DungeonFloorData *floor, u8 x, u8 y, u8 dir);
 void DUN_playForward(const DungeonFloorData *floor, u8 x, u8 y, u8 dir);

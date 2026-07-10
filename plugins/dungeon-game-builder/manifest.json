@@ -1,8 +1,8 @@
 {
   "id": "dungeon-game-builder",
   "name": "ダンジョンゲームビルダー",
-  "description": "3D ダンジョンゲームエンジンとフロアデータを同期し、SGDK ROM ビルドを実行します。",
-  "version": "1.0.0",
+  "description": "素材セット別の3Dビュー、固定床・天井BG、フロアデータを同期し、SGDK ROM ビルドを実行します。",
+  "version": "1.1.0",
   "icon": "build",
   "types": ["build"],
   "supportedCores": ["mega-drive"],
