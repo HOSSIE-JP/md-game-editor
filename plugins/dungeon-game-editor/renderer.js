@@ -816,7 +816,35 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const dir = DIRS[dirIndex];
     const cell = cellAt(state.preview.x, state.preview.y);
     if (!cell || (cell.walls & dir.bit)) return false;
-    return Boolean(cellAt(state.preview.x + dir.dx, state.preview.y + dir.dy));
+    const target = cellAt(state.preview.x + dir.dx, state.preview.y + dir.dy);
+    if (!target) return false;
+    /* 階段セルはソリッド (前進バンプでフロア移動) */
+    return !core.cellIsSolid(target);
+  }
+
+  /* 階段バンプ: 前のフロアの下り階段の隣 / 次のフロアの上り階段の隣へ */
+  function previewGoStairs(kind) {
+    const currentOrder = Number(state.current?.order || 1);
+    const targetOrder = kind === 'up' ? currentOrder - 1 : currentOrder + 1;
+    const target = state.floors.find((floor) => Number(floor.order) === targetOrder);
+    if (!target) {
+      setStatus(kind === 'up' ? 'これより上のフロアはありません' : 'これより下のフロアはありません');
+      return;
+    }
+    const arrival = core.stairsArrival(target, kind === 'up' ? 'down' : 'up');
+    state.current = target;
+    state.preview = arrival
+      ? { x: arrival.x, y: arrival.y, dir: arrival.dir }
+      : { ...target.start };
+    stopPreviewAnimation();
+    invalidateViewModel();
+    ui.floorSelect.value = target.id;
+    ui.name.value = target.name || '';
+    ui.width.value = target.width;
+    ui.height.value = target.height;
+    setStatus(`${target.name || target.id} へ移動しました`);
+    renderAll();
+    void loadTexturesForCurrent();
   }
 
   function movePreview(action) {
@@ -826,9 +854,20 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const to = { ...state.preview };
     if (action === 'turn-left') to.dir = (to.dir + 3) & 3;
     if (action === 'turn-right') to.dir = (to.dir + 1) & 3;
-    if (action === 'forward' && canPreviewMove(to.dir)) {
-      to.x += DIRS[to.dir].dx;
-      to.y += DIRS[to.dir].dy;
+    if (action === 'forward') {
+      if (canPreviewMove(to.dir)) {
+        to.x += DIRS[to.dir].dx;
+        to.y += DIRS[to.dir].dy;
+      } else {
+        /* 目前が階段セルならフロア移動 (実機の階段バンプと同一) */
+        const dir = DIRS[to.dir];
+        const cell = cellAt(state.preview.x, state.preview.y);
+        const target = cellAt(state.preview.x + dir.dx, state.preview.y + dir.dy);
+        if (cell && target && !(cell.walls & dir.bit) && core.cellIsSolid(target)) {
+          previewGoStairs(target.stairs);
+          return;
+        }
+      }
     }
     if (action === 'back') {
       const dir = (state.preview.dir + 2) & 3;

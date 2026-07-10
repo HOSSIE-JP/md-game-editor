@@ -36,6 +36,31 @@ static u8 back_bank;
 static bool view_dark;
 static Sprite *bb_sprites[DUN_SPRITE_COUNT];
 
+/* ミニマップ (ビュー右の余白, BG_A + PAL2, 4px/セル) */
+#define DUN_MM_TILES_W 10
+#define DUN_MM_TILES_H 10
+#define DUN_MM_PX (DUN_MM_TILES_W * 8)
+#define DUN_MM_BASE (DUN_BANK1_INDEX + DUN_BANK_TILES)
+#define DUN_MM_X 30
+#define DUN_MM_Y 4
+#define DUN_MM_CELL 4
+
+static u32 mm_tiles[DUN_MM_TILES_W * DUN_MM_TILES_H * 8];
+static const u16 dun_mm_palette[16] = {
+    0x0000, /* 0: 未使用 */
+    0x0222, /* 1: 背景 */
+    0x0444, /* 2: 床 */
+    0x0424, /* 3: 暗闇床 */
+    0x0EEE, /* 4: 壁 */
+    0x008E, /* 5: 扉 (オレンジ) */
+    0x04E4, /* 6: プレイヤー (緑) */
+    0x02EE, /* 7: 宝箱 (黄) */
+    0x0EC8, /* 8: 上り階段 (水色) */
+    0x0C4A, /* 9: 下り階段 (紫) */
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+};
+static void mmWriteTileMap(void);
+
 void DUN_initView(void)
 {
     u16 i;
@@ -43,10 +68,12 @@ void DUN_initView(void)
     VDP_clearPlane(BG_B, TRUE);
     PAL_setPalette(PAL0, dungeon_view_palette.data, CPU);
     PAL_setPalette(PAL1, dungeon_bb_palette.data, CPU);
+    PAL_setColors(32, dun_mm_palette, 16, CPU);
     SPR_init();
     for (i = 0; i < DUN_SPRITE_COUNT; i++) bb_sprites[i] = NULL;
     back_bank = 0;
     view_dark = FALSE;
+    mmWriteTileMap();
 }
 
 void DUN_setDark(bool dark)
@@ -59,6 +86,7 @@ void DUN_setDark(bool dark)
 
 /* ------------------------------------------------------------
  * エッジ状態評価 (0=開 / 1=壁 / 2=扉) — render-core と同一仕様
+ * 階段セルはソリッド扱いで、その開いた面は壁として描く
  * ------------------------------------------------------------ */
 
 static bool inBounds(const DungeonFloorData *floor, s16 x, s16 y)
@@ -66,7 +94,19 @@ static bool inBounds(const DungeonFloorData *floor, s16 x, s16 y)
     return x >= 0 && y >= 0 && x < floor->width && y < floor->height;
 }
 
-static u8 edgeStateBetween(const DungeonFloorData *floor, s16 x, s16 y, u8 cross_dir)
+static u8 cellFlagsAt(const DungeonFloorData *floor, s16 x, s16 y)
+{
+    if (!inBounds(floor, x, y)) return 0;
+    return floor->flags[DUN_INDEX(floor, x, y)];
+}
+
+static bool cellIsSolidAt(const DungeonFloorData *floor, s16 x, s16 y)
+{
+    return (cellFlagsAt(floor, x, y) & (DUN_FLAG_STAIRS_UP | DUN_FLAG_STAIRS_DOWN)) != 0;
+}
+
+/* 壁/扉ビットのみのエッジ判定 (階段ソリディティを含まない) */
+static u8 rawEdgeState(const DungeonFloorData *floor, s16 x, s16 y, u8 cross_dir)
 {
     const u8 opposite = (u8)((cross_dir + 2) & 3);
     const s16 nx = x + dir_dx[cross_dir];
@@ -78,6 +118,15 @@ static u8 edgeStateBetween(const DungeonFloorData *floor, s16 x, s16 y, u8 cross
     if ((ea & door_bits[cross_dir]) || (eb & door_bits[opposite])) return 2;
     if (!a_in || !b_in) return 1;
     if ((ea & edge_bits[cross_dir]) || (eb & edge_bits[opposite])) return 1;
+    return 0;
+}
+
+static u8 edgeStateBetween(const DungeonFloorData *floor, s16 x, s16 y, u8 cross_dir)
+{
+    const u8 state = rawEdgeState(floor, x, y, cross_dir);
+    if (state != 0) return state;
+    if (cellIsSolidAt(floor, x, y)) return 1;
+    if (cellIsSolidAt(floor, x + dir_dx[cross_dir], y + dir_dy[cross_dir])) return 1;
     return 0;
 }
 
@@ -163,35 +212,72 @@ static void flushFrame(void)
  * ビルボード (宝箱・階段)
  * ------------------------------------------------------------ */
 
-static bool losPathClear(const DungeonFloorData *floor, u8 x, u8 y, u8 dir, s8 dd, s8 dl, bool depth_first)
+/*
+ * LOS: カメラセル中心 → 対象セル中心の線分が横切るエッジ/セルを
+ * supercover 走査 (整数誤差項) で判定する。壁・扉・階段セルは視線を遮る。
+ * render-core の losVisible と同一の整数アルゴリズム。
+ */
+static bool losEdgeOpen(const DungeonFloorData *floor, s16 cx, s16 cy, u8 cross_dir)
 {
-    const u8 right = (u8)((dir + 1) & 3);
-    s16 cx = x;
-    s16 cy = y;
-    u8 pass;
-    for (pass = 0; pass < 2; pass++)
-    {
-        const bool depth_step = depth_first ? (pass == 0) : (pass == 1);
-        const s8 amount = depth_step ? dd : dl;
-        const u8 base_dir = depth_step ? dir : right;
-        const u8 cross = amount >= 0 ? base_dir : (u8)((base_dir + 2) & 3);
-        s8 remain = amount >= 0 ? amount : (s8)(-amount);
-        while (remain > 0)
-        {
-            if (edgeStateBetween(floor, cx, cy, cross) != 0) return FALSE;
-            cx += dir_dx[cross];
-            cy += dir_dy[cross];
-            remain--;
-        }
-    }
-    return TRUE;
+    return rawEdgeState(floor, cx, cy, cross_dir) == 0;
+}
+
+static bool losCellSolid(const DungeonFloorData *floor, s16 cx, s16 cy)
+{
+    if (!inBounds(floor, cx, cy)) return TRUE;
+    return cellIsSolidAt(floor, cx, cy);
 }
 
 static bool losVisible(const DungeonFloorData *floor, u8 x, u8 y, u8 dir, s8 dd, s8 dl)
 {
+    const u8 right = (u8)((dir + 1) & 3);
+    const s16 tx = (s16)x + (s16)dd * dir_dx[dir] + (s16)dl * dir_dx[right];
+    const s16 ty = (s16)y + (s16)dd * dir_dy[dir] + (s16)dl * dir_dy[right];
+    const s16 adx = tx > x ? (s16)(tx - x) : (s16)(x - tx);
+    const s16 ady = ty > y ? (s16)(ty - y) : (s16)(y - ty);
+    const u8 sx = tx > x ? DUN_DIR_E : DUN_DIR_W;
+    const u8 sy = ty > y ? DUN_DIR_S : DUN_DIR_N;
+    s16 cx = x;
+    s16 cy = y;
+    s16 err = adx - ady;
+    s16 steps = adx + ady;
     if (dd == 0 && dl == 0) return TRUE;
-    if (losPathClear(floor, x, y, dir, dd, dl, TRUE)) return TRUE;
-    return losPathClear(floor, x, y, dir, dd, dl, FALSE);
+    while (steps > 0)
+    {
+        if (err > 0 || ady == 0)
+        {
+            if (!losEdgeOpen(floor, cx, cy, sx)) return FALSE;
+            cx += dir_dx[sx];
+            cy += dir_dy[sx];
+            err -= (s16)(2 * ady);
+            steps--;
+        }
+        else if (err < 0 || adx == 0)
+        {
+            if (!losEdgeOpen(floor, cx, cy, sy)) return FALSE;
+            cx += dir_dx[sy];
+            cy += dir_dy[sy];
+            err += (s16)(2 * adx);
+            steps--;
+        }
+        else
+        {
+            /* 線分が格子の角を正確に通過: どちらか一方の回り込みが開いていれば可視 */
+            const s16 nx = cx + dir_dx[sx];
+            const s16 ny = cy + dir_dy[sx];
+            const s16 mx = cx + dir_dx[sy];
+            const s16 my = cy + dir_dy[sy];
+            const bool via_x = losEdgeOpen(floor, cx, cy, sx) && !losCellSolid(floor, nx, ny) && losEdgeOpen(floor, nx, ny, sy);
+            const bool via_y = losEdgeOpen(floor, cx, cy, sy) && !losCellSolid(floor, mx, my) && losEdgeOpen(floor, mx, my, sx);
+            if (!via_x && !via_y) return FALSE;
+            cx += dir_dx[sx] + dir_dx[sy];
+            cy += dir_dy[sx] + dir_dy[sy];
+            err += (s16)(2 * adx - 2 * ady);
+            steps -= 2;
+        }
+        if ((cx != tx || cy != ty) && losCellSolid(floor, cx, cy)) return FALSE;
+    }
+    return TRUE;
 }
 
 static const SpriteDefinition *billboardDefForFlags(u8 flags)
@@ -249,6 +335,92 @@ static void updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
     {
         if (bb_sprites[used]) SPR_setVisibility(bb_sprites[used], HIDDEN);
     }
+}
+
+/* ------------------------------------------------------------
+ * ミニマップ描画
+ * ------------------------------------------------------------ */
+
+#define MM_COLOR_BG 1
+#define MM_COLOR_FLOOR 2
+#define MM_COLOR_DARK 3
+#define MM_COLOR_WALL 4
+#define MM_COLOR_DOOR 5
+#define MM_COLOR_PLAYER 6
+#define MM_COLOR_CHEST 7
+#define MM_COLOR_STAIRS_UP 8
+#define MM_COLOR_STAIRS_DOWN 9
+
+static void mmSetPixel(u16 px, u16 py, u16 color)
+{
+    u32 *row;
+    u16 shift;
+    if (px >= DUN_MM_PX || py >= DUN_MM_PX) return;
+    row = &mm_tiles[((((py >> 3) * DUN_MM_TILES_W) + (px >> 3)) * 8) + (py & 7)];
+    shift = (u16)((7 - (px & 7)) * 4);
+    *row = (*row & ~((u32)0xf << shift)) | ((u32)(color & 0xf) << shift);
+}
+
+static void mmFillRect(u16 px, u16 py, u16 w, u16 h, u16 color)
+{
+    u16 ix;
+    u16 iy;
+    for (iy = 0; iy < h; iy++)
+    {
+        for (ix = 0; ix < w; ix++) mmSetPixel(px + ix, py + iy, color);
+    }
+}
+
+static void mmWriteTileMap(void)
+{
+    u16 buf[DUN_MM_TILES_W * DUN_MM_TILES_H];
+    u16 i;
+    for (i = 0; i < DUN_MM_TILES_W * DUN_MM_TILES_H; i++)
+    {
+        buf[i] = TILE_ATTR_FULL(PAL2, FALSE, FALSE, FALSE, DUN_MM_BASE + i);
+    }
+    VDP_setTileMapDataRect(BG_A, buf, DUN_MM_X, DUN_MM_Y, DUN_MM_TILES_W, DUN_MM_TILES_H, DUN_MM_TILES_W, CPU);
+}
+
+void DUN_drawMinimap(const DungeonFloorData *floor, u8 px, u8 py, u8 dir)
+{
+    const u16 cell = DUN_MM_CELL;
+    const u16 ox = (u16)((DUN_MM_PX - (floor->width * cell)) / 2);
+    const u16 oy = (u16)((DUN_MM_PX - (floor->height * cell)) / 2);
+    u16 x;
+    u16 y;
+    u16 i;
+    for (i = 0; i < DUN_MM_TILES_W * DUN_MM_TILES_H * 8; i++) mm_tiles[i] = 0x11111111;
+    for (y = 0; y < floor->height; y++)
+    {
+        for (x = 0; x < floor->width; x++)
+        {
+            const u16 edges = floor->edges[DUN_INDEX(floor, x, y)];
+            const u8 flags = floor->flags[DUN_INDEX(floor, x, y)];
+            const u16 bx = ox + (x * cell);
+            const u16 by = oy + (y * cell);
+            u16 fill = (flags & DUN_FLAG_DARK) ? MM_COLOR_DARK : MM_COLOR_FLOOR;
+            if (flags & DUN_FLAG_STAIRS_UP) fill = MM_COLOR_STAIRS_UP;
+            if (flags & DUN_FLAG_STAIRS_DOWN) fill = MM_COLOR_STAIRS_DOWN;
+            mmFillRect(bx, by, cell, cell, fill);
+            if (flags & DUN_FLAG_CHEST) mmFillRect(bx + 1, by + 1, cell - 2, cell - 2, MM_COLOR_CHEST);
+            /* 壁/扉は各セルの北辺と西辺 + 外周の南/東辺で描く */
+            if (edges & (DUN_EDGE_N | DUN_DOOR_N)) mmFillRect(bx, by, cell, 1, (edges & DUN_DOOR_N) ? MM_COLOR_DOOR : MM_COLOR_WALL);
+            if (edges & (DUN_EDGE_W | DUN_DOOR_W)) mmFillRect(bx, by, 1, cell, (edges & DUN_DOOR_W) ? MM_COLOR_DOOR : MM_COLOR_WALL);
+            if ((y == floor->height - 1) && (edges & (DUN_EDGE_S | DUN_DOOR_S))) mmFillRect(bx, by + cell - 1, cell, 1, (edges & DUN_DOOR_S) ? MM_COLOR_DOOR : MM_COLOR_WALL);
+            if ((x == floor->width - 1) && (edges & (DUN_EDGE_E | DUN_DOOR_E))) mmFillRect(bx + cell - 1, by, 1, cell, (edges & DUN_DOOR_E) ? MM_COLOR_DOOR : MM_COLOR_WALL);
+        }
+    }
+    /* プレイヤー位置 (2x2) と向き (1px) */
+    {
+        const u16 bx = ox + (px * cell);
+        const u16 by = oy + (py * cell);
+        static const s8 face_dx[4] = { 1, 3, 1, 0 };
+        static const s8 face_dy[4] = { 0, 1, 3, 1 };
+        mmFillRect(bx + 1, by + 1, 2, 2, MM_COLOR_PLAYER);
+        mmSetPixel(bx + face_dx[dir & 3], by + face_dy[dir & 3], MM_COLOR_PLAYER);
+    }
+    VDP_loadTileData(mm_tiles, DUN_MM_BASE, DUN_MM_TILES_W * DUN_MM_TILES_H, DMA_QUEUE);
 }
 
 /* ------------------------------------------------------------

@@ -99,10 +99,36 @@ test('dungeon render core is UMD and keeps compose == direct render', () => {
   assert.match(coreSource, /globalThis\.DungeonRenderCore = core/);
 
   const core = require(corePath);
+  assert.equal(core.EDGE_STATE_COUNT, 5);
   const settings = { animation_frames: 3, turn_frames: 3 };
   const spaces = core.buildEdgeSpaces(settings);
   assert.ok(spaces.move.length > 20 && spaces.move.length <= core.MOVE_EDGE_LIMIT);
   assert.ok(spaces.turn.length > spaces.move.length && spaces.turn.length <= core.TURN_EDGE_LIMIT);
+
+  /* 階段セルはソリッド: 開いた面は壁として描かれ、視線と移動を遮る */
+  const blank = () => ({ walls: 0, doors: 0, one_way: 0, dark: false, event: '', stairs: '' });
+  const mkFloor = () => ({ width: 5, height: 5, cells: Array.from({ length: 5 }, () => Array.from({ length: 5 }, blank)) });
+  const stairsFloor = mkFloor();
+  stairsFloor.cells[1][2].stairs = 'up';
+  assert.equal(core.cellIsSolid(stairsFloor.cells[1][2]), true);
+  assert.equal(core.edgeStateBetween(stairsFloor, 2, 2, 0), core.EDGE_STATE_WALL);
+  assert.equal(core.rawEdgeState(stairsFloor, 2, 2, 0), core.EDGE_STATE_OPEN);
+  assert.deepEqual(core.stairsArrival(stairsFloor, 'up'), { x: 2, y: 0, dir: 0 });
+
+  /* LOS: 壁越し・角越し・階段セル越しの宝箱は見えない。階段セル自体は見える */
+  const wallFloor = mkFloor();
+  wallFloor.cells[2][2].walls = 2;
+  wallFloor.cells[2][3].walls = 8;
+  assert.equal(core.losVisible(wallFloor, 2, 2, 1, 2, 0), false);
+  assert.equal(core.losVisible(wallFloor, 2, 2, 0, 2, 0), true);
+  const cornerFloor = mkFloor();
+  cornerFloor.cells[3][2].walls |= 1;
+  cornerFloor.cells[2][2].walls |= 4;
+  cornerFloor.cells[2][1].walls |= 2;
+  cornerFloor.cells[2][2].walls |= 8;
+  assert.equal(core.losVisible(cornerFloor, 1, 3, 0, 2, 2), false);
+  assert.equal(core.losVisible(stairsFloor, 2, 3, 0, 3, 0), false);
+  assert.equal(core.losVisible(stairsFloor, 2, 3, 0, 2, 0), true);
 
   /* 鏡像の対合性 */
   spaces.turn.forEach((def, index) => {
@@ -155,7 +181,9 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.equal(generated.floor.height, 18);
   assert.equal(generated.floor.cells.length, 18);
   assert.equal(generated.floor.cells[0].length, 20);
-  assert.equal(generated.floor.cells[generated.floor.start.y][generated.floor.start.x].stairs, 'up');
+  /* 階段セルはソリッドになるため開始セルには置かれない */
+  assert.equal(generated.floor.cells[generated.floor.start.y][generated.floor.start.x].stairs, '');
+  assert.ok(generated.floor.cells.flat().some((cell) => cell.stairs === 'up'));
 
   const cells = generated.floor.cells.flat();
   assert.ok(cells.some((cell) => cell.doors !== 0));
@@ -197,6 +225,7 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.match(patternHeader, /#define DUN_TURN_FRAMES 2/);
   assert.match(patternHeader, /#define DUN_MOVE_EDGE_COUNT \d+/);
   assert.match(patternHeader, /#define DUN_TURN_EDGE_COUNT \d+/);
+  assert.match(patternHeader, /#define DUN_EDGE_STATE_COUNT 5/);
   assert.match(patternHeader, /#define DUN_TILESET_TILE_COUNT \d+/);
   assert.match(patternHeader, /#define DUN_BB_CELL_COUNT \d+/);
   assert.match(patternHeader, /typedef struct \{ s8 dd; s8 dl; u8 face; \} DunEdgeDef;/);
@@ -264,12 +293,19 @@ test('dungeon-game-builder syncs engine, writes generated main, and build variab
   assert.match(generated.sourceCode, /int main\(bool hardReset\)/);
   assert.match(generated.sourceCode, /hasWallAt/);
   assert.match(generated.sourceCode, /DUN_USE_TEXT_HUD 1/);
-  assert.match(generated.sourceCode, /pressedAction/);
+  assert.match(generated.sourceCode, /selectAction/);
   assert.match(generated.sourceCode, /performAction/);
   assert.match(generated.sourceCode, /DUN_playForward/);
   assert.match(generated.sourceCode, /DUN_playBackward/);
   assert.match(generated.sourceCode, /DUN_playTurn/);
   assert.match(generated.sourceCode, /DUN_setDark/);
+  assert.match(generated.sourceCode, /DUN_drawMinimap/);
+  assert.match(generated.sourceCode, /DUN_ACTION_STAIRS/);
+  assert.match(generated.sourceCode, /goStairs/);
+  assert.match(generated.sourceCode, /stairsFlagsAt/);
+  /* 前進/後退は押しっぱなし (レベルトリガー) */
+  assert.match(generated.sourceCode, /\(joy & BUTTON_UP\)/);
+  assert.match(generated.sourceCode, /\(joy & BUTTON_DOWN\)/);
   assert.match(generated.sourceCode, /SPR_update/);
   assert.match(generated.sourceCode, /canMove\(floor, player_x, player_y, player_dir\)/);
   assert.doesNotMatch(generated.sourceCode, /KDebug_Alert/);
@@ -292,6 +328,10 @@ test('dungeon-game-builder syncs engine, writes generated main, and build variab
   assert.match(viewSource, /dun_edges_turn_mirrored/);
   assert.match(viewSource, /SPR_addSprite/);
   assert.match(viewSource, /losVisible/);
+  assert.match(viewSource, /rawEdgeState/);
+  assert.match(viewSource, /cellIsSolidAt/);
+  assert.match(viewSource, /DUN_drawMinimap/);
+  assert.match(viewSource, /dun_mm_palette/);
   assert.match(viewSource, /dun_palette_dark/);
   assert.doesNotMatch(viewSource, /VDP_setTileMapXY/);
   assert.doesNotMatch(viewSource, /loadCachedTile/);
@@ -356,6 +396,11 @@ test('dungeon template starts with valid settings and plugin roles', () => {
   });
   const floorTemplate = JSON.parse(fs.readFileSync(path.join(templateDir, 'data', 'dungeon', 'floors', 'floor_001_template.json'), 'utf-8'));
   assert.match(floorTemplate.assets.door_texture, /#door$/);
+  /* 階段セルはソリッドのため開始セルとは別に配置される */
+  assert.equal(floorTemplate.cells[floorTemplate.start.y][floorTemplate.start.x].stairs, '');
+  const templateCells = floorTemplate.cells.flat();
+  assert.ok(templateCells.some((cell) => cell.stairs === 'up'));
+  assert.ok(templateCells.some((cell) => cell.stairs === 'down'));
   const settings = JSON.parse(fs.readFileSync(path.join(templateDir, 'data', 'dungeon', 'settings.json'), 'utf-8'));
   assert.equal(settings.turn_frames, 8);
   assert.equal(fs.existsSync(path.join(templateDir, 'res', 'dungeon', 'textures', 'dungeon_texture_atlas.png')), true);

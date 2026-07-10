@@ -341,21 +341,57 @@ function walkableNeighbors(floor, x, y) {
     .filter((entry) => inBounds(floor.width, floor.height, entry.x, entry.y) && !(floor.cells[y][x].walls & entry.dir.bit));
 }
 
-function farthestCell(floor, start) {
+function bfsDistances(floor, start) {
   const queue = [{ x: start.x, y: start.y, d: 0 }];
-  const visited = new Set([cellKey(start.x, start.y)]);
-  let farthest = queue[0];
+  const visited = new Map([[cellKey(start.x, start.y), 0]]);
   for (let i = 0; i < queue.length; i++) {
     const current = queue[i];
-    if (current.d > farthest.d) farthest = current;
     walkableNeighbors(floor, current.x, current.y).forEach((next) => {
       const key = cellKey(next.x, next.y);
       if (visited.has(key)) return;
-      visited.add(key);
+      visited.set(key, current.d + 1);
       queue.push({ x: next.x, y: next.y, d: current.d + 1 });
     });
   }
+  return visited;
+}
+
+function farthestCell(floor, start) {
+  const distances = bfsDistances(floor, start);
+  let farthest = { x: start.x, y: start.y, d: 0 };
+  distances.forEach((d, key) => {
+    if (d > farthest.d) {
+      const [x, y] = key.split(',').map(Number);
+      farthest = { x, y, d };
+    }
+  });
   return farthest;
+}
+
+/*
+ * 階段セルはソリッド (進入不可・バンプでフロア移動) になるため、
+ * 通路を分断しない「行き止まりセル (開いた辺が 1 つ)」に配置する。
+ */
+function placeStairs(floor) {
+  const start = floor.start;
+  const distances = bfsDistances(floor, start);
+  const deadEnds = [];
+  distances.forEach((d, key) => {
+    const [x, y] = key.split(',').map(Number);
+    if (x === start.x && y === start.y) return;
+    if (walkableNeighbors(floor, x, y).length === 1) deadEnds.push({ x, y, d });
+  });
+  deadEnds.sort((a, b) => a.d - b.d || a.y - b.y || a.x - b.x);
+  if (deadEnds.length >= 2) {
+    const up = deadEnds[0];
+    const down = deadEnds[deadEnds.length - 1];
+    floor.cells[up.y][up.x].stairs = 'up';
+    floor.cells[down.y][down.x].stairs = 'down';
+    return;
+  }
+  /* 行き止まりが足りない場合のフォールバック: 最遠セルへ下り階段のみ */
+  const down = farthestCell(floor, start);
+  if (down.x !== start.x || down.y !== start.y) floor.cells[down.y][down.x].stairs = 'down';
 }
 
 function makeGeneratedFloor(payload = {}) {
@@ -378,22 +414,21 @@ function makeGeneratedFloor(payload = {}) {
     assets: payload.assets || {},
     cells,
   }, payload.order || 1, payload.name || 'Generated Floor');
-  const down = farthestCell(floor, floor.start);
-  floor.cells[floor.start.y][floor.start.x].stairs = 'up';
-  floor.cells[down.y][down.x].stairs = 'down';
+  placeStairs(floor);
 
   shuffle(rooms).slice(0, Math.max(1, Math.floor(rooms.length / 2))).forEach((room, index) => {
     const x = Math.min(room.x + room.w - 1, room.x + 1 + (index % Math.max(1, room.w - 1)));
     const y = Math.min(room.y + room.h - 1, room.y + 1);
     if (x === floor.start.x && y === floor.start.y) return;
-    if (x === down.x && y === down.y) return;
+    if (floor.cells[y][x].stairs) return;
     floor.cells[y][x].event = 'chest';
   });
 
   for (let i = 0; i < Math.max(1, Math.floor((width * height) / 90)); i++) {
     const x = Math.floor(Math.random() * width);
     const y = Math.floor(Math.random() * height);
-    if ((x === floor.start.x && y === floor.start.y) || (x === down.x && y === down.y)) continue;
+    if (x === floor.start.x && y === floor.start.y) continue;
+    if (floor.cells[y][x].stairs) continue;
     floor.cells[y][x].dark = true;
   }
 
@@ -982,6 +1017,7 @@ function exportPatternFiles(projectDir, view) {
     `#define DUN_MOVE_EDGE_COUNT ${spaces.move.length}`,
     `#define DUN_TURN_EDGE_COUNT ${spaces.turn.length}`,
     '#define DUN_EDGE_STATE_MAX 128',
+    `#define DUN_EDGE_STATE_COUNT ${core.EDGE_STATE_COUNT}`,
     `#define DUN_TILESET_TILE_COUNT ${view.pool.count}`,
     `#define DUN_BB_CELL_COUNT ${bbCells.length}`,
     `#define DUN_BB_FRAME_TILES ${core.BB_FRAME_TILES}`,
@@ -992,7 +1028,7 @@ function exportPatternFiles(projectDir, view) {
     'typedef struct { s16 x; s16 y; s8 frame; } DunBBPose;',
     'typedef struct {',
     '    const u16 *offsets;    /* [DUN_VIEW_TILE_COUNT] bit15=葉 */',
-    '    const u16 *nodes;      /* [edgeId, open, wall, door] の u16 ストリーム */',
+    '    const u16 *nodes;      /* [edgeId, 開, 壁, 扉, 上階段, 下階段] の u16 ストリーム */',
     '    const u16 *tile_map;   /* ローカルID → グローバルタイル番号 */',
     '    const u8 *tile_flips;  /* ローカルID → bit0=HFLIP, bit1=VFLIP */',
     '} DunFrameTable;',
@@ -1127,9 +1163,9 @@ function exportViewAssets(projectDir, floors) {
   const { headerPath, sourcePath } = exportPatternFiles(projectDir, view);
   const resourcePath = updateGeneratedResources(projectDir);
 
-  const legacyMapPath = path.join(projectDir, 'res', GENERATED_LEGACY_MAP_REL);
   try {
-    if (fs.existsSync(legacyMapPath)) fs.rmSync(legacyMapPath);
+    const legacyPath = path.join(projectDir, 'res', GENERATED_LEGACY_MAP_REL);
+    if (fs.existsSync(legacyPath)) fs.rmSync(legacyPath);
   } catch (_) { /* 旧ファイル削除は失敗しても致命的でない */ }
 
   const summary = {

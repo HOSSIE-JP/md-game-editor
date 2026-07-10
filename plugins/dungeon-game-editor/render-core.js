@@ -28,6 +28,9 @@
   const EDGE_STATE_OPEN = 0;
   const EDGE_STATE_WALL = 1;
   const EDGE_STATE_DOOR = 2;
+  const EDGE_STATE_STAIRS_UP = 3;
+  const EDGE_STATE_STAIRS_DOWN = 4;
+  const EDGE_STATE_COUNT = 5;
   const MOVE_EDGE_LIMIT = 64;
   const TURN_EDGE_LIMIT = 127;
   const LEAF_FLAG = 0x8000;
@@ -35,7 +38,6 @@
   const TILE_DROP_MIN_COVER = 3;
   const TILE_DROP_MIN_DEPTH = 3.25;
   const TILE_PARTIAL_CAP = 8;
-  const DOOR_DETAIL_DEPTH = 4.75;
   const DOOR_PANEL_U0 = 0.22;
   const DOOR_PANEL_U1 = 0.78;
   const DOOR_PANEL_V0 = 0.18;
@@ -499,16 +501,25 @@
   }
 
   /*
-   * 扉は「壁テクスチャ + 中央の扉パネル」として描く。パネル外のピクセルは
+   * 扉・階段は「壁テクスチャ + 中央のパネル」として描く。パネル外のピクセルは
    * 壁と完全一致するため、焼き込みタイルが壁バリアントと共有される。
    */
-  function sampleDoorTexel(textures, u, v) {
+  function samplePanelTexel(textures, panelTexture, u0, u1, v0, u, v) {
     const uf = fractional(u);
-    if (uf >= DOOR_PANEL_U0 && uf <= DOOR_PANEL_U1 && v >= DOOR_PANEL_V0) {
-      const pu = (uf - DOOR_PANEL_U0) / (DOOR_PANEL_U1 - DOOR_PANEL_U0);
-      const pv = (v - DOOR_PANEL_V0) / (1 - DOOR_PANEL_V0);
-      return sampleTexel(textures.door, pu, pv);
+    if (uf >= u0 && uf <= u1 && v >= v0) {
+      const pu = (uf - u0) / (u1 - u0);
+      const pv = (v - v0) / (1 - v0);
+      return sampleTexel(panelTexture, pu, pv);
     }
+    return sampleTexel(textures.wall, u, v);
+  }
+
+  function sampleDoorTexel(textures, u, v) {
+    return samplePanelTexel(textures, textures.door, DOOR_PANEL_U0, DOOR_PANEL_U1, DOOR_PANEL_V0, u, v);
+  }
+
+  function sampleStateTexel(textures, state, u, v) {
+    if (state === EDGE_STATE_DOOR) return sampleDoorTexel(textures, u, v);
     return sampleTexel(textures.wall, u, v);
   }
 
@@ -655,6 +666,8 @@
   /*
    * フロアデータから各エッジの状態 (0=開/1=壁/2=扉) を読み取る。
    * player (x, y, dirIndex 0..3=N/E/S/W) から見た相対エッジ defs を評価する。
+   * 階段セルはソリッド扱いで、その開いた面は壁として描かれる
+   * (上り/下りの区別はビルボードスプライトのアイコンで表現する)。
    * MD エンジン側 (dungeon_view.c) の evaluateEdgeStates と同一仕様。
    */
   function sampleEdgeStates(floor, x, y, dirIndex, defs, out) {
@@ -675,7 +688,12 @@
     return x >= 0 && y >= 0 && x < floor.width && y < floor.height;
   }
 
-  function edgeStateBetween(floor, x, y, crossDir) {
+  function cellIsSolid(cell) {
+    return Boolean(cell && (cell.stairs === 'up' || cell.stairs === 'down'));
+  }
+
+  /* 壁/扉ビットのみのエッジ判定 (階段ソリディティを含まない) */
+  function rawEdgeState(floor, x, y, crossDir) {
     const nx = x + DIR_DX[crossDir];
     const ny = y + DIR_DY[crossDir];
     const opposite = (crossDir + 2) & 3;
@@ -689,6 +707,17 @@
     if (door) return EDGE_STATE_DOOR;
     const wall = !aIn || !bIn || (cellA.walls & bit) || (cellB.walls & oppositeBit);
     return wall ? EDGE_STATE_WALL : EDGE_STATE_OPEN;
+  }
+
+  function edgeStateBetween(floor, x, y, crossDir) {
+    const state = rawEdgeState(floor, x, y, crossDir);
+    if (state !== EDGE_STATE_OPEN) return state;
+    /* 階段セルに面する開いたエッジは壁面として描く */
+    const nx = x + DIR_DX[crossDir];
+    const ny = y + DIR_DY[crossDir];
+    if (cellIsSolid(cellInBounds(floor, x, y) ? floor.cells[y][x] : null)) return EDGE_STATE_WALL;
+    if (cellIsSolid(cellInBounds(floor, nx, ny) ? floor.cells[ny][nx] : null)) return EDGE_STATE_WALL;
+    return EDGE_STATE_OPEN;
   }
 
   /* ------------------------------------------------------------------
@@ -706,10 +735,9 @@
     for (let i = 0; i < defs.length; i++) {
       const state = states[i];
       if (state === EDGE_STATE_OPEN) continue;
-      const isDoor = state === EDGE_STATE_DOOR;
       rasterizeEdge(pose, defs[i], null, (p, depth, u, v, shade) => {
         if (depth > zBuffer[p] + VIEW_DEPTH_EPSILON) return;
-        const texel = isDoor ? sampleDoorTexel(textures, u, v) : sampleTexel(textures.wall, u, v);
+        const texel = sampleStateTexel(textures, state, u, v);
         pixels[p] = nearestPalette(palette, texel.r * shade, texel.g * shade, texel.b * shade);
         zBuffer[p] = Math.min(zBuffer[p], depth);
       });
@@ -736,15 +764,27 @@
       cover[p] = 1;
       z[p] = Math.min(z[p], depth);
     });
-    return { z, wall, door, cover };
+    /*
+     * state 値 (1..4) でそのまま引ける配列。階段状態 (3, 4) は現状
+     * 壁と同一参照 (階段セルは壁面 + ビルボードで表現) — パネル差分
+     * フラグが立たないためツリー分岐コストはゼロになる。
+     */
+    return { z, cover, layers: [null, wall, door, wall, wall] };
   }
 
+  /*
+   * タイルごとの被覆統計に加え、「扉/階段パネルがこのタイル内で壁面と
+   * 実際に異なるか」のフラグ (bit = state 番号) を求める。異ならない状態は
+   * デシジョンツリー上で壁の子と厳密に共有できる。
+   */
   function soloTileStats(solo) {
     const tileCount = VIEW_TILE_W * VIEW_TILE_H;
     const count = new Uint16Array(tileCount);
     const minZ = new Float32Array(tileCount);
     const maxZ = new Float32Array(tileCount);
+    const panel = new Uint8Array(tileCount);
     minZ.fill(Number.POSITIVE_INFINITY);
+    const wallLayer = solo.layers[EDGE_STATE_WALL];
     for (let ty = 0; ty < VIEW_TILE_H; ty++) {
       for (let tx = 0; tx < VIEW_TILE_W; tx++) {
         const tile = (ty * VIEW_TILE_W) + tx;
@@ -756,11 +796,14 @@
             count[tile]++;
             if (solo.z[p] < minZ[tile]) minZ[tile] = solo.z[p];
             if (solo.z[p] > maxZ[tile]) maxZ[tile] = solo.z[p];
+            for (let state = EDGE_STATE_DOOR; state < EDGE_STATE_COUNT; state++) {
+              if (solo.layers[state][p] !== wallLayer[p]) panel[tile] |= (1 << state);
+            }
           }
         }
       }
     }
-    return { count, minZ, maxZ };
+    return { count, minZ, maxZ, panel };
   }
 
   function tileRowsFromPixels(pixels, tx, ty) {
@@ -857,13 +900,13 @@
       return local;
     };
 
-    const internNode = (edgeId, c0, c1, c2) => {
-      const key = `${edgeId},${c0},${c1},${c2}`;
+    const internNode = (edgeId, children) => {
+      const key = `${edgeId},${children.join(',')}`;
       let ref = nodeIntern.get(key);
       if (ref == null) {
         ref = nodes.length;
-        if (ref + 4 > 0x8000) throw new Error('dungeon decision stream overflow');
-        nodes.push(edgeId, c0, c1, c2);
+        if (ref + 1 + EDGE_STATE_COUNT > 0x8000) throw new Error('dungeon decision stream overflow');
+        nodes.push(edgeId, ...children);
         nodeIntern.set(key, ref);
       }
       return ref;
@@ -888,9 +931,7 @@
         .sort((a, b) => a.entry.defIndex - b.entry.defIndex);
       ordered.forEach(({ entry, state }) => {
         const solo = solos[entry.defIndex];
-        /* 遠方の扉は壁と同一視 (パネルが視認できないため分岐を潰して共有) */
-        const useDoor = state === EDGE_STATE_DOOR && entry.minZ <= DOOR_DETAIL_DEPTH;
-        const source = useDoor ? solo.door : solo.wall;
+        const source = solo.layers[state];
         for (let py = 0; py < 8; py++) {
           const rowStart = (((ty * 8) + py) * VIEW_W) + (tx * 8);
           for (let px = 0; px < 8; px++) {
@@ -925,6 +966,7 @@
           minZ: stat.minZ[tile],
           maxZ: stat.maxZ[tile],
           full: stat.count[tile] === 64,
+          panel: stat.panel[tile],
         });
       }
       /* 遠距離の極小カバーは切り捨て (実機出力とプレビューの差は 1-2px 未満) */
@@ -960,22 +1002,35 @@
             }
           }
         }
-        const children = [];
-        for (let state = 0; state <= 2; state++) {
-          chosen[index] = state;
-          if (state > EDGE_STATE_OPEN && occludesRest) {
-            /* このエッジがタイル全体を覆い残りは全て背後 → 打ち切り */
-            const saved = chosen.slice(index + 1);
-            chosen.fill(EDGE_STATE_OPEN, index + 1);
-            children.push(renderLeaf(tile, involved, chosen));
-            chosen.set(saved, index + 1);
-          } else {
-            children.push(build(index + 1));
+        /*
+         * 状態エイリアス: このタイル内でパネルが壁面と同一に見える状態は
+         * 壁 (state 1) の子を厳密に共有し、再帰回数とタイル数を抑える。
+         */
+        const panelFlags = entry.panel;
+        const children = new Array(EDGE_STATE_COUNT);
+        const aliasChildren = new Map();
+        for (let state = 0; state < EDGE_STATE_COUNT; state++) {
+          let alias = state;
+          if (state > EDGE_STATE_WALL && !(panelFlags & (1 << state))) alias = EDGE_STATE_WALL;
+          let child = aliasChildren.get(alias);
+          if (child == null) {
+            chosen[index] = alias;
+            if (alias > EDGE_STATE_OPEN && occludesRest) {
+              /* このエッジがタイル全体を覆い残りは全て背後 → 打ち切り */
+              const saved = chosen.slice(index + 1);
+              chosen.fill(EDGE_STATE_OPEN, index + 1);
+              child = renderLeaf(tile, involved, chosen);
+              chosen.set(saved, index + 1);
+            } else {
+              child = build(index + 1);
+            }
+            aliasChildren.set(alias, child);
           }
+          children[state] = child;
         }
         chosen[index] = EDGE_STATE_OPEN;
-        if (children[0] === children[1] && children[1] === children[2]) return children[0];
-        return internNode(involved[index].defIndex, children[0], children[1], children[2]);
+        if (children.every((child) => child === children[0])) return children[0];
+        return internNode(involved[index].defIndex, children);
       };
       offsets[tile] = build(0);
     }
@@ -1117,42 +1172,91 @@
   }
 
   /*
-   * 簡易 LOS: 前進→横移動 または 横移動→前進 のどちらかの経路が
-   * 壁・扉に遮られなければ可視。MD エンジン側と同一仕様。
+   * LOS: カメラセル中心 → 対象セル中心の線分が横切るエッジ/セルを
+   * supercover 走査 (整数誤差項) で判定する。壁・扉・階段セルは視線を遮る。
+   * MD エンジン側 (dungeon_view.c) と同一の整数アルゴリズム。
    */
-  function losVisible(floor, x, y, dirIndex, dd, dl) {
-    if (dd === 0 && dl === 0) return true;
-    return losPathClear(floor, x, y, dirIndex, dd, dl, true)
-      || losPathClear(floor, x, y, dirIndex, dd, dl, false);
+  function losEdgeOpen(floor, x, y, crossDir) {
+    /*
+     * 壁・扉ビットのみで判定する (階段ソリディティは含めない)。
+     * これにより階段セル自身を対象とするビルボードは見え、
+     * 階段セルを「通過する」視線は losCellSolid が遮る。
+     */
+    return rawEdgeState(floor, x, y, crossDir) === EDGE_STATE_OPEN;
   }
 
-  function losPathClear(floor, x, y, dirIndex, dd, dl, depthFirst) {
+  function losCellSolid(floor, x, y) {
+    if (!cellInBounds(floor, x, y)) return true;
+    return cellIsSolid(floor.cells[y][x]);
+  }
+
+  function losVisible(floor, x, y, dirIndex, dd, dl) {
+    if (dd === 0 && dl === 0) return true;
     const dir = dirIndex & 3;
     const rightDir = (dir + 1) & 3;
+    const tx = x + dd * DIR_DX[dir] + dl * DIR_DX[rightDir];
+    const ty = y + dd * DIR_DY[dir] + dl * DIR_DY[rightDir];
+    const adx = Math.abs(tx - x);
+    const ady = Math.abs(ty - y);
+    const sx = tx > x ? 1 : 3; /* DIR index: E=1, W=3 */
+    const sy = ty > y ? 2 : 0; /* DIR index: S=2, N=0 */
     let cx = x;
     let cy = y;
-    const stepDepth = () => {
-      const sign = dd >= 0 ? 1 : -1;
-      const crossDir = sign > 0 ? dir : (dir + 2) & 3;
-      for (let i = 0; i < Math.abs(dd); i++) {
-        if (edgeStateBetween(floor, cx, cy, crossDir) !== EDGE_STATE_OPEN) return false;
-        cx += DIR_DX[crossDir];
-        cy += DIR_DY[crossDir];
+    let err = adx - ady;
+    let steps = adx + ady;
+    while (steps > 0) {
+      if (err > 0 || ady === 0) {
+        if (!losEdgeOpen(floor, cx, cy, sx)) return false;
+        cx += DIR_DX[sx];
+        cy += DIR_DY[sx];
+        err -= 2 * ady;
+        steps--;
+      } else if (err < 0 || adx === 0) {
+        if (!losEdgeOpen(floor, cx, cy, sy)) return false;
+        cx += DIR_DX[sy];
+        cy += DIR_DY[sy];
+        err += 2 * adx;
+        steps--;
+      } else {
+        /* 線分が格子の角を正確に通過: どちらか一方の回り込みが開いていれば可視 */
+        const nx = cx + DIR_DX[sx];
+        const ny = cy + DIR_DY[sx];
+        const mx = cx + DIR_DX[sy];
+        const my = cy + DIR_DY[sy];
+        const viaX = losEdgeOpen(floor, cx, cy, sx) && !losCellSolid(floor, nx, ny) && losEdgeOpen(floor, nx, ny, sy);
+        const viaY = losEdgeOpen(floor, cx, cy, sy) && !losCellSolid(floor, mx, my) && losEdgeOpen(floor, mx, my, sx);
+        if (!viaX && !viaY) return false;
+        cx += DIR_DX[sx] + DIR_DX[sy];
+        cy += DIR_DY[sx] + DIR_DY[sy];
+        err += 2 * adx - 2 * ady;
+        steps -= 2;
       }
-      return true;
-    };
-    const stepLateral = () => {
-      const sign = dl >= 0 ? 1 : -1;
-      const crossDir = sign > 0 ? rightDir : (rightDir + 2) & 3;
-      for (let i = 0; i < Math.abs(dl); i++) {
-        if (edgeStateBetween(floor, cx, cy, crossDir) !== EDGE_STATE_OPEN) return false;
-        cx += DIR_DX[crossDir];
-        cy += DIR_DY[crossDir];
+      /* 中間セル (対象セル自身は除く) がソリッドなら遮蔽 */
+      if ((cx !== tx || cy !== ty) && losCellSolid(floor, cx, cy)) return false;
+    }
+    return true;
+  }
+
+  /*
+   * 階段バンプ遷移の到着位置: 対象フロアの kind ('up'|'down') 階段セルの
+   * 隣接セルのうち、壁で塞がれておらずソリッドでない最初のセルへ、
+   * 階段に背を向けた向きで到着する。MD エンジン側 (main.c) と同一仕様。
+   */
+  function stairsArrival(floor, kind) {
+    for (let y = 0; y < floor.height; y++) {
+      for (let x = 0; x < floor.width; x++) {
+        if (floor.cells[y][x].stairs !== kind) continue;
+        for (let dir = 0; dir < 4; dir++) {
+          const nx = x + DIR_DX[dir];
+          const ny = y + DIR_DY[dir];
+          if (!cellInBounds(floor, nx, ny)) continue;
+          if (rawEdgeState(floor, x, y, dir) === EDGE_STATE_WALL) continue;
+          if (cellIsSolid(floor.cells[ny][nx])) continue;
+          return { x: nx, y: ny, dir };
+        }
       }
-      return true;
-    };
-    if (depthFirst) return stepDepth() && stepLateral();
-    return stepLateral() && stepDepth();
+    }
+    return null;
   }
 
   /* ------------------------------------------------------------------
@@ -1193,7 +1297,7 @@
   }
 
   const core = {
-    version: '2.0.0',
+    version: '2.1.0',
     VIEW_W,
     VIEW_H,
     VIEW_TILE_W,
@@ -1208,6 +1312,13 @@
     EDGE_STATE_OPEN,
     EDGE_STATE_WALL,
     EDGE_STATE_DOOR,
+    EDGE_STATE_STAIRS_UP,
+    EDGE_STATE_STAIRS_DOWN,
+    EDGE_STATE_COUNT,
+    cellIsSolid,
+    losCellSolid,
+    rawEdgeState,
+    stairsArrival,
     MOVE_EDGE_LIMIT,
     TURN_EDGE_LIMIT,
     LEAF_FLAG,
