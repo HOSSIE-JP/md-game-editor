@@ -47,11 +47,22 @@ const ASSET_META = Object.freeze({
   stairs_down_texture: { label: '下り階段', kind: 'stairs_down', fileName: 'stairs_down', width: 48, height: 48, opaque: false },
 });
 const ASSET_KEYS = Object.freeze(Object.keys(ASSET_META));
+/* 壁焼き込み4要素は素材セット単位、宝箱/階段3要素はプロジェクト共通 (settings.common_assets) */
+const SET_ASSET_KEYS = Object.freeze(['wall_texture', 'door_texture', 'floor_texture', 'ceiling_texture']);
+const COMMON_ASSET_KEYS = Object.freeze(['chest_texture', 'stairs_up_texture', 'stairs_down_texture']);
+const COMMON_CARD_SENTINEL = '__common__';
 const MAX_ASSET_SETS = 255;
 const VIEW_W = 200;
 const VIEW_H = 128;
-/* 実機の 1 アニメフレーム = DUN_ANIMATION_STEP_VBLANKS(2) vblank ≒ 33ms */
-const FRAME_STEP_MS = 34;
+const ANIMATION_FRAMES_MIN = 2;
+const ANIMATION_FRAMES_MAX = 8;
+/* dungeon-service.js の MOVE_SPEED_VBLANKS_MAX と揃える */
+const MOVE_SPEED_VBLANKS_MAX = 60;
+/* 実機の必須DMA転送 = DUN_ANIMATION_STEP_VBLANKS(2) vblank (dungeon_view.c flushFrame と同じ値)。
+ * 1 vblank ≒ 16.67ms (NTSC 60Hz)。実際のプレビュー間隔は settings.move_speed_vblanks
+ * (エディタで設定する起動時デフォルトのペーシング) を加えて frameStepMs() で求める。 */
+const DUN_ANIMATION_STEP_VBLANKS = 2;
+const VBLANK_MS = 1000 / 60;
 const DARK_PALETTE_SCALE = 0.35;
 
 export function activatePlugin({ plugin, root, api, logger, registerCapability }) {
@@ -67,6 +78,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     preview: { x: 1, y: 1, dir: 1 },
     animation: null,
     animationFrame: 0,
+    /* 自動マッピング用の踏破済みセル: floorId -> Set<"x,y">。フロア切替をまたいで
+     * プレビューセッション中は保持し、セル編集/データ再読込でリセットする。 */
+    visitedByFloor: new Map(),
+    /* ミニマップ表示モード: 'visited' (自分が歩いた場所のみ, 既定) / 'full' (全体表示) */
+    minimapMode: 'visited',
     textureCache: new Map(),
     textureCacheEpoch: 0,
     textures: null,
@@ -89,6 +105,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         <button class="active" data-tab="map">フロア編集</button>
         <button data-tab="preview">3Dプレビュー</button>
         <button data-tab="assets">素材</button>
+        <button data-tab="settings">設定</button>
         <span class="dge-status"></span>
         <span class="dge-dirty"></span>
         <button class="dge-save" data-action="save">保存</button>
@@ -134,7 +151,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         <div class="dge-preview-shell">
           <div class="dge-preview-stage">
             <canvas class="dge-view" width="200" height="128"></canvas>
-            <canvas class="dge-minimap" width="160" height="160"></canvas>
+            <div class="dge-minimap-wrap">
+              <canvas class="dge-minimap" width="160" height="160"></canvas>
+              <button type="button" class="dge-minimap-mode" data-action="minimap-mode">歩いた場所のみ</button>
+            </div>
           </div>
           <div class="dge-preview-controls">
             <button data-preview="turn-left">←</button>
@@ -146,6 +166,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       </section>
       <section class="dge-panel" data-panel="assets">
         <div class="dge-assets"></div>
+      </section>
+      <section class="dge-panel" data-panel="settings">
+        <div class="dge-settings"></div>
       </section>
     </div>
   `;
@@ -165,9 +188,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     cellInfo: root.querySelector('.dge-cell-info'),
     previewInfo: root.querySelector('.dge-preview-info'),
     assets: root.querySelector('.dge-assets'),
+    settings: root.querySelector('.dge-settings'),
     tabs: Array.from(root.querySelectorAll('[data-tab]')),
     panels: Array.from(root.querySelectorAll('[data-panel]')),
     minimap: root.querySelector('.dge-minimap'),
+    minimapMode: root.querySelector('.dge-minimap-mode'),
     assetsView: null,
   };
   const mapCtx = ui.map.getContext('2d');
@@ -199,6 +224,67 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   function cellAt(x, y) {
     if (!state.current || x < 0 || y < 0 || x >= state.current.width || y >= state.current.height) return null;
     return state.current.cells[y][x];
+  }
+
+  /* ------------------------------------------------------------------
+   * ミニマップ自動マッピング (踏破済みセル追跡) — 実機 dungeon_view.c の
+   * DUN_MINIMAP_VISITED と対になるプレビュー側の状態。
+   *
+   * state.visitedByFloor は floorId -> Set<"x,y"> で、フロア切替 (フロア選択
+   * ドロップダウン・階段遷移) をまたいでプレビューセッション中は保持する
+   * (実機がフロアごとの踏破ビットフィールドを RAM に持ち続けるのと同じ)。
+   * 「歩き直し」とみなしてリセットするのは以下のときだけ:
+   *   - フロアデータの再読込・巻き戻し (refresh / restoreCommittedState)
+   *   - セル編集によりそのフロアのデータ自体が変わったとき
+   *     (handleMapClick でのマップ編集、resizeFloor での実サイズ変更)
+   * 保存 (saveCurrent) 自体はセルを変えないのでリセットしない。
+   * ------------------------------------------------------------------ */
+
+  function visitedKey(x, y) {
+    return `${x},${y}`;
+  }
+
+  function getVisitedSet(floorId) {
+    const key = floorId || '';
+    let set = state.visitedByFloor.get(key);
+    if (!set) {
+      set = new Set();
+      state.visitedByFloor.set(key, set);
+    }
+    return set;
+  }
+
+  function markPreviewVisited(floor, x, y) {
+    if (!floor) return;
+    getVisitedSet(floor.id).add(visitedKey(x, y));
+  }
+
+  function isPreviewVisited(floorId, x, y) {
+    const set = state.visitedByFloor.get(floorId || '');
+    return Boolean(set && set.has(visitedKey(x, y)));
+  }
+
+  function resetVisitedForFloor(floorId) {
+    state.visitedByFloor.delete(floorId || '');
+  }
+
+  function resetAllVisited() {
+    state.visitedByFloor.clear();
+  }
+
+  /* ミニマップのセル (床/宝箱/階段の塗り) を表示するか。full モードは常に表示 */
+  function shouldDrawMinimapCell(mode, floorId, x, y) {
+    return mode === 'full' || isPreviewVisited(floorId, x, y);
+  }
+
+  /* ミニマップの壁/扉エッジを表示するか。自セルか、辺を挟んだ隣接セルの
+   * どちらかが訪問済みなら表示する (歩いて隣から見た壁として扱う)。
+   * hasNeighbor=false (マップ外周) では自セルの訪問状態のみで判定する。
+   * 実機 dungeon_view.c の DUN_drawMinimap と同じ規則。 */
+  function shouldDrawMinimapEdge(mode, floorId, x, y, nx, ny, hasNeighbor) {
+    if (mode === 'full') return true;
+    if (isPreviewVisited(floorId, x, y)) return true;
+    return hasNeighbor && isPreviewVisited(floorId, nx, ny);
   }
 
   function setDirty(value) {
@@ -233,7 +319,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   function normalizeAssetSetForUi(assetSet, index) {
     const id = String(assetSet?.id || (index === 0 ? 'default' : `set-${index + 1}`)).trim();
     const assets = {};
-    ASSET_KEYS.forEach((key) => {
+    SET_ASSET_KEYS.forEach((key) => {
       assets[key] = String(assetSet?.assets?.[key] || state.defaultAssets[key] || DEFAULT_ASSET_REFS[key]);
     });
     return {
@@ -241,6 +327,15 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       name: String(assetSet?.name || id || `Set ${index + 1}`).trim(),
       assets,
     };
+  }
+
+  function normalizeCommonAssetsForUi(commonAssets) {
+    const source = commonAssets && typeof commonAssets === 'object' ? commonAssets : {};
+    const assets = {};
+    COMMON_ASSET_KEYS.forEach((key) => {
+      assets[key] = String(source[key] || state.defaultAssets[key] || DEFAULT_ASSET_REFS[key]);
+    });
+    return assets;
   }
 
   function normalizeSettingsForUi(settings) {
@@ -252,14 +347,16 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     return {
       ...source,
       asset_sets: rawSets.map(normalizeAssetSetForUi),
+      common_assets: normalizeCommonAssetsForUi(source.common_assets),
     };
   }
 
   function effectiveAssetsForFloor(floor) {
+    const common = state.settings?.common_assets || {};
     const set = assetSetById(floor?.asset_set_id);
-    if (set) return { ...state.defaultAssets, ...set.assets };
-    if (floor?.assets) return { ...state.defaultAssets, ...floor.assets };
-    return { ...state.defaultAssets };
+    if (set) return { ...state.defaultAssets, ...common, ...set.assets };
+    if (floor?.assets) return { ...state.defaultAssets, ...common, ...floor.assets };
+    return { ...state.defaultAssets, ...common };
   }
 
   function normalizeFloorForUi(floor) {
@@ -288,6 +385,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     renderFloorAssetSetSelect();
     if (!state.assetEditorSetId) state.assetEditorSetId = state.current.asset_set_id || firstAssetSet()?.id || '';
     state.preview = { ...state.current.start };
+    /* 実機の resetPlayer() と同じく、開始セルへ着地したら踏破済みとして記録する */
+    markPreviewVisited(state.current, state.preview.x, state.preview.y);
     stopPreviewAnimation();
     renderAll();
   }
@@ -303,6 +402,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const nextW = Math.max(4, Math.min(MAX_SIZE, Number(width || state.current.width)));
     const nextH = Math.max(4, Math.min(MAX_SIZE, Number(height || state.current.height)));
     if (nextW === state.current.width && nextH === state.current.height) return;
+    /* セル配列そのものが作り直されるため、踏破済み記録は無効になる */
+    resetVisitedForFloor(state.current.id);
     const old = state.current.cells;
     state.current.cells = Array.from({ length: nextH }, (_, y) => (
       Array.from({ length: nextW }, (_, x) => old[y]?.[x] ? { ...old[y][x] } : blankCell(15))
@@ -536,7 +637,17 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     }
 
     drawPreviewMinimap(floor, minimapPose());
+    renderMinimapModeButton();
     ui.previewInfo.textContent = `X:${state.preview.x} Y:${state.preview.y} ${DIRS[state.preview.dir]?.label || 'E'}`;
+  }
+
+  /* ミニマップ表示モードのトグルボタンのラベルを現在の state.minimapMode に合わせる */
+  function renderMinimapModeButton() {
+    if (!ui.minimapMode) return;
+    const visitedOnly = state.minimapMode !== 'full';
+    ui.minimapMode.textContent = visitedOnly ? '歩いた場所のみ' : '全体表示';
+    ui.minimapMode.title = visitedOnly ? 'クリックで全体表示に切り替え' : 'クリックで歩いた場所のみに切り替え';
+    ui.minimapMode.classList.toggle('full', !visitedOnly);
   }
 
   function composePreviewImage(model, floor) {
@@ -647,8 +758,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = 'rgba(10, 13, 14, 0.9)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const mode = state.minimapMode;
+    const floorId = floor.id;
     for (let y = 0; y < floor.height; y++) {
       for (let x = 0; x < floor.width; x++) {
+        if (!shouldDrawMinimapCell(mode, floorId, x, y)) continue;
         const cell = floor.cells[y][x];
         ctx.fillStyle = cell.dark ? '#15131d' : '#26302d';
         ctx.fillRect(ox + x * size, oy + y * size, Math.max(1, size - 1), Math.max(1, size - 1));
@@ -688,6 +802,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
     ctx.lineCap = 'square';
+    const mode = state.minimapMode;
+    const floorId = floor.id;
     for (let y = 0; y < floor.height; y++) {
       for (let x = 0; x < floor.width; x++) {
         const cell = floor.cells[y][x];
@@ -696,6 +812,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         DIRS.forEach((dir) => {
           if (!(cell[key] & dir.bit)) return;
           if ((dir.id === 'w' && x > 0) || (dir.id === 'n' && y > 0)) return;
+          const nx = x + dir.dx;
+          const ny = y + dir.dy;
+          const hasNeighbor = nx >= 0 && ny >= 0 && nx < floor.width && ny < floor.height;
+          if (!shouldDrawMinimapEdge(mode, floorId, x, y, nx, ny, hasNeighbor)) return;
           const edge = edgeLine(px, py, size, dir.id);
           ctx.beginPath();
           ctx.moveTo(edge.x0, edge.y0);
@@ -743,7 +863,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const generation = ++state.assetTextureGeneration;
     const setId = set.id;
     const projectDir = await refreshProjectDir();
-    const loaded = await loadTextureRefs({ ...state.defaultAssets, ...set.assets }, projectDir);
+    const loaded = await loadTextureRefs({ ...state.defaultAssets, ...state.settings?.common_assets, ...set.assets }, projectDir);
     if (generation !== state.assetTextureGeneration || selectedAssetSet()?.id !== setId) return;
     state.assetTextures = loaded;
     state.assetViewModel = null;
@@ -910,7 +1030,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         </header>
         <div class="dge-assets-workspace">
           <div class="dge-asset-card-grid">
-            ${ASSET_KEYS.map((key) => renderAssetCard(set, key)).join('')}
+            ${SET_ASSET_KEYS.map((key) => renderAssetCard(set, key)).join('')}
           </div>
           <aside class="dge-assets-preview-pane">
             <div class="dge-mini-title">実機相当3Dプレビュー</div>
@@ -926,6 +1046,20 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       </div>
     `;
 
+    const commonSection = `
+      <section class="dge-set-editor dge-common-editor">
+        <header class="dge-set-header">
+          <div>
+            <h2>共通素材</h2>
+            <code>宝箱・階段 (全素材セット共通・プロジェクトで1回だけ生成)</code>
+          </div>
+        </header>
+        <div class="dge-asset-card-grid">
+          ${COMMON_ASSET_KEYS.map((key) => renderCommonAssetCard(key)).join('')}
+        </div>
+      </section>
+    `;
+
     ui.assets.innerHTML = `
       <div class="dge-assets-layout">
         <aside class="dge-set-list-pane">
@@ -939,13 +1073,84 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
             <button type="button" data-action="set-duplicate" ${!set || sets.length >= MAX_ASSET_SETS ? 'disabled' : ''}>複製</button>
           </div>
         </aside>
-        ${content}
+        <div class="dge-assets-main">
+          ${commonSection}
+          ${content}
+        </div>
       </div>
     `;
     ui.assetsView = ui.assets.querySelector('.dge-assets-view');
     if (ui.assetsView) ui.assetsView.getContext('2d').imageSmoothingEnabled = false;
     const generation = ++state.assetCardsGeneration;
-    if (set) ASSET_KEYS.forEach((key) => void loadAssetCardPreview(set.id, key, generation));
+    if (set) SET_ASSET_KEYS.forEach((key) => void loadAssetCardPreview(set.id, key, generation));
+    COMMON_ASSET_KEYS.forEach((key) => void loadAssetCardPreview(COMMON_CARD_SENTINEL, key, generation));
+  }
+
+  /* ------------------------------------------------------------------
+   * 設定タブ (アニメーションフレーム数 / 移動速度の既定値)
+   * ------------------------------------------------------------------ */
+
+  function renderSettings() {
+    if (!ui.settings) return;
+    const settings = state.settings || {};
+    const animationFrames = Math.max(ANIMATION_FRAMES_MIN, Math.min(ANIMATION_FRAMES_MAX, Number(settings.animation_frames) || ANIMATION_FRAMES_MAX));
+    const turnFrames = Math.max(ANIMATION_FRAMES_MIN, Math.min(ANIMATION_FRAMES_MAX, Number(settings.turn_frames) || animationFrames));
+    const moveSpeed = Math.max(0, Math.min(MOVE_SPEED_VBLANKS_MAX, Number(settings.move_speed_vblanks) || 0));
+    ui.settings.innerHTML = `
+      <div class="dge-settings-form">
+        <h2>ダンジョン設定</h2>
+        <p class="dge-settings-hint">
+          アニメーションフレーム数を減らすとパターン数が減りROM容量を削減できますが、動きは荒くなります。
+          移動速度は前進/後退の1コマごとに、実機必須の2vblank転送に加えて追加で待つvblank数です。
+          値が大きいほど1マスの移動がゆっくりになり、0で最速 (追加待ちなし) になります。
+          ここで設定するのは起動時の既定値で、ゲーム内のパワーアップ演出などから DUN_setMoveSpeed() を
+          呼ぶことで実行中に変更できます (このプレビューは既定値のみを反映します)。
+        </p>
+        <label class="dge-field">前進/後退アニメーションフレーム数 (${ANIMATION_FRAMES_MIN}〜${ANIMATION_FRAMES_MAX})
+          <input type="number" min="${ANIMATION_FRAMES_MIN}" max="${ANIMATION_FRAMES_MAX}" step="1" data-settings-field="animation_frames" value="${animationFrames}">
+        </label>
+        <label class="dge-field">旋回アニメーションフレーム数 (${ANIMATION_FRAMES_MIN}〜${ANIMATION_FRAMES_MAX})
+          <input type="number" min="${ANIMATION_FRAMES_MIN}" max="${ANIMATION_FRAMES_MAX}" step="1" data-settings-field="turn_frames" value="${turnFrames}">
+        </label>
+        <label class="dge-field">移動速度: 追加待ちvblank数 (0〜${MOVE_SPEED_VBLANKS_MAX}, 0=最速)
+          <input type="number" min="0" max="${MOVE_SPEED_VBLANKS_MAX}" step="1" data-settings-field="move_speed_vblanks" value="${moveSpeed}">
+        </label>
+        <button type="button" class="dge-wide" data-action="settings-save">設定を保存</button>
+      </div>
+    `;
+  }
+
+  function readSettingsFormFields() {
+    if (!ui.settings) return null;
+    const animInput = ui.settings.querySelector('[data-settings-field="animation_frames"]');
+    const turnInput = ui.settings.querySelector('[data-settings-field="turn_frames"]');
+    const speedInput = ui.settings.querySelector('[data-settings-field="move_speed_vblanks"]');
+    const animationFrames = Math.max(ANIMATION_FRAMES_MIN, Math.min(ANIMATION_FRAMES_MAX, Number(animInput?.value) || ANIMATION_FRAMES_MAX));
+    const turnFrames = Math.max(ANIMATION_FRAMES_MIN, Math.min(ANIMATION_FRAMES_MAX, Number(turnInput?.value) || animationFrames));
+    const moveSpeed = Math.max(0, Math.min(MOVE_SPEED_VBLANKS_MAX, Number(speedInput?.value) || 0));
+    return { animation_frames: animationFrames, turn_frames: turnFrames, move_speed_vblanks: moveSpeed };
+  }
+
+  async function saveSettingsForm() {
+    const fields = readSettingsFormFields();
+    if (!fields) return;
+    if (!await guardUnsaved('設定を保存する')) return;
+    const nextSettings = { ...state.settings, ...fields };
+    const result = await api.plugins.invokeHook(plugin.id, 'saveDungeonSettings', { settings: cloneData(nextSettings) });
+    if (!result?.ok) {
+      setStatus(result?.error || '設定の保存に失敗しました');
+      return;
+    }
+    state.settings = normalizeSettingsForUi(result.settings || nextSettings);
+    if (Array.isArray(result.floors)) state.floors = result.floors.map(normalizeFloorForUi);
+    state.current = state.floors.find((floor) => floor.id === state.current?.id) || state.floors[0] || state.current;
+    state.exportInfo = result.export || state.exportInfo;
+    invalidateViewModel();
+    setDirty(false);
+    captureCommittedState();
+    setStatus('設定を保存しました');
+    renderSettings();
+    renderPreview();
   }
 
   function renderAssetCard(set, key) {
@@ -968,6 +1173,32 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         <div class="dge-asset-actions">
           <button type="button" data-action="asset-import" data-asset-key="${key}">${isDefault ? '選択' : '置換'}</button>
           <button type="button" data-action="asset-default" data-asset-key="${key}" ${isDefault ? 'disabled' : ''}>既定に戻す</button>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderCommonAssetCard(key) {
+    const meta = ASSET_META[key];
+    const commonAssets = state.settings?.common_assets || {};
+    const ref = String(commonAssets[key] || state.defaultAssets[key] || DEFAULT_ASSET_REFS[key]);
+    const isDefault = ref === String(state.defaultAssets[key] || DEFAULT_ASSET_REFS[key]);
+    return `
+      <article class="dge-asset-card" data-asset-card="${key}" data-common="1">
+        <header>
+          <strong>${escapeHtml(meta.label)}</strong>
+          <span>${meta.width}×${meta.height} / 16色${meta.opaque ? ' / 不透明' : ' / 透過可'}</span>
+        </header>
+        <div class="dge-asset-thumb"><img alt="${escapeHtml(meta.label)} preview"></div>
+        <label>保存先<input type="text" readonly value="${escapeHtml(ref)}" title="${escapeHtml(ref)}"></label>
+        <div class="dge-asset-facts">
+          <span data-asset-dimensions>読込中...</span>
+          <span data-asset-colors>- colors</span>
+        </div>
+        <div class="dge-asset-validation pending" data-asset-validation>検証中...</div>
+        <div class="dge-asset-actions">
+          <button type="button" data-action="asset-import" data-asset-key="${key}" data-common="1">${isDefault ? '選択' : '置換'}</button>
+          <button type="button" data-action="asset-default" data-asset-key="${key}" data-common="1" ${isDefault ? 'disabled' : ''}>既定に戻す</button>
         </div>
       </article>
     `;
@@ -1137,10 +1368,13 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   }
 
   async function loadAssetCardPreview(setId, key, generation) {
-    const set = assetSetById(setId);
+    const isCommon = setId === COMMON_CARD_SENTINEL;
+    const set = isCommon ? null : assetSetById(setId);
     const meta = ASSET_META[key];
-    if (!set || !meta) return;
-    const ref = String(set.assets?.[key] || state.defaultAssets[key] || DEFAULT_ASSET_REFS[key]);
+    if ((!isCommon && !set) || !meta) return;
+    const ref = isCommon
+      ? String(state.settings?.common_assets?.[key] || state.defaultAssets[key] || DEFAULT_ASSET_REFS[key])
+      : String(set.assets?.[key] || state.defaultAssets[key] || DEFAULT_ASSET_REFS[key]);
     const parsed = parseTextureRef(ref);
     const projectDir = await refreshProjectDir();
     const sourcePath = resolveAssetPath(parsed.path, projectDir);
@@ -1195,7 +1429,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   }
 
   function updateAssetCard(setId, key, generation, details) {
-    if (generation !== state.assetCardsGeneration || selectedAssetSet()?.id !== setId) return;
+    if (generation !== state.assetCardsGeneration) return;
+    if (setId !== COMMON_CARD_SENTINEL && selectedAssetSet()?.id !== setId) return;
     const card = ui.assets.querySelector(`[data-asset-card="${key}"]`);
     if (!card) return;
     const image = card.querySelector('img');
@@ -1222,9 +1457,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   }
 
   async function importAssetForSet(key) {
-    const set = selectedAssetSet();
+    const isCommon = COMMON_ASSET_KEYS.includes(key);
+    const set = isCommon ? null : selectedAssetSet();
     const meta = ASSET_META[key];
-    if (!set || !meta) return;
+    if ((!isCommon && !set) || !meta) return;
     const picked = await api.electronAPI.pickFile({
       title: `${meta.label}画像を選択`,
       properties: ['openFile'],
@@ -1281,7 +1517,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       const validation = validateAssetInspection(inspection, meta);
       if (!validation.ok) throw new Error(validation.message);
 
-      const safeSetId = safePathPart(set.id);
+      const safeSetId = isCommon ? 'common' : safePathPart(set.id);
       const targetSubdir = `dungeon/textures/${safeSetId}`;
       const targetFileName = `${meta.fileName}${ext}`;
       const written = await api.electronAPI.writeAssetFile({
@@ -1291,12 +1527,18 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         dataUrl,
       });
       if (!written?.ok) throw new Error(written?.error || '画像の保存に失敗しました');
-      if (selectedAssetSet()?.id !== set.id) return;
+      if (!isCommon && selectedAssetSet()?.id !== set.id) return;
       const relativePath = normalizeSavedAssetPath(written.relativePath || `${targetSubdir}/${targetFileName}`);
-      set.assets[key] = relativePath;
+      if (isCommon) {
+        if (!state.settings.common_assets) state.settings.common_assets = {};
+        state.settings.common_assets[key] = relativePath;
+      } else {
+        set.assets[key] = relativePath;
+      }
       setDirty(true);
       setStatus(`${meta.label}を設定しました${converted.warning ? ` / ${converted.warning}` : ''}`);
-      refreshTextureConsumers(set.id);
+      if (isCommon) refreshTextureConsumers(null, { common: true });
+      else refreshTextureConsumers(set.id);
     } catch (err) {
       setStatus(`${meta.label}: ${String(err?.message || err)}`);
       renderAssets();
@@ -1305,21 +1547,30 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   }
 
   function resetAssetToDefault(key) {
+    if (!ASSET_META[key]) return;
+    if (COMMON_ASSET_KEYS.includes(key)) {
+      if (!state.settings?.common_assets) return;
+      state.settings.common_assets[key] = String(state.defaultAssets[key] || DEFAULT_ASSET_REFS[key]);
+      setDirty(true);
+      setStatus(`${ASSET_META[key].label}を既定素材へ戻しました`);
+      refreshTextureConsumers(null, { common: true });
+      return;
+    }
     const set = selectedAssetSet();
-    if (!set || !ASSET_META[key]) return;
+    if (!set) return;
     set.assets[key] = String(state.defaultAssets[key] || DEFAULT_ASSET_REFS[key]);
     setDirty(true);
     setStatus(`${ASSET_META[key].label}を既定素材へ戻しました`);
     refreshTextureConsumers(set.id);
   }
 
-  function refreshTextureConsumers(changedSetId) {
+  function refreshTextureConsumers(changedSetId, options = {}) {
     clearTextureCache();
     state.viewModel = null;
     state.assetViewModel = null;
     state.assetTextures = null;
     renderAll();
-    if (state.current?.asset_set_id === changedSetId) void loadTexturesForCurrent();
+    if (options.common || state.current?.asset_set_id === changedSetId) void loadTexturesForCurrent();
     void loadTexturesForAssetEditor();
   }
 
@@ -1445,6 +1696,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     renderFloorAssetSetSelect();
     renderMap();
     renderAssets();
+    renderSettings();
     renderPreview();
   }
 
@@ -1503,7 +1755,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (state.tool === 'stairs_down') cell.stairs = cell.stairs === 'down' ? '' : 'down';
     if (state.tool === 'start') state.current.start = { x, y, dir: DIR_INDEX[edge] ?? 1 };
     if (state.tool === 'erase') Object.assign(cell, blankCell(0));
+    /* マップを編集したフロアの踏破済み記録は無効になる。プレビュー位置は
+     * 従来どおり開始セルへ戻るので、そのセルだけを歩き直しとして記録する */
+    resetVisitedForFloor(floor.id);
     state.preview = { ...state.current.start };
+    markPreviewVisited(state.current, state.preview.x, state.preview.y);
     ui.cellInfo.textContent = `X:${x} Y:${y} edge:${edge}`;
     setDirty(true);
     renderAll();
@@ -1518,12 +1774,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const cell = cellAt(state.preview.x, state.preview.y);
     if (!cell || (cell.walls & dir.bit)) return false;
     const target = cellAt(state.preview.x + dir.dx, state.preview.y + dir.dy);
-    if (!target) return false;
-    /* 階段セルはソリッド (前進バンプでフロア移動) */
-    return !core.cellIsSolid(target);
+    return Boolean(target);
   }
 
-  /* 階段バンプ: 前のフロアの下り階段の隣 / 次のフロアの上り階段の隣へ */
+  /* 階段遷移: 前のフロアの下り階段 / 次のフロアの上り階段の位置そのものへ */
   async function previewGoStairs(kind) {
     const currentOrder = Number(state.current?.order || 1);
     const targetOrder = kind === 'up' ? currentOrder - 1 : currentOrder + 1;
@@ -1540,6 +1794,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     state.preview = arrival
       ? { x: arrival.x, y: arrival.y, dir: arrival.dir }
       : { ...target.start };
+    /* 実機の goStairs() と同じく、遷移先フロアの到着セルを踏破済みとして記録する */
+    markPreviewVisited(target, state.preview.x, state.preview.y);
     stopPreviewAnimation();
     invalidateViewModel();
     ui.floorSelect.value = target.id;
@@ -1558,20 +1814,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const to = { ...state.preview };
     if (action === 'turn-left') to.dir = (to.dir + 3) & 3;
     if (action === 'turn-right') to.dir = (to.dir + 1) & 3;
-    if (action === 'forward') {
-      if (canPreviewMove(to.dir)) {
-        to.x += DIRS[to.dir].dx;
-        to.y += DIRS[to.dir].dy;
-      } else {
-        /* 目前が階段セルならフロア移動 (実機の階段バンプと同一) */
-        const dir = DIRS[to.dir];
-        const cell = cellAt(state.preview.x, state.preview.y);
-        const target = cellAt(state.preview.x + dir.dx, state.preview.y + dir.dy);
-        if (cell && target && !(cell.walls & dir.bit) && core.cellIsSolid(target)) {
-          void previewGoStairs(target.stairs);
-          return;
-        }
-      }
+    if (action === 'forward' && canPreviewMove(to.dir)) {
+      to.x += DIRS[to.dir].dx;
+      to.y += DIRS[to.dir].dy;
     }
     if (action === 'back') {
       const dir = (state.preview.dir + 2) & 3;
@@ -1583,9 +1828,22 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (from.x === to.x && from.y === to.y && from.dir === to.dir) return;
     const isTurn = action === 'turn-left' || action === 'turn-right';
     const total = isTurn ? model.spaces.frames.turnPoses.length : model.spaces.frames.fwdPoses.length;
-    state.animation = { action, from, to, frameIndex: 0, total, lastStep: performance.now() };
+    /* 前進/後退で階段セルへ着地したら、移動完了後に自動でフロア遷移する */
+    const arrivesOnStairs = !isTurn;
+    state.animation = { action, from, to, frameIndex: 0, total, lastStep: performance.now(), arrivesOnStairs };
     cancelAnimationFrame(state.animationFrame);
     state.animationFrame = requestAnimationFrame(stepPreviewAnimation);
+  }
+
+  /*
+   * 実機の1アニメフレーム = DUN_ANIMATION_STEP_VBLANKS(2, ハード必須) +
+   * settings.move_speed_vblanks (エディタ設定の既定ペーシング) vblank。
+   * プレビューのフレーム間隔をこれに合わせることで、実機が起動直後に
+   * 再生する速さとエディタ上のプレビューが一致する (WYSIWYG)。
+   */
+  function frameStepMs() {
+    const extra = Math.max(0, Math.min(MOVE_SPEED_VBLANKS_MAX, Number(state.settings?.move_speed_vblanks) || 0));
+    return (DUN_ANIMATION_STEP_VBLANKS + extra) * VBLANK_MS;
   }
 
   function stepPreviewAnimation() {
@@ -1593,13 +1851,20 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (!anim) return;
     renderPreview();
     const now = performance.now();
-    if (now - anim.lastStep >= FRAME_STEP_MS) {
+    if (now - anim.lastStep >= frameStepMs()) {
       anim.lastStep = now;
       anim.frameIndex++;
       if (anim.frameIndex >= anim.total) {
         state.preview = { ...anim.to };
+        /* 実機の applyMove() 直後の markVisited() と同じく、移動完了時点で
+         * (回転のみの場合は同一セルへの無害な再マークになる) 着地セルを記録する */
+        markPreviewVisited(state.current, state.preview.x, state.preview.y);
         state.animation = null;
         renderPreview();
+        if (anim.arrivesOnStairs) {
+          const landed = cellAt(anim.to.x, anim.to.y);
+          if (landed && landed.stairs) void previewGoStairs(landed.stairs);
+        }
         return;
       }
     }
@@ -1634,6 +1899,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     state.assetEditorSetId = assetSetById(state.committed.assetEditorSetId)
       ? state.committed.assetEditorSetId
       : (state.current.asset_set_id || firstAssetSet()?.id || '');
+    /* 未保存の変更を破棄してコミット済みデータへ巻き戻す = データの再読込と同義 */
+    resetAllVisited();
     clearTextureCache();
     state.textures = null;
     state.assetTextures = null;
@@ -1705,6 +1972,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     state.defaultAssets = { ...DEFAULT_ASSET_REFS, ...(result.defaultAssets || {}) };
     state.settings = normalizeSettingsForUi(result.settings);
     state.floors = (result.floors || []).map(normalizeFloorForUi);
+    /* フロアデータをディスクから再読込した = 新しいプレビューセッションとして扱う */
+    resetAllVisited();
     state.current = state.floors.find((floor) => floor.id === previousFloorId) || state.floors[0] || blankFloor(1);
     state.assetEditorSetId = assetSetById(state.current.asset_set_id)
       ? state.current.asset_set_id
@@ -1862,6 +2131,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (action === 'set-delete') deleteAssetSet();
     if (action === 'asset-import') void importAssetForSet(actionTarget.dataset.assetKey);
     if (action === 'asset-default') resetAssetToDefault(actionTarget.dataset.assetKey);
+    if (action === 'settings-save') void saveSettingsForm();
+    if (action === 'minimap-mode') {
+      state.minimapMode = state.minimapMode === 'full' ? 'visited' : 'full';
+      renderPreview();
+    }
     if (setTarget?.dataset?.setSelect) void selectAssetEditorSet(setTarget.dataset.setSelect);
   });
   ui.map.addEventListener('click', handleMapClick);

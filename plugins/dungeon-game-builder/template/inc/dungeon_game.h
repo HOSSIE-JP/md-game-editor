@@ -32,7 +32,6 @@
 #define DUN_ACTION_BACKWARD 2
 #define DUN_ACTION_TURN_L   3
 #define DUN_ACTION_TURN_R   4
-#define DUN_ACTION_STAIRS   5
 
 typedef struct DungeonFloorData
 {

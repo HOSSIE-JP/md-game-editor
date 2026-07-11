@@ -11,7 +11,7 @@
  *  - 左回転:   右回転テーブルを鏡像評価 (dun_edges_turn_mirrored) し
  *              水平反転で合成する
  *  - 床/天井:  選択素材セットの 32x32 パターンを BG_B へ反復配置
- *  - 宝箱/階段: 選択素材セットのプリスケール済みビルボードスプライト
+ *  - 宝箱/階段: 素材セットに依らないプロジェクト共通のプリスケール済みビルボードスプライト
  * ============================================================= */
 #include "dungeon_view.h"
 #include "dungeon_patterns.h"
@@ -37,6 +37,14 @@ static u8 back_bank;
 static bool view_dark;
 static const DunViewSet *active_view_set;
 static Sprite *bb_sprites[DUN_SPRITE_COUNT];
+/* flushFrame の必須 2 vblank DMA 転送に追加する待ち vblank 数 (0 = 追加なし)。
+ * 起動時は DUN_MOVE_SPEED_VBLANKS_DEFAULT で初期化し、DUN_setMoveSpeed で
+ * ゲーム側 (パワーアップ等) から実行時に変更できる。 */
+static u8 dun_extra_step_vblanks;
+/* ミニマップ表示モード (DUN_MINIMAP_VISITED / DUN_MINIMAP_FULL)。起動時は
+ * VISITED (自動マッピング) で初期化し、DUN_setMinimapMode でゲーム側
+ * (マップ入手アイテム等) から実行時に切り替えられる。 */
+static u8 dun_minimap_mode;
 
 /* ミニマップ (ビュー右の余白, BG_A + PAL2, 4px/セル) */
 #define DUN_MM_TILES_W 10
@@ -93,7 +101,7 @@ void DUN_applyViewSet(u8 view_set)
     active_view_set = &dun_view_sets[view_set];
     if (view_dark) PAL_setColors(0, active_view_set->dark_palette, 16, CPU);
     else PAL_setPalette(PAL0, active_view_set->view_palette->data, CPU);
-    PAL_setPalette(PAL1, active_view_set->billboard_palette->data, CPU);
+    PAL_setPalette(PAL1, dun_common_bb_palette.data, CPU);
     writeBackground();
 }
 
@@ -108,6 +116,8 @@ void DUN_initView(void)
     back_bank = 0;
     view_dark = FALSE;
     active_view_set = NULL;
+    dun_extra_step_vblanks = DUN_MOVE_SPEED_VBLANKS_DEFAULT;
+    dun_minimap_mode = DUN_MINIMAP_VISITED;
     DUN_applyViewSet(0);
     mmWriteTileMap();
 }
@@ -120,9 +130,22 @@ void DUN_setDark(bool dark)
     else PAL_setPalette(PAL0, active_view_set->view_palette->data, CPU);
 }
 
+/* ゲーム側のパワーアップ演出などから呼び、移動アニメーションのテンポを変える */
+void DUN_setMoveSpeed(u8 extra_vblanks)
+{
+    dun_extra_step_vblanks = extra_vblanks;
+}
+
+/* ゲーム側 (マップ入手アイテム等) から呼び、ミニマップの表示モードを実行時に切り替える */
+void DUN_setMinimapMode(u8 mode)
+{
+    dun_minimap_mode = mode;
+}
+
 /* ------------------------------------------------------------
  * エッジ状態評価 (0=開 / 1=壁 / 2=扉) — render-core と同一仕様
- * 階段セルはソリッド扱いで、その開いた面は壁として描く
+ * ソリッドなセルは開いた面を壁として描くが、階段も宝箱と同様に通行可能な
+ * イベントセルへ変更したため、現在ソリッドになるセル種別は存在しない。
  * ------------------------------------------------------------ */
 
 static bool inBounds(const DungeonFloorData *floor, s16 x, s16 y)
@@ -130,18 +153,16 @@ static bool inBounds(const DungeonFloorData *floor, s16 x, s16 y)
     return x >= 0 && y >= 0 && x < floor->width && y < floor->height;
 }
 
-static u8 cellFlagsAt(const DungeonFloorData *floor, s16 x, s16 y)
-{
-    if (!inBounds(floor, x, y)) return 0;
-    return floor->flags[DUN_INDEX(floor, x, y)];
-}
-
+/* 将来ソリッドなセル種別を追加する場合のフックとして残す (render-core.js の cellIsSolid と同一) */
 static bool cellIsSolidAt(const DungeonFloorData *floor, s16 x, s16 y)
 {
-    return (cellFlagsAt(floor, x, y) & (DUN_FLAG_STAIRS_UP | DUN_FLAG_STAIRS_DOWN)) != 0;
+    (void)floor;
+    (void)x;
+    (void)y;
+    return FALSE;
 }
 
-/* 壁/扉ビットのみのエッジ判定 (階段ソリディティを含まない) */
+/* 壁/扉ビットのみのエッジ判定 */
 static u8 rawEdgeState(const DungeonFloorData *floor, s16 x, s16 y, u8 cross_dir)
 {
     const u8 opposite = (u8)((cross_dir + 2) & 3);
@@ -229,11 +250,15 @@ static void stageFrame(const DunFrameTable *table, bool mirrored)
 
 /*
  * ステージング済みフレームを裏バンクへ 2 vblank で転送して表示を切り替える。
- * (6.4KB + 6.4KB + タイルマップ 800B を DMA キューで分割転送)
+ * (6.4KB + 6.4KB + タイルマップ 800B を DMA キューで分割転送。この 2 vblank は
+ * ダブルバッファ転送のハード制約でありペーシング用途で変更しない)
+ * dun_extra_step_vblanks > 0 の場合、その後に追加で vblank を待って
+ * アニメーションのテンポを落とす (DUN_setMoveSpeed でランタイムに変更可能)。
  */
 static void flushFrame(void)
 {
     const u16 bank_base = back_bank ? DUN_BANK1_INDEX : DUN_BANK0_INDEX;
+    u8 extra;
     VDP_loadTileData(tile_staging, bank_base, DUN_BANK_HALF, DMA_QUEUE);
     SPR_update();
     SYS_doVBlankProcess();
@@ -242,6 +267,7 @@ static void flushFrame(void)
     SPR_update();
     SYS_doVBlankProcess();
     back_bank ^= 1;
+    for (extra = 0; extra < dun_extra_step_vblanks; extra++) SYS_doVBlankProcess();
 }
 
 /* ------------------------------------------------------------
@@ -250,7 +276,7 @@ static void flushFrame(void)
 
 /*
  * LOS: カメラセル中心 → 対象セル中心の線分が横切るエッジ/セルを
- * supercover 走査 (整数誤差項) で判定する。壁・扉・階段セルは視線を遮る。
+ * supercover 走査 (整数誤差項) で判定する。壁・扉セルは視線を遮る。
  * render-core の losVisible と同一の整数アルゴリズム。
  */
 static bool losEdgeOpen(const DungeonFloorData *floor, s16 cx, s16 cy, u8 cross_dir)
@@ -258,6 +284,7 @@ static bool losEdgeOpen(const DungeonFloorData *floor, s16 cx, s16 cy, u8 cross_
     return rawEdgeState(floor, cx, cy, cross_dir) == 0;
 }
 
+/* 現在ソリッドなセル種別は存在しないため、範囲外セルのみを遮蔽とみなす */
 static bool losCellSolid(const DungeonFloorData *floor, s16 cx, s16 cy)
 {
     if (!inBounds(floor, cx, cy)) return TRUE;
@@ -298,14 +325,20 @@ static bool losVisible(const DungeonFloorData *floor, u8 x, u8 y, u8 dir, s8 dd,
         }
         else
         {
-            /* 線分が格子の角を正確に通過: どちらか一方の回り込みが開いていれば可視 */
+            /*
+             * 線分が格子の角を正確に通過する場合。どちらか一方の回り込みが
+             * 開いていれば「セル到達」は可能だが、レンダラは開いていない側の
+             * 壁もそのまま描画するため、その壁はカメラ直近では画面上で対象と
+             * 同じ領域に映り込み得る。見た目上の遮蔽と一致させるため両方が
+             * 開いている場合のみ可視とする (どちらか一方でも壁なら遮蔽)。
+             */
             const s16 nx = cx + dir_dx[sx];
             const s16 ny = cy + dir_dy[sx];
             const s16 mx = cx + dir_dx[sy];
             const s16 my = cy + dir_dy[sy];
             const bool via_x = losEdgeOpen(floor, cx, cy, sx) && !losCellSolid(floor, nx, ny) && losEdgeOpen(floor, nx, ny, sy);
             const bool via_y = losEdgeOpen(floor, cx, cy, sy) && !losCellSolid(floor, mx, my) && losEdgeOpen(floor, mx, my, sx);
-            if (!via_x && !via_y) return FALSE;
+            if (!via_x || !via_y) return FALSE;
             cx += dir_dx[sx] + dir_dx[sy];
             cy += dir_dy[sx] + dir_dy[sy];
             err += (s16)(2 * adx - 2 * ady);
@@ -316,11 +349,12 @@ static bool losVisible(const DungeonFloorData *floor, u8 x, u8 y, u8 dir, s8 dd,
     return TRUE;
 }
 
+/* 宝箱/上り階段/下り階段は素材セットに依らずプロジェクト共通スプライトを使う */
 static const SpriteDefinition *billboardDefForFlags(u8 flags)
 {
-    if (flags & DUN_FLAG_CHEST) return active_view_set->chest;
-    if (flags & DUN_FLAG_STAIRS_UP) return active_view_set->stairs_up;
-    if (flags & DUN_FLAG_STAIRS_DOWN) return active_view_set->stairs_down;
+    if (flags & DUN_FLAG_CHEST) return &dun_common_bb_chest;
+    if (flags & DUN_FLAG_STAIRS_UP) return &dun_common_bb_stairs_up;
+    if (flags & DUN_FLAG_STAIRS_DOWN) return &dun_common_bb_stairs_down;
     return NULL;
 }
 
@@ -407,6 +441,16 @@ static void mmFillRect(u16 px, u16 py, u16 w, u16 h, u16 color)
     }
 }
 
+/* 訪問済みセル判定 (DUN_MINIMAP_VISITED 用)。visited は main.c 側が持つ現在フロアの
+ * 踏破ビットフィールド (DUN_INDEX と同じ並びの 1 セル = 1 bit)。範囲外は未訪問扱い。 */
+static bool mmIsVisited(const DungeonFloorData *floor, const u8 *visited, s16 x, s16 y)
+{
+    u16 bit;
+    if (!inBounds(floor, x, y)) return FALSE;
+    bit = DUN_INDEX(floor, x, y);
+    return (visited[bit >> 3] & (u8)(1 << (bit & 7))) != 0;
+}
+
 static void mmWriteTileMap(void)
 {
     u16 buf[DUN_MM_TILES_W * DUN_MM_TILES_H];
@@ -418,7 +462,7 @@ static void mmWriteTileMap(void)
     VDP_setTileMapDataRect(BG_A, buf, DUN_MM_X, DUN_MM_Y, DUN_MM_TILES_W, DUN_MM_TILES_H, DUN_MM_TILES_W, CPU);
 }
 
-void DUN_drawMinimap(const DungeonFloorData *floor, u8 px, u8 py, u8 dir)
+void DUN_drawMinimap(const DungeonFloorData *floor, const u8 *visited, u8 px, u8 py, u8 dir)
 {
     const u16 cell = DUN_MM_CELL;
     const u16 ox = (u16)((DUN_MM_PX - (floor->width * cell)) / 2);
@@ -435,19 +479,33 @@ void DUN_drawMinimap(const DungeonFloorData *floor, u8 px, u8 py, u8 dir)
             const u8 flags = floor->flags[DUN_INDEX(floor, x, y)];
             const u16 bx = ox + (x * cell);
             const u16 by = oy + (y * cell);
-            u16 fill = (flags & DUN_FLAG_DARK) ? MM_COLOR_DARK : MM_COLOR_FLOOR;
-            if (flags & DUN_FLAG_STAIRS_UP) fill = MM_COLOR_STAIRS_UP;
-            if (flags & DUN_FLAG_STAIRS_DOWN) fill = MM_COLOR_STAIRS_DOWN;
-            mmFillRect(bx, by, cell, cell, fill);
-            if (flags & DUN_FLAG_CHEST) mmFillRect(bx + 1, by + 1, cell - 2, cell - 2, MM_COLOR_CHEST);
-            /* 壁/扉は各セルの北辺と西辺 + 外周の南/東辺で描く */
-            if (edges & (DUN_EDGE_N | DUN_DOOR_N)) mmFillRect(bx, by, cell, 1, (edges & DUN_DOOR_N) ? MM_COLOR_DOOR : MM_COLOR_WALL);
-            if (edges & (DUN_EDGE_W | DUN_DOOR_W)) mmFillRect(bx, by, 1, cell, (edges & DUN_DOOR_W) ? MM_COLOR_DOOR : MM_COLOR_WALL);
-            if ((y == floor->height - 1) && (edges & (DUN_EDGE_S | DUN_DOOR_S))) mmFillRect(bx, by + cell - 1, cell, 1, (edges & DUN_DOOR_S) ? MM_COLOR_DOOR : MM_COLOR_WALL);
-            if ((x == floor->width - 1) && (edges & (DUN_EDGE_E | DUN_DOOR_E))) mmFillRect(bx + cell - 1, by, 1, cell, (edges & DUN_DOOR_E) ? MM_COLOR_DOOR : MM_COLOR_WALL);
+            /* DUN_MINIMAP_FULL では全セル訪問済み扱い。VISITED では実際の踏破状態を見る */
+            const bool self_visited = (dun_minimap_mode == DUN_MINIMAP_FULL) || mmIsVisited(floor, visited, x, y);
+            if (self_visited)
+            {
+                u16 fill = (flags & DUN_FLAG_DARK) ? MM_COLOR_DARK : MM_COLOR_FLOOR;
+                if (flags & DUN_FLAG_STAIRS_UP) fill = MM_COLOR_STAIRS_UP;
+                if (flags & DUN_FLAG_STAIRS_DOWN) fill = MM_COLOR_STAIRS_DOWN;
+                mmFillRect(bx, by, cell, cell, fill);
+                if (flags & DUN_FLAG_CHEST) mmFillRect(bx + 1, by + 1, cell - 2, cell - 2, MM_COLOR_CHEST);
+            }
+            /*
+             * 壁/扉は各セルの北辺と西辺 + 外周の南/東辺で描く。VISITED モードでは
+             * 自セルか、辺を挟んだ隣接セルのどちらかが訪問済みなら描画する
+             * (歩いて隣から見た壁も「見えている」ものとして扱う)。外周の南/東辺は
+             * 隣接セルが存在しないため自セルの訪問状態のみで判定する。
+             */
+            if ((edges & (DUN_EDGE_N | DUN_DOOR_N)) && (self_visited || mmIsVisited(floor, visited, x, y - 1)))
+                mmFillRect(bx, by, cell, 1, (edges & DUN_DOOR_N) ? MM_COLOR_DOOR : MM_COLOR_WALL);
+            if ((edges & (DUN_EDGE_W | DUN_DOOR_W)) && (self_visited || mmIsVisited(floor, visited, x - 1, y)))
+                mmFillRect(bx, by, 1, cell, (edges & DUN_DOOR_W) ? MM_COLOR_DOOR : MM_COLOR_WALL);
+            if ((y == floor->height - 1) && (edges & (DUN_EDGE_S | DUN_DOOR_S)) && self_visited)
+                mmFillRect(bx, by + cell - 1, cell, 1, (edges & DUN_DOOR_S) ? MM_COLOR_DOOR : MM_COLOR_WALL);
+            if ((x == floor->width - 1) && (edges & (DUN_EDGE_E | DUN_DOOR_E)) && self_visited)
+                mmFillRect(bx + cell - 1, by, 1, cell, (edges & DUN_DOOR_E) ? MM_COLOR_DOOR : MM_COLOR_WALL);
         }
     }
-    /* プレイヤー位置 (2x2) と向き (1px) */
+    /* プレイヤー位置 (2x2) と向き (1px) は表示モードに関わらず常に描く */
     {
         const u16 bx = ox + (px * cell);
         const u16 by = oy + (py * cell);

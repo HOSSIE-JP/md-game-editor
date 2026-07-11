@@ -33,6 +33,9 @@ const DEFAULT_ASSETS = {
   stairs_down_texture: 'dungeon/textures/dungeon_texture_atlas.png#stairs_down',
 };
 const ASSET_KEYS = Object.freeze(Object.keys(DEFAULT_ASSETS));
+/* 壁焼き込み4要素 (素材セット単位) と 宝箱/階段3要素 (プロジェクト共通 = settings.common_assets) を分離する */
+const SET_ASSET_KEYS = Object.freeze(['wall_texture', 'door_texture', 'floor_texture', 'ceiling_texture']);
+const COMMON_ASSET_KEYS = Object.freeze(['chest_texture', 'stairs_up_texture', 'stairs_down_texture']);
 const ASSET_CONSTRAINTS = Object.freeze({
   wall_texture: { width: 96, height: 96, opaque: true },
   door_texture: { width: 96, height: 96, opaque: true },
@@ -45,18 +48,23 @@ const ASSET_CONSTRAINTS = Object.freeze({
 const DEFAULT_ASSET_SET = Object.freeze({
   id: 'default',
   name: 'Default',
-  assets: Object.freeze({ ...DEFAULT_ASSETS }),
+  assets: Object.freeze(Object.fromEntries(SET_ASSET_KEYS.map((key) => [key, DEFAULT_ASSETS[key]]))),
 });
+const DEFAULT_COMMON_ASSETS = Object.freeze(Object.fromEntries(COMMON_ASSET_KEYS.map((key) => [key, DEFAULT_ASSETS[key]])));
 const DEFAULT_SETTINGS = {
   animation_frames: 8,
   turn_frames: 8,
+  move_speed_vblanks: 0,
   view_tile_width: 25,
   view_tile_height: 16,
   view_pixel_width: 200,
   view_pixel_height: 128,
   asset_sets: [DEFAULT_ASSET_SET],
+  common_assets: DEFAULT_COMMON_ASSETS,
 };
 const DUN_ANIMATION_STEP_VBLANKS = 2;
+/* move_speed_vblanks の上限 (実機側 dun_extra_step_vblanks は u8 だが、UI上の常識的な上限として抑える) */
+const MOVE_SPEED_VBLANKS_MAX = 60;
 const TILESET_TILES_PER_ROW = 32;
 const PATTERN_TEXTURE_MAX_SIZE = 96;
 const GENERATED_RESOURCE_BEGIN = '// DUNGEON_GENERATED_BEGIN';
@@ -69,7 +77,9 @@ const GENERATED_BB_SHEETS = {
   stairs_up: 'dungeon/generated/dungeon_bb_stairs_up.png',
   stairs_down: 'dungeon/generated/dungeon_bb_stairs_down.png',
 };
+const GENERATED_COMMON_CACHE_REL = 'dungeon/generated/common/bake.bin';
 const BAKE_CACHE_REL = 'dungeon/generated/dungeon_bake_cache.json';
+const BAKE_CACHE_VERSION = 3;
 const BUDGET_TILE_WARN = 40000;
 const BUDGET_NODE_WORDS_WARN = 24000;
 const BUDGET_TOTAL_BYTES_WARN = 1536 * 1024;
@@ -200,7 +210,7 @@ function normalizeAssetSet(assetSet = {}, index = 0) {
   const hasExplicitId = Object.prototype.hasOwnProperty.call(source, 'id');
   const id = String(hasExplicitId ? source.id : (index === 0 ? 'default' : `set-${index + 1}`)).trim();
   const assets = {};
-  ASSET_KEYS.forEach((key) => {
+  SET_ASSET_KEYS.forEach((key) => {
     assets[key] = String(source.assets?.[key] || DEFAULT_ASSETS[key]).trim();
   });
   return {
@@ -210,21 +220,46 @@ function normalizeAssetSet(assetSet = {}, index = 0) {
   };
 }
 
+/*
+ * settings.common_assets が明示されていればキーごとに既定値で補完する。
+ * 未指定 (旧保存ファイル) の場合は asset_sets の中から各キーが既定値と
+ * 異なる最初のセットの値を採用する (v1.1 以前は宝箱/階段もセット単位だった)。
+ */
+function normalizeCommonAssets(source, rawAssetSets = []) {
+  const explicit = Boolean(source && typeof source === 'object');
+  const sets = Array.isArray(rawAssetSets) ? rawAssetSets : [];
+  const common = {};
+  COMMON_ASSET_KEYS.forEach((key) => {
+    if (explicit) {
+      common[key] = String(source[key] || DEFAULT_ASSETS[key]).trim();
+      return;
+    }
+    const legacySet = sets.find((set) => {
+      const value = String(set?.assets?.[key] || '').trim();
+      return value && value !== DEFAULT_ASSETS[key];
+    });
+    common[key] = String(legacySet?.assets?.[key] || DEFAULT_ASSETS[key]).trim();
+  });
+  return common;
+}
+
 function normalizeSettings(settings = {}) {
   const incoming = settings && typeof settings === 'object' ? settings : {};
   const animationFrames = clampInt(incoming.animation_frames, 2, 8, DEFAULT_SETTINGS.animation_frames);
   const hasAssetSets = Array.isArray(incoming.asset_sets || incoming.assetSets);
-  const assetSets = hasAssetSets
-    ? (incoming.asset_sets || incoming.assetSets).map(normalizeAssetSet)
-    : DEFAULT_SETTINGS.asset_sets.map(normalizeAssetSet);
+  const rawAssetSets = hasAssetSets ? (incoming.asset_sets || incoming.assetSets) : DEFAULT_SETTINGS.asset_sets;
+  const assetSets = rawAssetSets.map(normalizeAssetSet);
+  const commonAssets = normalizeCommonAssets(incoming.common_assets, rawAssetSets);
   return {
     animation_frames: animationFrames,
     turn_frames: clampInt(incoming.turn_frames, 2, 8, animationFrames),
+    move_speed_vblanks: clampInt(incoming.move_speed_vblanks, 0, MOVE_SPEED_VBLANKS_MAX, DEFAULT_SETTINGS.move_speed_vblanks),
     view_tile_width: DEFAULT_SETTINGS.view_tile_width,
     view_tile_height: DEFAULT_SETTINGS.view_tile_height,
     view_pixel_width: DEFAULT_SETTINGS.view_pixel_width,
     view_pixel_height: DEFAULT_SETTINGS.view_pixel_height,
     asset_sets: assetSets,
+    common_assets: commonAssets,
   };
 }
 
@@ -249,7 +284,7 @@ function loadFloors(projectDir) {
 }
 
 function assetSignature(assets = {}) {
-  return JSON.stringify(ASSET_KEYS.map((key) => String(assets[key] || DEFAULT_ASSETS[key])));
+  return JSON.stringify(SET_ASSET_KEYS.map((key) => String(assets[key] || DEFAULT_ASSETS[key])));
 }
 
 function makeLegacySetId(signature, usedIds) {
@@ -284,6 +319,21 @@ function resolveEffectiveState(floorsInput, settingsInput) {
     }
     return next;
   });
+  /*
+   * asset_sets すら存在しなかった更に旧い形式 (フロア単位 inline assets) に残る
+   * 宝箱/階段カスタム値を拾い上げる。settings.common_assets が (明示指定または
+   * asset_sets 由来スキャンで) 既に非既定値を見つけているキーは上書きしない
+   * (まだ既定値のままのキーのみ top-up)。移行済みのフロアは保存時に inline
+   * assets が失われるため、この処理は旧形式のフロアが残っている間だけ効く。
+   */
+  COMMON_ASSET_KEYS.forEach((key) => {
+    if (settings.common_assets[key] !== DEFAULT_ASSETS[key]) return;
+    const legacyFloor = floors.find((floor) => {
+      const value = String(floor.assets?.[key] || '').trim();
+      return value && value !== DEFAULT_ASSETS[key];
+    });
+    if (legacyFloor) settings.common_assets[key] = String(legacyFloor.assets[key]).trim();
+  });
   return { floors, settings: { ...settings, asset_sets: assetSets } };
 }
 
@@ -298,9 +348,12 @@ function validateProjectState(floors, settings) {
     if (ids.has(id)) throw new Error(`素材セットIDが重複しています: ${id}`);
     ids.add(id);
     if (!String(set?.name || '').trim()) throw new Error(`素材セット ${id} の名前が空です`);
-    ASSET_KEYS.forEach((key) => {
+    SET_ASSET_KEYS.forEach((key) => {
       if (!String(set?.assets?.[key] || '').trim()) throw new Error(`素材セット ${id} の ${key} が未設定です`);
     });
+  });
+  COMMON_ASSET_KEYS.forEach((key) => {
+    if (!String(settings?.common_assets?.[key] || '').trim()) throw new Error(`共通素材の ${key} が未設定です`);
   });
   floors.forEach((floor) => {
     if (!ids.has(String(floor.asset_set_id || ''))) {
@@ -478,8 +531,9 @@ function farthestCell(floor, start) {
 }
 
 /*
- * 階段セルはソリッド (進入不可・バンプでフロア移動) になるため、
- * 通路を分断しない「行き止まりセル (開いた辺が 1 つ)」に配置する。
+ * 階段セルは宝箱と同様に通行可能なイベントセルだが、レベルデザインの
+ * 既定値として通路の突き当たり (行き止まりセル: 開いた辺が 1 つ) に
+ * 配置する (ソリッドだった頃の技術的制約ではなく意匠上の選択)。
  */
 function placeStairs(floor) {
   const start = floor.start;
@@ -853,16 +907,16 @@ function resizeTextureForPatterns(texture, maxSize = PATTERN_TEXTURE_MAX_SIZE) {
 }
 
 /*
- * フロアのアセット参照から描画用テクスチャ一式を読み込む。
+ * アセット参照から描画用テクスチャ一式を読み込む。kinds で読み込む種別を絞る
+ * (壁焼き込み4種は素材セット単位、宝箱/階段3種はプロジェクト共通で1回だけ)。
  * アトラス PNG は path ごとに 1 回だけパースし、サイドカー
  * <atlas>.json ({"columns":4,"rows":2}) があれば扉付きレイアウトで切り出す。
  * タグ未定義 (旧 3x2 アトラスの door 等) は手続き生成にフォールバックする。
  */
-function loadViewTextures(projectDir, source, options = {}) {
-  const refs = { ...DEFAULT_ASSETS, ...(source?.assets || {}) };
+function loadTexturesForRefs(projectDir, kinds, refs, options = {}) {
   const atlasCache = new Map();
   const textures = {};
-  core.TEXTURE_KINDS.forEach((kind) => {
+  kinds.forEach((kind) => {
     const key = `${kind}_texture`;
     const refValue = refs[key] || DEFAULT_ASSETS[key];
     if (options.validate !== false) validateTextureRef(projectDir, key, refValue);
@@ -893,6 +947,17 @@ function loadViewTextures(projectDir, source, options = {}) {
     textures[kind] = texture || core.makeFallbackTexture(kind);
   });
   return textures;
+}
+
+const SET_TEXTURE_KINDS = Object.freeze(['wall', 'door', 'floor', 'ceiling']);
+const COMMON_TEXTURE_KINDS = Object.freeze(['chest', 'stairs_up', 'stairs_down']);
+
+function loadSetTextures(projectDir, assetSet, options = {}) {
+  return loadTexturesForRefs(projectDir, SET_TEXTURE_KINDS, assetSet?.assets || {}, options);
+}
+
+function loadCommonTextures(projectDir, commonAssets, options = {}) {
+  return loadTexturesForRefs(projectDir, COMMON_TEXTURE_KINDS, commonAssets || {}, options);
 }
 
 /* ==================================================================
@@ -991,14 +1056,6 @@ function buildViewExport(settings, textures) {
     core.bakeFrame(pose, spaces.turn, textures, palette, bands, pool)
   ));
 
-  const spritePalette = core.buildSpritePalette(textures);
-  const sheets = {
-    chest: core.renderBillboardSheet(textures.chest, spritePalette),
-    stairs_up: core.renderBillboardSheet(textures.stairs_up, spritePalette),
-    stairs_down: core.renderBillboardSheet(textures.stairs_down, spritePalette),
-  };
-  const billboards = core.buildBillboardTables(settings);
-
   const allFrames = [staticFrame, ...fwdFrames, ...turnFrames];
   const nodeWordsMax = Math.max(...allFrames.map((frame) => frame.stats.nodeWords));
   const nodeWordsTotal = allFrames.reduce((sum, frame) => sum + frame.stats.nodeWords, 0);
@@ -1029,9 +1086,6 @@ function buildViewExport(settings, textures) {
     staticFrame,
     fwdFrames,
     turnFrames,
-    spritePalette,
-    sheets,
-    billboards,
     budget: {
       tileCount: pool.count,
       tileBytes,
@@ -1043,6 +1097,21 @@ function buildViewExport(settings, textures) {
     },
     warnings,
   };
+}
+
+/*
+ * 宝箱/上り階段/下り階段のビルボードスプライトシート+パレット+座標テーブルは
+ * プロジェクトで1回だけ焼き込む (settings.common_assets 由来、素材セット非依存)。
+ */
+function buildBillboardExport(settings, commonTextures) {
+  const spritePalette = core.buildSpritePalette(commonTextures);
+  const sheets = {
+    chest: core.renderBillboardSheet(commonTextures.chest, spritePalette),
+    stairs_up: core.renderBillboardSheet(commonTextures.stairs_up, spritePalette),
+    stairs_down: core.renderBillboardSheet(commonTextures.stairs_down, spritePalette),
+  };
+  const billboards = core.buildBillboardTables(settings);
+  return { spritePalette, sheets, billboards };
 }
 
 function tilePaletteIndex(tileRows, tileIndex, px, py) {
@@ -1086,7 +1155,7 @@ function writeBillboardSheets(projectDir, sheets, spritePalette, relativePaths =
   return paths;
 }
 
-function updateGeneratedResources(projectDir, setExports = []) {
+function updateGeneratedResources(projectDir, setExports = [], commonDescriptor) {
   const resPath = ensureResourcesFile(projectDir);
   const generatedLines = [GENERATED_RESOURCE_BEGIN];
   setExports.forEach((entry) => {
@@ -1095,12 +1164,17 @@ function updateGeneratedResources(projectDir, setExports = []) {
       `PALETTE ${symbols.viewPalette} "${paths.tileset}"`,
       `TILESET ${symbols.viewTileset} "${paths.tileset}" NONE ALL`,
       `TILESET ${symbols.backgroundTileset} "${paths.background}" NONE NONE`,
+    );
+  });
+  if (commonDescriptor) {
+    const { symbols, paths } = commonDescriptor;
+    generatedLines.push(
       `PALETTE ${symbols.billboardPalette} "${paths.billboards.chest}"`,
       `SPRITE ${symbols.chest} "${paths.billboards.chest}" ${core.BB_FRAME_TILES} ${core.BB_FRAME_TILES} NONE 0`,
       `SPRITE ${symbols.stairsUp} "${paths.billboards.stairs_up}" ${core.BB_FRAME_TILES} ${core.BB_FRAME_TILES} NONE 0`,
       `SPRITE ${symbols.stairsDown} "${paths.billboards.stairs_down}" ${core.BB_FRAME_TILES} ${core.BB_FRAME_TILES} NONE 0`,
     );
-  });
+  }
   generatedLines.push(GENERATED_RESOURCE_END);
   const current = fs.existsSync(resPath) ? fs.readFileSync(resPath, 'utf-8') : '';
   const blockPattern = new RegExp(`${escapeForRegExp(GENERATED_RESOURCE_BEGIN)}[\\s\\S]*?${escapeForRegExp(GENERATED_RESOURCE_END)}\\n?`, 'm');
@@ -1133,20 +1207,31 @@ function generatedSetDescriptor(assetSet) {
       viewPalette: `${prefix}_view_palette`,
       viewTileset: `${prefix}_view_tileset`,
       backgroundTileset: `${prefix}_background_tileset`,
+    },
+    paths: {
+      tileset: `${dir}/view_tileset.png`,
+      background: `${dir}/background_tileset.png`,
+      cache: `${dir}/bake.bin`,
+    },
+  };
+}
+
+const COMMON_DESCRIPTOR_KEY = 'common';
+
+/* 宝箱/上り階段/下り階段: 素材セットに依らずプロジェクトで1つだけ生成する記述子 */
+function generatedCommonDescriptor() {
+  const prefix = `dun_${COMMON_DESCRIPTOR_KEY}`;
+  return {
+    key: COMMON_DESCRIPTOR_KEY,
+    symbols: {
       billboardPalette: `${prefix}_bb_palette`,
       chest: `${prefix}_bb_chest`,
       stairsUp: `${prefix}_bb_stairs_up`,
       stairsDown: `${prefix}_bb_stairs_down`,
     },
     paths: {
-      tileset: `${dir}/view_tileset.png`,
-      background: `${dir}/background_tileset.png`,
-      billboards: {
-        chest: `${dir}/bb_chest.png`,
-        stairs_up: `${dir}/bb_stairs_up.png`,
-        stairs_down: `${dir}/bb_stairs_down.png`,
-      },
-      cache: `${dir}/bake.bin`,
+      billboards: GENERATED_BB_SHEETS,
+      cache: GENERATED_COMMON_CACHE_REL,
     },
   };
 }
@@ -1197,12 +1282,20 @@ function emitBillboardPoseRows(poses) {
   return poses.map((pose) => `{ ${pose.x}, ${pose.y}, ${pose.frame} }`).join(', ');
 }
 
-function exportPatternFiles(projectDir, setEntries) {
+/*
+ * settings は (キャッシュ由来ではなく) 呼び出し元の最新読み込み結果をそのまま渡す。
+ * move_speed_vblanks は焼き込み結果 (壁テーブル・ビルボード座標) に影響しない
+ * ランタイムのペーシング値なので computeBakeHash に含めない — その代わり、
+ * view.settings (キャッシュヒット時は旧い値のまま) ではなく常に最新の settings から
+ * #define を生成することで、キャッシュヒットでも設定変更が反映されるようにする。
+ */
+function exportPatternFiles(projectDir, setEntries, commonView, settings) {
   const headerPath = path.join(projectDir, 'inc', 'dungeon_patterns.h');
   const sourcePath = path.join(projectDir, 'src', 'dungeon_patterns.c');
   if (!setEntries.length) throw new Error('referenced dungeon asset set is required');
   const view = setEntries[0].view;
-  const { spaces, billboards, settings } = view;
+  const { spaces } = view;
+  const { billboards } = commonView;
   const fwdCount = view.fwdFrames.length;
   const turnCount = view.turnFrames.length;
   const bbCells = billboards.cells;
@@ -1223,6 +1316,7 @@ function exportPatternFiles(projectDir, setEntries) {
     `#define DUN_ANIMATION_FRAMES ${settings.animation_frames}`,
     `#define DUN_TURN_ANIMATION_FRAMES ${settings.turn_frames}`,
     `#define DUN_ANIMATION_STEP_VBLANKS ${DUN_ANIMATION_STEP_VBLANKS}`,
+    `#define DUN_MOVE_SPEED_VBLANKS_DEFAULT ${settings.move_speed_vblanks}`,
     `#define DUN_FWD_FRAMES ${fwdCount}`,
     `#define DUN_TURN_FRAMES ${turnCount}`,
     `#define DUN_MOVE_EDGE_COUNT ${spaces.move.length}`,
@@ -1246,14 +1340,11 @@ function exportPatternFiles(projectDir, setEntries) {
     '    const u8 *tile_flips;  /* ローカルID → bit0=HFLIP, bit1=VFLIP */',
     '} DunFrameTable;',
     '',
+    /* 宝箱/上り階段/下り階段/ビルボードpaletteはセット非依存 (dun_common_bb_* をグローバル参照) */
     'typedef struct {',
     '    const TileSet *view_tileset;',
     '    const TileSet *background_tileset;',
     '    const Palette *view_palette;',
-    '    const Palette *billboard_palette;',
-    '    const SpriteDefinition *chest;',
-    '    const SpriteDefinition *stairs_up;',
-    '    const SpriteDefinition *stairs_down;',
     '    const u16 *dark_palette;',
     '    const DunFrameTable *frame_static;',
     '    const DunFrameTable *frames_fwd;',
@@ -1328,7 +1419,7 @@ function exportPatternFiles(projectDir, setEntries) {
     lines.push(...cHexU16Array(`${prefix}_palette_dark`, darkColors));
     lines.push('');
     const s = entry.descriptor.symbols;
-    registry.push(`    { &${s.viewTileset}, &${s.backgroundTileset}, &${s.viewPalette}, &${s.billboardPalette}, &${s.chest}, &${s.stairsUp}, &${s.stairsDown}, ${prefix}_palette_dark, &${prefix}_frame_static, ${prefix}_frames_fwd, ${prefix}_frames_turn }`);
+    registry.push(`    { &${s.viewTileset}, &${s.backgroundTileset}, &${s.viewPalette}, ${prefix}_palette_dark, &${prefix}_frame_static, ${prefix}_frames_fwd, ${prefix}_frames_turn }`);
   });
 
   lines.push('const DunViewSet dun_view_sets[DUN_VIEW_SET_COUNT] = {');
@@ -1346,15 +1437,7 @@ function exportPatternFiles(projectDir, setEntries) {
  * ビューエクスポート統括 (キャッシュ付き)
  * ================================================================== */
 
-function computeBakeHash(projectDir, assetSet, settings) {
-  const hash = crypto.createHash('sha1');
-  hash.update(`core:${core.version}`);
-  hash.update(JSON.stringify({
-    animation_frames: settings.animation_frames,
-    turn_frames: settings.turn_frames,
-  }));
-  hash.update(JSON.stringify(assetSet?.assets || {}));
-  const refs = { ...DEFAULT_ASSETS, ...(assetSet?.assets || {}) };
+function hashAssetRefs(hash, projectDir, refs) {
   const seen = new Set();
   Object.values(refs).forEach((ref) => {
     const imagePath = resolveAssetPath(projectDir, parseTextureRef(ref).assetPath);
@@ -1368,6 +1451,34 @@ function computeBakeHash(projectDir, assetSet, settings) {
       hash.update('missing');
     }
   });
+}
+
+function computeBakeHash(projectDir, assetSet, settings) {
+  const hash = crypto.createHash('sha1');
+  hash.update(`core:${core.version}`);
+  hash.update(JSON.stringify({
+    animation_frames: settings.animation_frames,
+    turn_frames: settings.turn_frames,
+  }));
+  const refs = {};
+  SET_ASSET_KEYS.forEach((key) => { refs[key] = assetSet?.assets?.[key] || DEFAULT_ASSETS[key]; });
+  hash.update(JSON.stringify(refs));
+  hashAssetRefs(hash, projectDir, refs);
+  return hash.digest('hex');
+}
+
+/* 宝箱/上り階段/下り階段の共通ビルボード焼き込み専用ハッシュ (素材セットの壁/扉/床/天井とは独立) */
+function computeCommonBakeHash(projectDir, commonAssets, settings) {
+  const hash = crypto.createHash('sha1');
+  hash.update(`core:${core.version}`);
+  hash.update(JSON.stringify({
+    animation_frames: settings.animation_frames,
+    turn_frames: settings.turn_frames,
+  }));
+  const refs = {};
+  COMMON_ASSET_KEYS.forEach((key) => { refs[key] = commonAssets?.[key] || DEFAULT_ASSETS[key]; });
+  hash.update(JSON.stringify(refs));
+  hashAssetRefs(hash, projectDir, refs);
   return hash.digest('hex');
 }
 
@@ -1377,7 +1488,6 @@ function viewOutputPaths(projectDir, descriptor) {
     path.join(projectDir, 'src', 'dungeon_patterns.c'),
     path.join(projectDir, 'res', descriptor.paths.tileset),
     path.join(projectDir, 'res', descriptor.paths.background),
-    ...Object.values(descriptor.paths.billboards).map((rel) => path.join(projectDir, 'res', rel)),
   ];
 }
 
@@ -1389,8 +1499,12 @@ function writeSetArtifacts(projectDir, entry) {
   const { descriptor, view } = entry;
   const tilesetPath = writeTilesetAtlas(projectDir, view.pool, view.palette, descriptor.paths.tileset);
   const backgroundPath = writeBackdropTileset(projectDir, view.backdrop, view.palette, descriptor.paths.background);
-  const sheetPaths = writeBillboardSheets(projectDir, view.sheets, view.spritePalette, descriptor.paths.billboards);
-  return { tilesetPath, backgroundPath, sheetPaths };
+  return { tilesetPath, backgroundPath };
+}
+
+function writeCommonArtifacts(projectDir, commonView, commonDescriptor) {
+  const sheetPaths = writeBillboardSheets(projectDir, commonView.sheets, commonView.spritePalette, commonDescriptor.paths.billboards);
+  return { sheetPaths };
 }
 
 function referencedAssetSets(floors, settings) {
@@ -1400,14 +1514,22 @@ function referencedAssetSets(floors, settings) {
 
 function validateAssetSetTextures(projectDir, assetSets) {
   assetSets.forEach((assetSet) => {
-    ASSET_KEYS.forEach((key) => {
+    SET_ASSET_KEYS.forEach((key) => {
       validateTextureRef(projectDir, key, assetSet.assets[key]);
     });
   });
 }
 
+function validateCommonAssetTextures(projectDir, commonAssets) {
+  const refs = commonAssets || {};
+  COMMON_ASSET_KEYS.forEach((key) => {
+    validateTextureRef(projectDir, key, refs[key] || DEFAULT_ASSETS[key]);
+  });
+}
+
 function validateReferencedAssetTextures(projectDir, floors, settings) {
   validateAssetSetTextures(projectDir, referencedAssetSets(floors, settings));
+  validateCommonAssetTextures(projectDir, settings.common_assets);
 }
 
 function exportViewAssets(projectDir, floors, settingsInput = readSettings(projectDir)) {
@@ -1415,14 +1537,43 @@ function exportViewAssets(projectDir, floors, settingsInput = readSettings(proje
   const assetSets = referencedAssetSets(floors, settings);
   if (!assetSets.length) throw new Error('参照されている素材セットがありません');
   validateAssetSetTextures(projectDir, assetSets);
+  validateCommonAssetTextures(projectDir, settings.common_assets);
   const cachePath = path.join(projectDir, 'res', BAKE_CACHE_REL);
-  const cache = readJson(cachePath, { version: 2, entries: {} });
-  const nextCache = { version: 2, entries: {} };
+  const rawCache = readJson(cachePath, null);
+  const cache = rawCache?.version === BAKE_CACHE_VERSION ? rawCache : null;
+  const nextCache = { version: BAKE_CACHE_VERSION, entries: {}, common: null };
   let rebuilt = 0;
+
+  /* 宝箱/上り階段/下り階段: 素材セット数に関わらず1回だけ焼き込む */
+  const commonDescriptor = generatedCommonDescriptor();
+  const commonHash = computeCommonBakeHash(projectDir, settings.common_assets, settings);
+  const commonCacheAbsolute = path.join(projectDir, 'res', commonDescriptor.paths.cache);
+  let commonView = null;
+  let commonCached = false;
+  if (cache?.common?.hash === commonHash && fs.existsSync(commonCacheAbsolute)) {
+    try {
+      commonView = v8.deserialize(fs.readFileSync(commonCacheAbsolute));
+      commonCached = true;
+    } catch (_) {
+      commonView = null;
+    }
+  }
+  if (!commonView) {
+    const commonTextures = loadCommonTextures(projectDir, settings.common_assets, { validate: true, strict: true });
+    commonView = buildBillboardExport(settings, commonTextures);
+    ensureDir(path.dirname(commonCacheAbsolute));
+    fs.writeFileSync(commonCacheAbsolute, v8.serialize(commonView));
+    rebuilt++;
+  }
+  const commonOutputsExist = Object.values(commonDescriptor.paths.billboards)
+    .every((rel) => fs.existsSync(path.join(projectDir, 'res', rel)));
+  if (!commonCached || !commonOutputsExist) writeCommonArtifacts(projectDir, commonView, commonDescriptor);
+  nextCache.common = { hash: commonHash };
+
   const entries = assetSets.map((assetSet) => {
     const descriptor = generatedSetDescriptor(assetSet);
     const hash = computeBakeHash(projectDir, assetSet, settings);
-    const cacheEntry = cache?.version === 2 ? cache.entries?.[assetSet.id] : null;
+    const cacheEntry = cache?.entries?.[assetSet.id];
     const cacheAbsolute = path.join(projectDir, 'res', descriptor.paths.cache);
     let view = null;
     let cached = false;
@@ -1435,7 +1586,7 @@ function exportViewAssets(projectDir, floors, settingsInput = readSettings(proje
       }
     }
     if (!view) {
-      const textures = loadViewTextures(projectDir, assetSet, { validate: true, strict: true });
+      const textures = loadSetTextures(projectDir, assetSet, { validate: true, strict: true });
       view = buildViewExport(settings, textures);
       ensureDir(path.dirname(cacheAbsolute));
       fs.writeFileSync(cacheAbsolute, v8.serialize(cacheableView(view)));
@@ -1448,8 +1599,8 @@ function exportViewAssets(projectDir, floors, settingsInput = readSettings(proje
     return entry;
   });
 
-  const { headerPath, sourcePath } = exportPatternFiles(projectDir, entries);
-  const resourcePath = updateGeneratedResources(projectDir, entries.map((entry) => entry.descriptor));
+  const { headerPath, sourcePath } = exportPatternFiles(projectDir, entries, commonView, settings);
+  const resourcePath = updateGeneratedResources(projectDir, entries.map((entry) => entry.descriptor), commonDescriptor);
 
   try {
     const legacyPath = path.join(projectDir, 'res', GENERATED_LEGACY_MAP_REL);
@@ -1477,12 +1628,18 @@ function exportViewAssets(projectDir, floors, settingsInput = readSettings(proje
   };
   const warnings = setSummaries.flatMap((set) => set.warnings.map((warning) => `${set.name}: ${warning}`));
   const first = entries[0];
+  const commonSummary = {
+    key: commonDescriptor.key,
+    cached: commonCached,
+    paths: commonDescriptor.paths,
+    sheetPaths: Object.fromEntries(Object.entries(commonDescriptor.paths.billboards).map(([key, rel]) => [key, path.join(projectDir, 'res', rel)])),
+  };
   const summary = {
     headerPath,
     sourcePath,
     tilesetPath: path.join(projectDir, 'res', first.descriptor.paths.tileset),
     backgroundPath: path.join(projectDir, 'res', first.descriptor.paths.background),
-    sheetPaths: Object.fromEntries(Object.entries(first.descriptor.paths.billboards).map(([key, rel]) => [key, path.join(projectDir, 'res', rel)])),
+    sheetPaths: commonSummary.sheetPaths,
     resourcePath,
     tileCount: budget.tileCount,
     moveEdgeCount: first.view.spaces.move.length,
@@ -1490,6 +1647,7 @@ function exportViewAssets(projectDir, floors, settingsInput = readSettings(proje
     fwdFrameCount: first.view.fwdFrames.length,
     turnFrameCount: first.view.turnFrames.length,
     assetSets: setSummaries,
+    common: commonSummary,
     budget,
     warnings,
   };
@@ -1527,6 +1685,7 @@ function exportDungeonData(projectDir) {
     patternBackgroundPath: view.backgroundPath,
     resourcePath: view.resourcePath,
     assetSets: view.assetSets,
+    common: view.common,
     budget: view.budget,
     warnings: view.warnings,
     cached: view.cached,
@@ -1579,6 +1738,7 @@ function saveState(projectDir, payload = {}) {
   validateProjectState(floors, settings);
   /* 不正なtagless素材は設定・フロアを書き込む前にservice側でも拒否する。 */
   validateAssetSetTextures(projectDir, settings.asset_sets);
+  validateCommonAssetTextures(projectDir, settings.common_assets);
   writeJson(getSettingsPath(projectDir), settings);
   const existingFiles = new Map(entries.map((entry) => [entry.floor.id, entry.filePath]));
   floors.forEach((floor) => {
@@ -1674,17 +1834,22 @@ module.exports = {
   DIRS,
   DIR_INDEX,
   ASSET_KEYS,
+  SET_ASSET_KEYS,
+  COMMON_ASSET_KEYS,
   ASSET_CONSTRAINTS,
   DEFAULT_ASSETS,
   DEFAULT_ASSET_SET,
+  DEFAULT_COMMON_ASSETS,
   DEFAULT_SETTINGS,
   normalizeFloor,
   normalizeAssetSet,
+  normalizeCommonAssets,
   normalizeSettings,
   resolveEffectiveState,
   validateProjectState,
   validateTextureRef,
   validateAssetSetTextures,
+  validateCommonAssetTextures,
   validateReferencedAssetTextures,
   parsePng,
   writeIndexedPng,
@@ -1701,8 +1866,11 @@ module.exports = {
   hasEdge,
   /* テスト・内部利用向け */
   buildViewExport,
-  loadViewTextures,
+  buildBillboardExport,
+  loadSetTextures,
+  loadCommonTextures,
   exportViewAssets,
   computeBakeHash,
+  computeCommonBakeHash,
   renderCore: core,
 };

@@ -23,6 +23,18 @@ static u8 player_y;
 static u8 player_dir;
 static u16 prev_joy;
 
+/*
+ * ミニマップ自動マッピング用の踏破ビットフィールド (フロアごとに 1 セル = 1 bit)。
+ * エディタが許すフロア最大サイズ (MAX_SIZE=20x20, dungeon-service.js) を上限に
+ * 400 bit = 50 byte を確保する。DUNGEON_FLOOR_COUNT は dungeon_data.h のコンパイル時
+ * マクロなので、フロア数ぶんの配列をここ (main.c) に持てる。
+ * フロア数・プレイヤー位置・移動ロジックを既に把握している main.c がゲーム状態として
+ * 所有し、描画専任の dungeon_view.c へは現在フロア分のポインタだけを渡す
+ * (dungeon_view.c は dungeon_data.h を include していないため配列そのものは持てない)。
+ */
+#define DUN_VISITED_BYTES 50
+static u8 dun_visited[DUNGEON_FLOOR_COUNT][DUN_VISITED_BYTES];
+
 static bool inBounds(const DungeonFloorData *floor, s16 x, s16 y)
 {
     return x >= 0 && y >= 0 && x < floor->width && y < floor->height;
@@ -59,11 +71,21 @@ static bool canMove(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
     const u16 next = edgesAt(floor, nx, ny);
     if (!inBounds(floor, nx, ny)) return FALSE;
     if (hasWallAt(floor, x, y, dir)) return FALSE;
-    /* 階段セルはソリッド (前進バンプでフロア移動) */
-    if (stairsFlagsAt(floor, nx, ny)) return FALSE;
     if ((current & (DUN_ONEWAY_N | DUN_ONEWAY_E | DUN_ONEWAY_S | DUN_ONEWAY_W)) && !(current & oneway_bits[dir])) return FALSE;
     if ((next & (DUN_ONEWAY_N | DUN_ONEWAY_E | DUN_ONEWAY_S | DUN_ONEWAY_W)) && !(next & oneway_bits[opposite])) return FALSE;
     return TRUE;
+}
+
+/*
+ * 現在の floor_index/player_x/player_y のセルを踏破済みとして記録する
+ * (ミニマップ自動マッピング用)。ゲーム開始・移動成功・階段到着のたびに呼ぶ。
+ * セーブデータやエクスポートには一切影響しないランタイム限定の状態。
+ */
+static void markVisited(void)
+{
+    const DungeonFloorData *floor = &dungeon_floors[floor_index];
+    const u16 bit = DUN_INDEX(floor, player_x, player_y);
+    dun_visited[floor_index][bit >> 3] |= (u8)(1 << (bit & 7));
 }
 
 static void applyMove(const DungeonFloorData *floor, u8 action)
@@ -82,6 +104,7 @@ static void applyMove(const DungeonFloorData *floor, u8 action)
     {
         player_x = (u8)(player_x + dir_dx[player_dir]);
         player_y = (u8)(player_y + dir_dy[player_dir]);
+        markVisited();
         return;
     }
     if (action == DUN_ACTION_BACKWARD)
@@ -91,6 +114,7 @@ static void applyMove(const DungeonFloorData *floor, u8 action)
         {
             player_x = (u8)(player_x + dir_dx[dir]);
             player_y = (u8)(player_y + dir_dy[dir]);
+            markVisited();
         }
     }
 }
@@ -101,6 +125,7 @@ static void resetPlayer(void)
     player_x = floor->start_x;
     player_y = floor->start_y;
     player_dir = floor->start_dir & 3;
+    markVisited();
 }
 
 static void applyCellDarkness(const DungeonFloorData *floor)
@@ -114,16 +139,17 @@ static void drawCurrentView(const DungeonFloorData *floor)
     DUN_applyViewSet(floor->view_set);
     applyCellDarkness(floor);
     DUN_drawStatic(floor, player_x, player_y, player_dir);
-    DUN_drawMinimap(floor, player_x, player_y, player_dir);
+    DUN_drawMinimap(floor, dun_visited[floor_index], player_x, player_y, player_dir);
 #if DUN_USE_TEXT_HUD
     DUN_drawHud(floor_index, player_x, player_y, player_dir);
 #endif
 }
 
 /*
- * 階段バンプによるフロア移動。
- * 上り階段 → 前のフロア (order が 1 小さい) の下り階段の隣へ、
- * 下り階段 → 次のフロアの上り階段の隣へ、階段に背を向けて到着する。
+ * 階段遷移の到着位置。対象フロアの kind (flag) 階段セルそのものへ到着する
+ * (階段は宝箱と同様に通行可能なため、隣接セルへ逃がす必要がない)。
+ * 向きは壁で塞がれていない最初の方角 (見つからなければ北)。
+ * render-core.js の stairsArrival と同一仕様。
  */
 static bool findStairsArrival(const DungeonFloorData *floor, u8 flag, u8 *out_x, u8 *out_y, u8 *out_dir)
 {
@@ -135,24 +161,25 @@ static bool findStairsArrival(const DungeonFloorData *floor, u8 flag, u8 *out_x,
         {
             u8 dir;
             if (!(floor->flags[DUN_INDEX(floor, x, y)] & flag)) continue;
+            *out_x = (u8)x;
+            *out_y = (u8)y;
+            *out_dir = 0;
             for (dir = 0; dir < 4; dir++)
             {
-                const s16 nx = (s16)x + dir_dx[dir];
-                const s16 ny = (s16)y + dir_dy[dir];
-                if (!inBounds(floor, nx, ny)) continue;
-                if (hasWallAt(floor, (s16)x, (s16)y, dir)) continue;
-                if (stairsFlagsAt(floor, nx, ny)) continue;
-                *out_x = (u8)nx;
-                *out_y = (u8)ny;
-                *out_dir = dir;
-                return TRUE;
+                if (!hasWallAt(floor, (s16)x, (s16)y, dir))
+                {
+                    *out_dir = dir;
+                    break;
+                }
             }
+            return TRUE;
         }
     }
     return FALSE;
 }
 
-static void goStairs(u8 stairs_flag)
+/* フロアが切り替わったら TRUE。最上階の上り階段・最下階の下り階段は素通り (no-op) */
+static bool goStairs(u8 stairs_flag)
 {
     const bool up = (stairs_flag & DUN_FLAG_STAIRS_UP) != 0;
     const DungeonFloorData *dest;
@@ -162,39 +189,34 @@ static void goStairs(u8 stairs_flag)
     u8 target;
     if (up)
     {
-        if (floor_index == 0) return;
+        if (floor_index == 0) return FALSE;
         target = (u8)(floor_index - 1);
     }
     else
     {
-        if ((u8)(floor_index + 1) >= dungeon_floor_count) return;
+        if ((u8)(floor_index + 1) >= dungeon_floor_count) return FALSE;
         target = (u8)(floor_index + 1);
     }
     floor_index = target;
     dest = &dungeon_floors[floor_index];
-    /* 上ってきたなら到着フロアの下り階段の隣、下りてきたなら上り階段の隣 */
+    /* 上ってきたなら到着フロアの下り階段、下りてきたなら上り階段の位置へ着地する */
     if (findStairsArrival(dest, up ? DUN_FLAG_STAIRS_DOWN : DUN_FLAG_STAIRS_UP, &ax, &ay, &adir))
     {
         player_x = ax;
         player_y = ay;
         player_dir = adir;
+        markVisited();
     }
     else
     {
         resetPlayer();
     }
     drawCurrentView(dest);
+    return TRUE;
 }
 
 static void performAction(const DungeonFloorData *floor, u8 action)
 {
-    if (action == DUN_ACTION_STAIRS)
-    {
-        const s16 nx = (s16)player_x + dir_dx[player_dir];
-        const s16 ny = (s16)player_y + dir_dy[player_dir];
-        goStairs(stairsFlagsAt(floor, nx, ny));
-        return;
-    }
     if (action == DUN_ACTION_FORWARD)
     {
         DUN_playForward(floor, player_x, player_y, player_dir);
@@ -212,14 +234,18 @@ static void performAction(const DungeonFloorData *floor, u8 action)
         DUN_playTurn(floor, player_x, player_y, player_dir, action == DUN_ACTION_TURN_L);
     }
     applyMove(floor, action);
+    /* 前進/後退で階段セルへ足を踏み入れたら、着地直後に自動でフロアを切り替える */
+    if (action == DUN_ACTION_FORWARD || action == DUN_ACTION_BACKWARD)
+    {
+        const u8 stairs = stairsFlagsAt(floor, player_x, player_y);
+        /* goStairs が no-op (最上階/最下階) の場合は floor がまだ有効なので通常どおり描画する */
+        if (stairs && goStairs(stairs)) return;
+    }
     drawCurrentView(floor);
 }
 
-/*
- * 移動/旋回は押しっぱなしで連続動作 (レベルトリガー)。
- * 階段バンプだけは押した瞬間のみ反応し、連続フロア移動を防ぐ。
- */
-static u8 selectAction(const DungeonFloorData *floor, u16 joy, u16 pressed)
+/* 移動/旋回は押しっぱなしで連続動作する (レベルトリガー) */
+static u8 selectAction(const DungeonFloorData *floor, u16 joy)
 {
     if ((joy & BUTTON_UP) && canMove(floor, player_x, player_y, player_dir)) return DUN_ACTION_FORWARD;
     if (joy & BUTTON_DOWN)
@@ -229,12 +255,6 @@ static u8 selectAction(const DungeonFloorData *floor, u16 joy, u16 pressed)
     }
     if (joy & BUTTON_LEFT) return DUN_ACTION_TURN_L;
     if (joy & BUTTON_RIGHT) return DUN_ACTION_TURN_R;
-    if (pressed & BUTTON_UP)
-    {
-        const s16 nx = (s16)player_x + dir_dx[player_dir];
-        const s16 ny = (s16)player_y + dir_dy[player_dir];
-        if (!hasWallAt(floor, player_x, player_y, player_dir) && stairsFlagsAt(floor, nx, ny)) return DUN_ACTION_STAIRS;
-    }
     return DUN_ACTION_NONE;
 }
 
@@ -264,7 +284,7 @@ int main(bool hardReset)
         }
         else
         {
-            action = selectAction(floor, joy, pressed);
+            action = selectAction(floor, joy);
             if (action != DUN_ACTION_NONE)
             {
                 performAction(floor, action);

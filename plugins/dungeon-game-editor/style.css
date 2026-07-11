@@ -225,17 +225,44 @@
   background: #050607;
 }
 
-.dge-minimap {
+.dge-minimap-wrap {
   position: absolute;
   right: 10px;
   top: 10px;
   width: min(24vw, 160px);
   max-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dge-minimap {
+  width: 100%;
   aspect-ratio: 1;
   image-rendering: pixelated;
   border: 1px solid #7bd9a6;
   background: #101417;
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+.dge-minimap-mode {
+  width: 100%;
+  font-size: 11px;
+  padding: 3px 4px;
+  border: 1px solid #3d4945;
+  border-radius: 3px;
+  background: #1b2422;
+  color: #cfe9de;
+  cursor: pointer;
+}
+
+.dge-minimap-mode:hover {
+  background: #24302c;
+}
+
+.dge-minimap-mode.full {
+  border-color: #7bd9a6;
+  color: #7bd9a6;
 }
 
 .dge-preview-controls {
@@ -332,9 +359,20 @@
   flex: 1;
 }
 
+.dge-assets-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .dge-set-editor {
   min-width: 0;
   padding: 16px;
+}
+
+.dge-common-editor {
+  border-bottom: 1px solid #2d3634;
+  padding-bottom: 20px;
 }
 
 .dge-set-header {
@@ -514,6 +552,31 @@
 .dge-assets-empty {
   padding: 30px;
   color: #bac7bf;
+}
+
+.dge-settings {
+  min-height: 100%;
+  flex: 1 0 auto;
+  padding: 20px;
+  background: #101417;
+}
+
+.dge-settings-form {
+  display: grid;
+  gap: 4px;
+  max-width: 420px;
+}
+
+.dge-settings-form h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.dge-settings-hint {
+  margin: 0 0 14px;
+  color: #8fa099;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .dge-modal-panel {

@@ -401,8 +401,14 @@
     return { l: 0, d: -VIEW_CAMERA_BACKSTEP, angle: 0 };
   }
 
+  /*
+   * 前進/後退の並進は等速 (線形補間) にする。easeSmooth (smoothstep) は
+   * t=0/t=1 で速度が 0 に落ちるため、押しっぱなしで連続再生するとセル境界
+   * ごとに減速→再加速する「もたつき」に見える。回転 (poseTurnRight) は
+   * 単発動作が主で同じ連鎖は起きにくいため easeSmooth のまま残す。
+   */
   function poseForward(t) {
-    return { l: 0, d: -VIEW_CAMERA_BACKSTEP + easeSmooth(t), angle: 0 };
+    return { l: 0, d: -VIEW_CAMERA_BACKSTEP + clamp(t, 0, 1), angle: 0 };
   }
 
   function poseTurnRight(t) {
@@ -689,7 +695,7 @@
   /*
    * フロアデータから各エッジの状態 (0=開/1=壁/2=扉) を読み取る。
    * player (x, y, dirIndex 0..3=N/E/S/W) から見た相対エッジ defs を評価する。
-   * 階段セルはソリッド扱いで、その開いた面は壁として描かれる
+   * 階段セルは宝箱と同様に通行可能なイベントセルで、壁面としては描かれない
    * (上り/下りの区別はビルボードスプライトのアイコンで表現する)。
    * MD エンジン側 (dungeon_view.c) の evaluateEdgeStates と同一仕様。
    */
@@ -711,11 +717,18 @@
     return x >= 0 && y >= 0 && x < floor.width && y < floor.height;
   }
 
+  /*
+   * セルの「ソリッド」判定。以前は階段セルがここに該当し、隣接する開いた
+   * エッジを壁として焼き込む・移動と視線を遮る、という扱いだった。階段も
+   * 宝箱と同様に通行可能なイベントセルへ変更したため、現在ソリッドになる
+   * セル種別は存在しない (将来ソリッドなセル種別を追加する場合のフックと
+   * してこの関数と呼び出し側は残す)。
+   */
   function cellIsSolid(cell) {
-    return Boolean(cell && (cell.stairs === 'up' || cell.stairs === 'down'));
+    return false;
   }
 
-  /* 壁/扉ビットのみのエッジ判定 (階段ソリディティを含まない) */
+  /* 壁/扉ビットのみのエッジ判定 */
   function rawEdgeState(floor, x, y, crossDir) {
     const nx = x + DIR_DX[crossDir];
     const ny = y + DIR_DY[crossDir];
@@ -735,7 +748,7 @@
   function edgeStateBetween(floor, x, y, crossDir) {
     const state = rawEdgeState(floor, x, y, crossDir);
     if (state !== EDGE_STATE_OPEN) return state;
-    /* 階段セルに面する開いたエッジは壁面として描く */
+    /* ソリッドなセルに面する開いたエッジは壁面として描く (現在は常に false) */
     const nx = x + DIR_DX[crossDir];
     const ny = y + DIR_DY[crossDir];
     if (cellIsSolid(cellInBounds(floor, x, y) ? floor.cells[y][x] : null)) return EDGE_STATE_WALL;
@@ -1130,7 +1143,22 @@
     return Array.from(map.values()).sort((a, b) => a.dd - b.dd || a.dl - b.dl);
   }
 
+  /*
+   * 自分の足元 (dd=0, dl=0) は連続透視式の特異点 (cam.z が 0 に近づく) に
+   * あたるため、通常の式には通さない。最至近バケット (BB_BUCKET_HEIGHTS[0])
+   * の公称奥行きに固定し、画面中央・その高さでの通常配置と同じ下端位置に
+   * 描く「足元インジケータ」として扱う。
+   */
+  function billboardUnderfootPose() {
+    const z = billboardBucketDepth(BB_BUCKET_HEIGHTS[0]);
+    const bottomY = VIEW_HORIZON + ((VIEW_EYE_Z * VIEW_PROJECT) / z);
+    const x = Math.round(VIEW_W / 2) - (BB_FRAME_SIZE / 2);
+    const y = Math.round(bottomY) - BB_FRAME_SIZE;
+    return { x, y, frame: 0 };
+  }
+
   function billboardPose(pose, cell) {
+    if (cell.dd === 0 && cell.dl === 0) return billboardUnderfootPose();
     const cam = toCameraPoint(pose, { l: cell.dl, d: cell.dd, z: 0, u: 0, v: 0 });
     if (cam.z < BB_MIN_DEPTH) return { x: 0, y: 0, frame: -1 };
     const height = (BB_WORLD_HEIGHT * VIEW_PROJECT) / cam.z;
@@ -1201,18 +1229,15 @@
 
   /*
    * LOS: カメラセル中心 → 対象セル中心の線分が横切るエッジ/セルを
-   * supercover 走査 (整数誤差項) で判定する。壁・扉・階段セルは視線を遮る。
+   * supercover 走査 (整数誤差項) で判定する。壁・扉セルは視線を遮る。
    * MD エンジン側 (dungeon_view.c) と同一の整数アルゴリズム。
    */
   function losEdgeOpen(floor, x, y, crossDir) {
-    /*
-     * 壁・扉ビットのみで判定する (階段ソリディティは含めない)。
-     * これにより階段セル自身を対象とするビルボードは見え、
-     * 階段セルを「通過する」視線は losCellSolid が遮る。
-     */
+    /* 壁・扉ビットのみで判定する (セルのソリディティは含めない) */
     return rawEdgeState(floor, x, y, crossDir) === EDGE_STATE_OPEN;
   }
 
+  /* 現在ソリッドなセル種別は存在しないため、範囲外セルのみを遮蔽とみなす */
   function losCellSolid(floor, x, y) {
     if (!cellInBounds(floor, x, y)) return true;
     return cellIsSolid(floor.cells[y][x]);
@@ -1246,14 +1271,20 @@
         err += 2 * adx;
         steps--;
       } else {
-        /* 線分が格子の角を正確に通過: どちらか一方の回り込みが開いていれば可視 */
+        /*
+         * 線分が格子の角を正確に通過する場合。どちらか一方の回り込みが
+         * 開いていれば「セル到達」は可能だが、レンダラは開いていない側の
+         * 壁もそのまま描画するため、その壁はカメラ直近では画面上で対象と
+         * 同じ領域に映り込み得る。見た目上の遮蔽と一致させるため両方が
+         * 開いている場合のみ可視とする (どちらか一方でも壁なら遮蔽)。
+         */
         const nx = cx + DIR_DX[sx];
         const ny = cy + DIR_DY[sx];
         const mx = cx + DIR_DX[sy];
         const my = cy + DIR_DY[sy];
         const viaX = losEdgeOpen(floor, cx, cy, sx) && !losCellSolid(floor, nx, ny) && losEdgeOpen(floor, nx, ny, sy);
         const viaY = losEdgeOpen(floor, cx, cy, sy) && !losCellSolid(floor, mx, my) && losEdgeOpen(floor, mx, my, sx);
-        if (!viaX && !viaY) return false;
+        if (!viaX || !viaY) return false;
         cx += DIR_DX[sx] + DIR_DX[sy];
         cy += DIR_DY[sx] + DIR_DY[sy];
         err += 2 * adx - 2 * ady;
@@ -1266,22 +1297,23 @@
   }
 
   /*
-   * 階段バンプ遷移の到着位置: 対象フロアの kind ('up'|'down') 階段セルの
-   * 隣接セルのうち、壁で塞がれておらずソリッドでない最初のセルへ、
-   * 階段に背を向けた向きで到着する。MD エンジン側 (main.c) と同一仕様。
+   * 階段遷移の到着位置: 対象フロアの kind ('up'|'down') 階段セルそのものへ
+   * 到着する (階段は宝箱と同様に通行可能なため、隣接セルへ逃がす必要がない)。
+   * 向きは壁で塞がれていない最初の方角 (見つからなければ北)。
+   * MD エンジン側 (main.c) の findStairsArrival と同一仕様。
    */
   function stairsArrival(floor, kind) {
     for (let y = 0; y < floor.height; y++) {
       for (let x = 0; x < floor.width; x++) {
         if (floor.cells[y][x].stairs !== kind) continue;
-        for (let dir = 0; dir < 4; dir++) {
-          const nx = x + DIR_DX[dir];
-          const ny = y + DIR_DY[dir];
-          if (!cellInBounds(floor, nx, ny)) continue;
-          if (rawEdgeState(floor, x, y, dir) === EDGE_STATE_WALL) continue;
-          if (cellIsSolid(floor.cells[ny][nx])) continue;
-          return { x: nx, y: ny, dir };
+        let dir = 0;
+        for (let d = 0; d < 4; d++) {
+          if (rawEdgeState(floor, x, y, d) !== EDGE_STATE_WALL) {
+            dir = d;
+            break;
+          }
         }
+        return { x, y, dir };
       }
     }
     return null;
@@ -1324,8 +1356,15 @@
     });
   }
 
+  /*
+   * dungeon-service.js の computeBakeHash/computeCommonBakeHash はこの version 文字列を
+   * 焼き込みキャッシュキーへ含める。壁決定木 (edgeStateBetween/cellIsSolid) やビルボード
+   * 配置 (billboardPose) など、焼き込み結果に影響するロジックを変更したら必ず version を
+   * 上げること。上げ忘れると、既存プロジェクトの bake.bin がテクスチャ・設定不変を理由に
+   * 再利用され続け、ロジック修正が既存 ROM 出力へ反映されない (実際にこの不具合が発生した)。
+   */
   const core = {
-    version: '2.2.0',
+    version: '2.4.0',
     VIEW_W,
     VIEW_H,
     VIEW_TILE_W,
