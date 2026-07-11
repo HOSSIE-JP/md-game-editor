@@ -1,0 +1,48 @@
+{
+  "id": "easy-bgm-composer",
+  "name": "かんたん作曲",
+  "description": "音楽知識ゼロでもテーマを選ぶだけでメガドライブBGMを自動作曲し、グリッドで手直しして XGM2 アセットとして登録できます。",
+  "version": "0.1.0",
+  "icon": "music",
+  "types": ["editor"],
+  "supportedCores": ["mega-drive"],
+  "permissions": ["project.read", "project.write", "res.read", "res.write", "main.invokeHook"],
+  "dependencies": ["midi-converter"],
+  "hooks": [
+    "getTab",
+    "onActivate",
+    "onDeactivate",
+    "listEasyDefs",
+    "listEasySongs",
+    "loadEasySong",
+    "saveEasySong",
+    "deleteEasySong",
+    "composeEasySong",
+    "previewEasySong",
+    "exportEasySongToGame"
+  ],
+  "mainApi": {
+    "hooks": [
+      "listEasyDefs",
+      "listEasySongs",
+      "loadEasySong",
+      "saveEasySong",
+      "deleteEasySong",
+      "composeEasySong",
+      "previewEasySong",
+      "exportEasySongToGame"
+    ]
+  },
+  "tab": {
+    "label": "かんたん作曲",
+    "icon": "music",
+    "page": "easy-bgm-composer",
+    "order": 21
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "easy-bgm-composer",
+    "capabilities": ["page", "easy-bgm-composer"]
+  }
+}
