@@ -128,6 +128,11 @@
   color: #bac7bf;
 }
 
+.dge-enemy-step-hint {
+  color: #8fa099;
+  font-size: 11px;
+}
+
 .dge-field input,
 .dge-field select,
 .dge-floor-select {

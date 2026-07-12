@@ -15,6 +15,7 @@
 static const s8 dir_dx[4] = { 0, 1, 0, -1 };
 static const s8 dir_dy[4] = { -1, 0, 1, 0 };
 static const u16 edge_bits[4] = { DUN_EDGE_N, DUN_EDGE_E, DUN_EDGE_S, DUN_EDGE_W };
+static const u16 door_bits[4] = { DUN_DOOR_N, DUN_DOOR_E, DUN_DOOR_S, DUN_DOOR_W };
 static const u16 oneway_bits[4] = { DUN_ONEWAY_N, DUN_ONEWAY_E, DUN_ONEWAY_S, DUN_ONEWAY_W };
 
 static u8 floor_index;
@@ -22,6 +23,16 @@ static u8 player_x;
 static u8 player_y;
 static u8 player_dir;
 static u16 prev_joy;
+
+/*
+ * エネミー: dun_visited と同じフロア別RAM永続パターンで main.c が所有する。
+ * ビュー側 (dungeon_view.c) へは DUN_setEnemies() でポインタ+件数だけを渡す。
+ * AI (徘徊/追跡/RNG) は render-core.js (JS) と本ファイルの二重実装 — losVisible と
+ * 同じパターンなので、値・分岐の順序を変更したら両方に反映すること。
+ */
+static DunEnemy dun_enemies[DUNGEON_FLOOR_COUNT][DUN_MAX_ENEMIES];
+static u16 enemy_rng_state;
+static u32 enemy_next_step_vtime;
 
 /*
  * ミニマップ自動マッピング用の踏破ビットフィールド (フロアごとに 1 セル = 1 bit)。
@@ -62,6 +73,18 @@ static u8 stairsFlagsAt(const DungeonFloorData *floor, s16 x, s16 y)
     return (u8)(floor->flags[DUN_INDEX(floor, x, y)] & (DUN_FLAG_STAIRS_UP | DUN_FLAG_STAIRS_DOWN));
 }
 
+/* (x, y) に現在フロアのアクティブなエネミーがいるか。canMove からプレイヤー移動・
+ * stepEnemyWander/stepEnemyChase (経由の canMove 呼び出し) からエネミー移動、両方で使う。 */
+static bool cellHasEnemy(s16 x, s16 y)
+{
+    u8 i;
+    for (i = 0; i < DUN_MAX_ENEMIES; i++)
+    {
+        if (dun_enemies[floor_index][i].active && dun_enemies[floor_index][i].x == x && dun_enemies[floor_index][i].y == y) return TRUE;
+    }
+    return FALSE;
+}
+
 static bool canMove(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
 {
     const s16 nx = (s16)x + dir_dx[dir];
@@ -73,6 +96,8 @@ static bool canMove(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
     if (hasWallAt(floor, x, y, dir)) return FALSE;
     if ((current & (DUN_ONEWAY_N | DUN_ONEWAY_E | DUN_ONEWAY_S | DUN_ONEWAY_W)) && !(current & oneway_bits[dir])) return FALSE;
     if ((next & (DUN_ONEWAY_N | DUN_ONEWAY_E | DUN_ONEWAY_S | DUN_ONEWAY_W)) && !(next & oneway_bits[opposite])) return FALSE;
+    /* エネミーが占有するセルへは進入できない (プレイヤー・エネミー双方向でブロックされる) */
+    if (cellHasEnemy(nx, ny)) return FALSE;
     return TRUE;
 }
 
@@ -86,6 +111,258 @@ static void markVisited(void)
     const DungeonFloorData *floor = &dungeon_floors[floor_index];
     const u16 bit = DUN_INDEX(floor, player_x, player_y);
     dun_visited[floor_index][bit >> 3] |= (u8)(1 << (bit & 7));
+}
+
+/* ============================================================
+ * エネミーAI (render-core.js の同名関数群と line-for-line 対応)
+ * ============================================================ */
+
+/* xorshift16: render-core.js の xorshift16 と同一 (shift定数 7, 9, 8)。
+ * u16 への暗黙切り詰めが JS 側の "& 0xffff" マスクと同じ効果になる。 */
+static u16 enemyRngNext(void)
+{
+    u16 x = enemy_rng_state;
+    x ^= (u16)(x << 7);
+    x ^= (u16)(x >> 9);
+    x ^= (u16)(x << 8);
+    enemy_rng_state = x;
+    return x;
+}
+
+/* (x, y) がプレイヤー・宝箱・階段・他のアクティブなエネミー (exclude_index は除く) で占有されているか */
+static bool enemyBlockedCell(s16 exclude_index, s16 x, s16 y)
+{
+    const DungeonFloorData *floor = &dungeon_floors[floor_index];
+    u8 flags;
+    u8 i;
+    if (!inBounds(floor, x, y)) return TRUE;
+    if (x == player_x && y == player_y) return TRUE;
+    flags = floor->flags[DUN_INDEX(floor, x, y)];
+    if (flags & (DUN_FLAG_CHEST | DUN_FLAG_STAIRS_UP | DUN_FLAG_STAIRS_DOWN)) return TRUE;
+    for (i = 0; i < DUN_MAX_ENEMIES; i++)
+    {
+        if ((s16)i == exclude_index) continue;
+        if (!dun_enemies[floor_index][i].active) continue;
+        if (dun_enemies[floor_index][i].x == x && dun_enemies[floor_index][i].y == y) return TRUE;
+    }
+    return FALSE;
+}
+
+/* canMove (壁/一方通行/エネミー占有ルール) + enemyBlockedCell (占有ブロック全般) の合成判定 */
+static bool enemyCanMove(const DungeonFloorData *floor, s16 exclude_index, u8 x, u8 y, u8 dir)
+{
+    s16 nx;
+    s16 ny;
+    if (!canMove(floor, x, y, dir)) return FALSE;
+    nx = (s16)x + dir_dx[dir];
+    ny = (s16)y + dir_dy[dir];
+    return !enemyBlockedCell(exclude_index, nx, ny);
+}
+
+/* 敵の視界判定用: 壁・扉のどちらも遮る (プレイヤー移動可否の hasWallAt とは異なり、扉も視線を遮る) */
+static bool enemySightBlocked(const DungeonFloorData *floor, s16 x, s16 y, u8 dir)
+{
+    const u8 opposite = (u8)((dir + 2) & 3);
+    const s16 nx = x + dir_dx[dir];
+    const s16 ny = y + dir_dy[dir];
+    if (!inBounds(floor, x, y) || !inBounds(floor, nx, ny)) return TRUE;
+    if (edgesAt(floor, x, y) & (edge_bits[dir] | door_bits[dir])) return TRUE;
+    if (edgesAt(floor, nx, ny) & (edge_bits[opposite] | door_bits[opposite])) return TRUE;
+    return FALSE;
+}
+
+/* 視界: 正面直線 DUN_ENEMY_SIGHT_RANGE マス以内。壁と扉の両方が遮る */
+static bool enemySeesPlayer(const DungeonFloorData *floor, const DunEnemy *enemy)
+{
+    const u8 dir = enemy->dir & 3;
+    s16 cx = enemy->x;
+    s16 cy = enemy->y;
+    u8 step;
+    for (step = 0; step < DUN_ENEMY_SIGHT_RANGE; step++)
+    {
+        if (enemySightBlocked(floor, cx, cy, dir)) return FALSE;
+        cx += dir_dx[dir];
+        cy += dir_dy[dir];
+        if (!inBounds(floor, cx, cy)) return FALSE;
+        if (cx == player_x && cy == player_y) return TRUE;
+    }
+    return FALSE;
+}
+
+/*
+ * 徘徊: 75%直進 (可能なら) + それ以外は逆走を除く候補から一様選択。候補が無ければ最終手段で逆走。
+ * render-core.js の stepEnemyWander と同一ロジック・同一順序で RNG を消費する。
+ */
+static void stepEnemyWander(const DungeonFloorData *floor, u8 index)
+{
+    DunEnemy *enemy = &dun_enemies[floor_index][index];
+    const u8 forward_dir = enemy->dir & 3;
+    const u8 reverse_dir = (u8)((forward_dir + 2) & 3);
+    u8 candidates[3];
+    u8 candidate_count = 0;
+    bool forward_open = FALSE;
+    u16 roll;
+    s8 chosen = -1;
+    u8 d;
+    for (d = 0; d < 4; d++)
+    {
+        if (d == reverse_dir) continue;
+        if (!enemyCanMove(floor, (s16)index, enemy->x, enemy->y, d)) continue;
+        candidates[candidate_count++] = d;
+        if (d == forward_dir) forward_open = TRUE;
+    }
+    roll = (u16)(enemyRngNext() % 100);
+    if (forward_open && roll < DUN_ENEMY_WANDER_FORWARD_PCT)
+    {
+        chosen = (s8)forward_dir;
+    }
+    else if (candidate_count > 0)
+    {
+        chosen = (s8)candidates[enemyRngNext() % candidate_count];
+    }
+    else if (enemyCanMove(floor, (s16)index, enemy->x, enemy->y, reverse_dir))
+    {
+        chosen = (s8)reverse_dir;
+    }
+    if (chosen < 0) return;
+    enemy->dir = (u8)chosen;
+    enemy->x = (u8)(enemy->x + dir_dx[(u8)chosen]);
+    enemy->y = (u8)(enemy->y + dir_dy[(u8)chosen]);
+}
+
+/* 軸差の大きい方 (同点は x 優先) を第一候補とする貪欲な向き最大2件を dirs[] に積み、件数を返す */
+static u8 chaseDirs(const DunEnemy *enemy, s8 *dirs)
+{
+    const s16 dx = (s16)player_x - (s16)enemy->x;
+    const s16 dy = (s16)player_y - (s16)enemy->y;
+    const s16 adx = dx < 0 ? (s16)(-dx) : dx;
+    const s16 ady = dy < 0 ? (s16)(-dy) : dy;
+    const s8 x_dir = dx > 0 ? DUN_DIR_E : (dx < 0 ? DUN_DIR_W : -1);
+    const s8 y_dir = dy > 0 ? DUN_DIR_S : (dy < 0 ? DUN_DIR_N : -1);
+    u8 count = 0;
+    if (adx >= ady)
+    {
+        if (x_dir >= 0) dirs[count++] = x_dir;
+        if (y_dir >= 0) dirs[count++] = y_dir;
+    }
+    else
+    {
+        if (y_dir >= 0) dirs[count++] = y_dir;
+        if (x_dir >= 0) dirs[count++] = x_dir;
+    }
+    return count;
+}
+
+/*
+ * 追跡1歩。プレイヤーのセルへ侵入しようとした場合は移動せず TRUE (接触) を返す
+ * (呼び出し側が onEnemyContact を呼ぶ)。候補が両方とも塞がっていれば移動しない。
+ */
+static bool stepEnemyChase(const DungeonFloorData *floor, u8 index)
+{
+    DunEnemy *enemy = &dun_enemies[floor_index][index];
+    s8 dirs[2];
+    const u8 count = chaseDirs(enemy, dirs);
+    u8 i;
+    for (i = 0; i < count; i++)
+    {
+        const u8 dir = (u8)dirs[i];
+        s16 nx;
+        s16 ny;
+        if (!canMove(floor, enemy->x, enemy->y, dir)) continue;
+        nx = (s16)enemy->x + dir_dx[dir];
+        ny = (s16)enemy->y + dir_dy[dir];
+        if (nx == player_x && ny == player_y)
+        {
+            enemy->dir = dir;
+            return TRUE;
+        }
+        if (!enemyBlockedCell((s16)index, nx, ny))
+        {
+            enemy->dir = dir;
+            enemy->x = (u8)nx;
+            enemy->y = (u8)ny;
+            return FALSE;
+        }
+    }
+    if (count > 0) enemy->dir = (u8)dirs[0];
+    return FALSE;
+}
+
+/* 将来の戦闘システム用フック。現在は空 (接触してもダメージ等のゲーム効果は一切発生しない) */
+static void onEnemyContact(u8 enemy_index)
+{
+    (void)enemy_index;
+}
+
+/* 現在フロアの全アクティブエネミーを1tick分進める (main ループの vblank タイマー駆動から呼ぶ) */
+static void stepEnemies(void)
+{
+    const DungeonFloorData *floor = &dungeon_floors[floor_index];
+    u8 index;
+    for (index = 0; index < DUN_MAX_ENEMIES; index++)
+    {
+        DunEnemy *enemy = &dun_enemies[floor_index][index];
+        u8 before_x;
+        u8 before_y;
+        bool sees;
+        if (!enemy->active) continue;
+        before_x = enemy->x;
+        before_y = enemy->y;
+        sees = enemySeesPlayer(floor, enemy);
+        if (sees)
+        {
+            enemy->mode = DUN_ENEMY_MODE_CHASE;
+            enemy->chase_timer = DUN_ENEMY_CHASE_TIMER;
+        }
+        if (enemy->mode == DUN_ENEMY_MODE_CHASE)
+        {
+            if (stepEnemyChase(floor, index)) onEnemyContact(index);
+            if (!sees)
+            {
+                if (enemy->chase_timer > 0) enemy->chase_timer--;
+                if (enemy->chase_timer == 0) enemy->mode = DUN_ENEMY_MODE_WANDER;
+            }
+        }
+        else
+        {
+            stepEnemyWander(floor, index);
+        }
+        if (enemy->x != before_x || enemy->y != before_y) enemy->anim ^= 1;
+    }
+}
+
+/*
+ * 起動時に1回だけ、各フロアの DUN_FLAG_ENEMY スポーンセルから dun_enemies を組み立てる。
+ * dun_visited (静的ゼロ初期化のみ) とは異なり、エネミーは向き/モード等の非ゼロ初期値が
+ * 必要なため明示的な初期化関数を持つ。以降はフロア再訪でも再初期化しない (生存位置が
+ * 永続する — dun_visited と同じ「main.c がフロア別RAMを所有」パターン)。
+ */
+static void initEnemies(void)
+{
+    u8 f;
+    for (f = 0; f < DUNGEON_FLOOR_COUNT; f++)
+    {
+        const DungeonFloorData *floor = &dungeon_floors[f];
+        u16 count = 0;
+        u16 x;
+        u16 y;
+        for (y = 0; y < floor->height && count < DUN_MAX_ENEMIES; y++)
+        {
+            for (x = 0; x < floor->width && count < DUN_MAX_ENEMIES; x++)
+            {
+                if (!(floor->flags[DUN_INDEX(floor, x, y)] & DUN_FLAG_ENEMY)) continue;
+                dun_enemies[f][count].x = (u8)x;
+                dun_enemies[f][count].y = (u8)y;
+                dun_enemies[f][count].dir = DUN_DIR_N;
+                dun_enemies[f][count].mode = DUN_ENEMY_MODE_WANDER;
+                dun_enemies[f][count].anim = 0;
+                dun_enemies[f][count].chase_timer = 0;
+                dun_enemies[f][count].active = TRUE;
+                count++;
+            }
+        }
+        for (; count < DUN_MAX_ENEMIES; count++) dun_enemies[f][count].active = FALSE;
+    }
 }
 
 static void applyMove(const DungeonFloorData *floor, u8 action)
@@ -138,6 +415,7 @@ static void drawCurrentView(const DungeonFloorData *floor)
 {
     DUN_applyViewSet(floor->view_set);
     applyCellDarkness(floor);
+    DUN_setEnemies(dun_enemies[floor_index], DUN_MAX_ENEMIES);
     DUN_drawStatic(floor, player_x, player_y, player_dir);
     DUN_drawMinimap(floor, dun_visited[floor_index], player_x, player_y, player_dir);
 #if DUN_USE_TEXT_HUD
@@ -265,6 +543,13 @@ int main(bool hardReset)
     VDP_setPlaneSize(64, 32, TRUE);
     JOY_init();
     DUN_initView();
+    initEnemies();
+    enemy_rng_state = DUN_ENEMY_RNG_SEED_DEFAULT;
+    /* 起動直後は floor_index==0 (dungeon_floors[0]) の per-floor 値を使う。
+     * DUN_ENEMY_STEP_VBLANKS_DEFAULT は各フロアの enemy_step_vblanks 焼き込み時に
+     * 「0=継承」を解決する既定値として dungeon-service.js のエクスポート時にのみ使われ、
+     * 実機側では参照しない (ドキュメント用途で define 自体は残す)。 */
+    enemy_next_step_vtime = vtimer + dungeon_floors[floor_index].enemy_step_vblanks;
     resetPlayer();
     drawCurrentView(&dungeon_floors[floor_index]);
 
@@ -289,6 +574,24 @@ int main(bool hardReset)
             {
                 performAction(floor, action);
             }
+        }
+
+        /*
+         * エネミーの徘徊/追跡は vblank タイマー駆動 (プレイヤー静止中も進む)。
+         * (s32) 差分による符号付き比較で vtimer のラップアラウンドにも安全に対応する
+         * (SGDK の一般的なイディオム)。ブロッキングアニメ中の複数回分の経過は
+         * 1ステップに集約される (deadline を現在時刻基準で毎回引き直すため)。
+         */
+        if ((s32)(vtimer - enemy_next_step_vtime) >= 0)
+        {
+            /* floor ではなく dungeon_floors[floor_index] を直接引く: 同じループ周回内で
+             * START/階段によりフロアが切り替わっていた場合でも、切り替え後のフロアの
+             * 間隔を即座に反映するため (ローカルの floor はループ先頭でのスナップショット)。 */
+            const DungeonFloorData *enemy_floor = &dungeon_floors[floor_index];
+            stepEnemies();
+            enemy_next_step_vtime = vtimer + enemy_floor->enemy_step_vblanks;
+            DUN_setEnemies(dun_enemies[floor_index], DUN_MAX_ENEMIES);
+            DUN_refreshBillboards();
         }
 
         SPR_update();

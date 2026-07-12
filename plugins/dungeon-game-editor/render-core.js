@@ -58,7 +58,22 @@
   const DIR_DX = [0, 1, 0, -1];
   const DIR_DY = [-1, 0, 1, 0];
   const EDGE_BITS = [1, 2, 4, 8];
-  const TEXTURE_KINDS = ['wall', 'door', 'floor', 'ceiling', 'chest', 'stairs_up', 'stairs_down'];
+  const TEXTURE_KINDS = ['wall', 'door', 'floor', 'ceiling', 'chest', 'stairs_up', 'stairs_down', 'enemy'];
+  /* エネミービルボード: ソース素材は 4方向(列)×歩行2フレーム(行) の 192x96、
+   * 生成シートは 8行(方向×歩行)×8列(距離バケット) の 384x384 (BB_FRAME_SIZE=48 基準) */
+  const BB_ENEMY_VIEWS = 4;
+  const BB_ENEMY_WALK_FRAMES = 2;
+  const BB_ENEMY_SOURCE_W = BB_FRAME_SIZE * BB_ENEMY_VIEWS;
+  const BB_ENEMY_SOURCE_H = BB_FRAME_SIZE * BB_ENEMY_WALK_FRAMES;
+  /* エネミーAI定数 (render-core.js に実装 → main.c へ line-for-line 移植する。
+   * losVisible と同じ二重実装パターン。JS/C で shift定数・順序を必ず揃えること) */
+  const DUN_MAX_ENEMIES = 8;
+  const ENEMY_MODE_WANDER = 0;
+  const ENEMY_MODE_CHASE = 1;
+  const ENEMY_SIGHT_RANGE = 3;
+  const ENEMY_CHASE_TIMER = 5;
+  const ENEMY_WANDER_FORWARD_PERCENT = 75;
+  const ENEMY_RNG_DEFAULT_SEED = 0x2025;
   const ATLAS_LAYOUT_LEGACY = {
     columns: 3,
     rows: 2,
@@ -92,6 +107,7 @@
     chest: [[196, 132, 51], [91, 53, 28], [241, 196, 108]],
     stairs_up: [[130, 186, 219], [49, 92, 115], [197, 232, 244]],
     stairs_down: [[148, 121, 209], [62, 46, 101], [213, 198, 255]],
+    enemy: [[168, 58, 58], [92, 24, 24], [230, 200, 90]],
   };
   const PALETTE_SHADES = [0.28, 0.36, 0.46, 0.56, 0.68, 0.82, 0.96];
 
@@ -117,6 +133,7 @@
    * ------------------------------------------------------------------ */
 
   function makeFallbackTexture(kind) {
+    if (kind === 'enemy') return makeFallbackEnemyTexture();
     const size = 32;
     const colors = FALLBACK_COLORS[kind] || FALLBACK_COLORS.wall;
     const data = new Uint8Array(size * size * 4);
@@ -134,6 +151,66 @@
     }
     if (kind === 'door') paintFallbackDoor(data, size, colors);
     return { width: size, height: size, data };
+  }
+
+  /*
+   * エネミーのプレースホルダー素材: 192x96 (4方向列×歩行2行、48x48セル)。
+   * 枠外は alpha=0 のまま (透過可)。方向マーカー = 目の位置 (view=2 正面は両目、
+   * view=0 背面は目なし、view=1/3 側面は片目)、歩行 = 2px の縦ボブ。
+   * 列の並び (view index) は draw 側の rel(=(enemyDir-camDir+4)&3) と同じ規約で
+   * 良く、見た目の意味付けは実装者の裁量 (最終的な絵作りは本物の素材で置換される想定)。
+   */
+  function makeFallbackEnemyTexture() {
+    const width = BB_ENEMY_SOURCE_W;
+    const height = BB_ENEMY_SOURCE_H;
+    const cellW = width / BB_ENEMY_VIEWS;
+    const cellH = height / BB_ENEMY_WALK_FRAMES;
+    const data = new Uint8Array(width * height * 4);
+    const colors = FALLBACK_COLORS.enemy;
+    for (let view = 0; view < BB_ENEMY_VIEWS; view++) {
+      for (let walk = 0; walk < BB_ENEMY_WALK_FRAMES; walk++) {
+        const bob = walk === 0 ? 0 : 2;
+        paintFallbackEnemyCell(data, width, view * cellW, walk * cellH, cellW, cellH, colors, view, bob);
+      }
+    }
+    return { width, height, data };
+  }
+
+  function paintFallbackEnemyCell(data, stride, ox, oy, cellW, cellH, colors, view, bob) {
+    const bodyTop = 10 + bob;
+    const bodyBottom = cellH - 4;
+    const bodyLeft = 12;
+    const bodyRight = cellW - 12;
+    for (let y = 0; y < cellH; y++) {
+      for (let x = 0; x < cellW; x++) {
+        if (x < bodyLeft || x > bodyRight || y < bodyTop || y > bodyBottom) continue;
+        const i = (((oy + y) * stride) + (ox + x)) * 4;
+        const shade = ((x + y) & 4) ? colors[0] : colors[1];
+        data[i] = shade[0];
+        data[i + 1] = shade[1];
+        data[i + 2] = shade[2];
+        data[i + 3] = 255;
+      }
+    }
+    const eyeY = bodyTop + 6;
+    const marker = colors[2];
+    const setPixel = (px, py) => {
+      if (px < 0 || px >= cellW || py < 0 || py >= cellH) return;
+      const i = (((oy + py) * stride) + (ox + px)) * 4;
+      data[i] = marker[0];
+      data[i + 1] = marker[1];
+      data[i + 2] = marker[2];
+      data[i + 3] = 255;
+    };
+    if (view === 2) {
+      setPixel(Math.floor(cellW / 2) - 4, eyeY);
+      setPixel(Math.floor(cellW / 2) + 3, eyeY);
+    } else if (view === 1) {
+      setPixel(bodyRight - 4, eyeY);
+    } else if (view === 3) {
+      setPixel(bodyLeft + 4, eyeY);
+    }
+    /* view === 0 (背面) は目を描かない */
   }
 
   function paintFallbackDoor(data, size, colors) {
@@ -330,6 +407,7 @@
     sampleTextureColors(textures.chest, colors);
     sampleTextureColors(textures.stairs_up, colors);
     sampleTextureColors(textures.stairs_down, colors);
+    sampleTextureColors(textures.enemy, colors);
     const quantized = quantizeColors(colors, 15);
     const key = SPRITE_TRANSPARENT;
     return [{ value: ((key.r << 16) | (key.g << 8) | key.b) >>> 0, ...key }, ...quantized];
@@ -1157,8 +1235,17 @@
     return { x, y, frame: 0 };
   }
 
-  function billboardPose(pose, cell) {
-    if (cell.dd === 0 && cell.dl === 0) return billboardUnderfootPose();
+  /*
+   * allowUnderfoot: 足元 (dd=0, dl=0) の特異点を billboardUnderfootPose() に固定するか。
+   * static/turn ポーズ (どちらもプレイヤーがそのセルに留まっている間の見た目) では true。
+   * fwd ポーズ (前進・後退アニメーションの中間フレーム。後退時は基準セルが到達先になる) では
+   * false にし、セルを離れた瞬間に足元スプライトを非表示 (frame=-1) にする。移動アニメーション中
+   * ずっと表示され続けると「スプライトが追いかけてくる」ように見えるため。
+   */
+  function billboardPose(pose, cell, allowUnderfoot) {
+    if (cell.dd === 0 && cell.dl === 0) {
+      return allowUnderfoot ? billboardUnderfootPose() : { x: 0, y: 0, frame: -1 };
+    }
     const cam = toCameraPoint(pose, { l: cell.dl, d: cell.dd, z: 0, u: 0, v: 0 });
     if (cam.z < BB_MIN_DEPTH) return { x: 0, y: 0, frame: -1 };
     const height = (BB_WORLD_HEIGHT * VIEW_PROJECT) / cam.z;
@@ -1185,12 +1272,12 @@
   function buildBillboardTables(settings) {
     const frames = buildFrames(settings);
     const cells = buildBillboardCells();
-    const forPose = (pose) => cells.map((cell) => billboardPose(pose, cell));
+    const forPose = (pose, allowUnderfoot) => cells.map((cell) => billboardPose(pose, cell, allowUnderfoot));
     return {
       cells,
-      staticPoses: forPose(frames.staticPose),
-      fwdPoses: frames.fwdPoses.map(forPose),
-      turnPoses: frames.turnPoses.map(forPose),
+      staticPoses: forPose(frames.staticPose, true),
+      fwdPoses: frames.fwdPoses.map((pose) => forPose(pose, false)),
+      turnPoses: frames.turnPoses.map((pose) => forPose(pose, true)),
     };
   }
 
@@ -1198,33 +1285,87 @@
     return (BB_WORLD_HEIGHT * VIEW_PROJECT) / height;
   }
 
+  /*
+   * 距離バケット1枚分 (frame) を texture からスケーリングして pixels の
+   * (originXBase, originYBase) を左上とする BB_FRAME_SIZE 四角内へブリットする。
+   * renderBillboardSheet (1行=8バケット) と renderEnemyBillboardSheet (8行=方向×歩行) の
+   * 共有実体。renderBillboardSheet の出力はリファクタ前後でバイト一致する
+   * (originXBase=frame*BB_FRAME_SIZE, originYBase=0 を渡せば旧実装と同じ計算になる)。
+   */
+  function blitBillboardFrame(pixels, sheetW, originXBase, originYBase, texture, palette, frame) {
+    const height = BB_BUCKET_HEIGHTS[frame];
+    const depth = billboardBucketDepth(height);
+    const shade = Math.max(0.3, 0.95 / (1 + depth * 0.1));
+    const size = height;
+    const originX = originXBase + Math.floor((BB_FRAME_SIZE - size) / 2);
+    const originY = originYBase + (BB_FRAME_SIZE - size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const sx = Math.min(texture.width - 1, Math.floor((x / size) * texture.width));
+        const sy = Math.min(texture.height - 1, Math.floor((y / size) * texture.height));
+        const i = ((sy * texture.width) + sx) * 4;
+        if (texture.data[i + 3] < 16) continue;
+        if (texture.data[i] > 240 && texture.data[i + 1] < 16 && texture.data[i + 2] > 240) continue;
+        const dest = ((originY + y) * sheetW) + originX + x;
+        pixels[dest] = nearestPalette(
+          palette,
+          texture.data[i] * shade,
+          texture.data[i + 1] * shade,
+          texture.data[i + 2] * shade,
+        );
+      }
+    }
+  }
+
   function renderBillboardSheet(texture, palette) {
     const sheetW = BB_FRAME_SIZE * BB_BUCKET_HEIGHTS.length;
     const pixels = new Uint8Array(sheetW * BB_FRAME_SIZE);
     BB_BUCKET_HEIGHTS.forEach((height, frame) => {
-      const depth = billboardBucketDepth(height);
-      const shade = Math.max(0.3, 0.95 / (1 + depth * 0.1));
-      const size = height;
-      const originX = (frame * BB_FRAME_SIZE) + Math.floor((BB_FRAME_SIZE - size) / 2);
-      const originY = BB_FRAME_SIZE - size;
-      for (let y = 0; y < size; y++) {
-        for (let x = 0; x < size; x++) {
-          const sx = Math.min(texture.width - 1, Math.floor((x / size) * texture.width));
-          const sy = Math.min(texture.height - 1, Math.floor((y / size) * texture.height));
-          const i = ((sy * texture.width) + sx) * 4;
-          if (texture.data[i + 3] < 16) continue;
-          if (texture.data[i] > 240 && texture.data[i + 1] < 16 && texture.data[i + 2] > 240) continue;
-          const dest = ((originY + y) * sheetW) + originX + x;
-          pixels[dest] = nearestPalette(
-            palette,
-            texture.data[i] * shade,
-            texture.data[i + 1] * shade,
-            texture.data[i + 2] * shade,
-          );
-        }
-      }
+      blitBillboardFrame(pixels, sheetW, frame * BB_FRAME_SIZE, 0, texture, palette, frame);
     });
     return { width: sheetW, height: BB_FRAME_SIZE, pixels };
+  }
+
+  function cropSubTexture(texture, cellW, cellH, col, row) {
+    const out = new Uint8Array(cellW * cellH * 4);
+    for (let y = 0; y < cellH; y++) {
+      for (let x = 0; x < cellW; x++) {
+        const sx = (col * cellW) + x;
+        const sy = (row * cellH) + y;
+        const si = ((sy * texture.width) + sx) * 4;
+        const di = ((y * cellW) + x) * 4;
+        out[di] = texture.data[si];
+        out[di + 1] = texture.data[si + 1];
+        out[di + 2] = texture.data[si + 2];
+        out[di + 3] = texture.data[si + 3];
+      }
+    }
+    return { width: cellW, height: cellH, data: out };
+  }
+
+  /*
+   * エネミー: ソース (192x96, 4方向列×歩行2行) から 8行(方向×歩行)×8列(距離バケット) の
+   * 384x384 シートを生成する。行 = (view * BB_ENEMY_WALK_FRAMES) + walk。
+   * dungeon_view.c / drawBillboardsInto は row = rel*2+anim (rel=0..3, anim=0..1) で
+   * この行インデックスと同じ規約を使う。
+   */
+  function renderEnemyBillboardSheet(texture, palette) {
+    const cellW = Math.max(1, Math.floor(texture.width / BB_ENEMY_VIEWS));
+    const cellH = Math.max(1, Math.floor(texture.height / BB_ENEMY_WALK_FRAMES));
+    const sheetW = BB_FRAME_SIZE * BB_BUCKET_HEIGHTS.length;
+    const sheetRows = BB_ENEMY_VIEWS * BB_ENEMY_WALK_FRAMES;
+    const sheetH = BB_FRAME_SIZE * sheetRows;
+    const pixels = new Uint8Array(sheetW * sheetH);
+    for (let view = 0; view < BB_ENEMY_VIEWS; view++) {
+      for (let walk = 0; walk < BB_ENEMY_WALK_FRAMES; walk++) {
+        const sub = cropSubTexture(texture, cellW, cellH, view, walk);
+        const destRow = (view * BB_ENEMY_WALK_FRAMES) + walk;
+        BB_BUCKET_HEIGHTS.forEach((height, frame) => {
+          blitBillboardFrame(pixels, sheetW, frame * BB_FRAME_SIZE, destRow * BB_FRAME_SIZE, sub, palette, frame);
+        });
+      }
+    }
+    return { width: sheetW, height: sheetH, pixels };
   }
 
   /*
@@ -1320,6 +1461,220 @@
   }
 
   /* ------------------------------------------------------------------
+   * エネミーAI (main.c dun_enemies へ line-for-line 移植する共有実装)。
+   * 16bit xorshift RNG (seed 既定 0x2025) で JS/C 決定的に同一系列を生成する。
+   * すべて 16bit-safe な整数演算のみ (JS 側は & 0xffff で明示マスクする)。
+   * ------------------------------------------------------------------ */
+
+  /* xorshift16: shift定数 (7, 9, 8)。C側は u16 への暗黙切り詰めで同じマスク効果になる */
+  function xorshift16(state) {
+    let x = state & 0xffff;
+    x ^= (x << 7) & 0xffff;
+    x ^= (x >>> 9) & 0xffff;
+    x ^= (x << 8) & 0xffff;
+    return x & 0xffff;
+  }
+
+  function makeEnemyRng(seed) {
+    const s = Number(seed);
+    return { state: (Number.isFinite(s) && (s & 0xffff) !== 0 ? s : ENEMY_RNG_DEFAULT_SEED) & 0xffff };
+  }
+
+  function enemyRngNext(rng) {
+    rng.state = xorshift16(rng.state);
+    return rng.state;
+  }
+
+  /*
+   * プレイヤーと同じ移動可否ルール (扉通過可・一方通行遵守)。占有 (エネミー/宝箱/階段/
+   * プレイヤー) は含まない。renderer.js の canPreviewMove もこれ経由にする
+   * (旧実装は one_way を一切見ていなかった不具合の修正を兼ねる)。
+   */
+  function canTraverse(floor, x, y, dir) {
+    const nx = x + DIR_DX[dir];
+    const ny = y + DIR_DY[dir];
+    if (!cellInBounds(floor, x, y) || !cellInBounds(floor, nx, ny)) return false;
+    if (rawEdgeState(floor, x, y, dir) === EDGE_STATE_WALL) return false;
+    const opposite = (dir + 2) & 3;
+    const current = floor.cells[y][x];
+    const next = floor.cells[ny][nx];
+    const currentOneWay = current.one_way || 0;
+    const nextOneWay = next.one_way || 0;
+    if (currentOneWay && !(currentOneWay & EDGE_BITS[dir])) return false;
+    if (nextOneWay && !(nextOneWay & EDGE_BITS[opposite])) return false;
+    return true;
+  }
+
+  /* フロアのエネミー・スポーンセル (cell.enemy===true) を上限 DUN_MAX_ENEMIES 件まで走査順で返す */
+  function enemySpawns(floor) {
+    const spawns = [];
+    for (let y = 0; y < floor.height; y++) {
+      for (let x = 0; x < floor.width; x++) {
+        if (!floor.cells[y][x].enemy) continue;
+        spawns.push({ x, y });
+        if (spawns.length >= DUN_MAX_ENEMIES) return spawns;
+      }
+    }
+    return spawns;
+  }
+
+  /* (x,y) がプレイヤー・宝箱・階段・他のアクティブなエネミー (excludeIndex は除く) で占有されているか */
+  function enemyBlockedCell(floor, enemies, excludeIndex, player, x, y) {
+    if (!cellInBounds(floor, x, y)) return true;
+    if (player && player.x === x && player.y === y) return true;
+    const cell = floor.cells[y][x];
+    if (cell.event === 'chest' || cell.stairs) return true;
+    for (let i = 0; i < enemies.length; i++) {
+      if (i === excludeIndex) continue;
+      const other = enemies[i];
+      if (other && other.active && other.x === x && other.y === y) return true;
+    }
+    return false;
+  }
+
+  /* (x,y) にいるアクティブなエネミーを返す (描画のフラグ参照より優先して呼ぶ) */
+  function enemyAt(enemies, x, y) {
+    if (!enemies) return null;
+    for (let i = 0; i < enemies.length; i++) {
+      const e = enemies[i];
+      if (e && e.active && e.x === x && e.y === y) return e;
+    }
+    return null;
+  }
+
+  /* canTraverse + 占有ブロックの合成判定 (index の敵が dir 方向へ進めるか) */
+  function enemyCanMove(floor, enemies, excludeIndex, player, x, y, dir) {
+    if (!canTraverse(floor, x, y, dir)) return false;
+    const nx = x + DIR_DX[dir];
+    const ny = y + DIR_DY[dir];
+    return !enemyBlockedCell(floor, enemies, excludeIndex, player, nx, ny);
+  }
+
+  /* 視界: 正面直線 ENEMY_SIGHT_RANGE マス以内。壁と扉の両方が遮る (rawEdgeState !== OPEN) */
+  function enemySeesPlayer(floor, enemy, player) {
+    if (!enemy || !enemy.active) return false;
+    const dir = enemy.dir & 3;
+    let cx = enemy.x;
+    let cy = enemy.y;
+    for (let step = 0; step < ENEMY_SIGHT_RANGE; step++) {
+      if (rawEdgeState(floor, cx, cy, dir) !== EDGE_STATE_OPEN) return false;
+      cx += DIR_DX[dir];
+      cy += DIR_DY[dir];
+      if (!cellInBounds(floor, cx, cy)) return false;
+      if (cx === player.x && cy === player.y) return true;
+    }
+    return false;
+  }
+
+  /*
+   * 徘徊: 75%直進 (可能なら) + それ以外は逆走を除く候補から一様選択。候補が無ければ最終手段で逆走。
+   * player はプレイヤーの占有セルを候補から除外するためだけに使う (徘徊中の接触は発火しない —
+   * 接触フックは stepEnemyChase の追跡ステップでのみ発火する仕様)。
+   */
+  function stepEnemyWander(floor, enemies, index, player, rng) {
+    const enemy = enemies[index];
+    const forwardDir = enemy.dir & 3;
+    const reverseDir = (forwardDir + 2) & 3;
+    const candidates = [];
+    for (let d = 0; d < 4; d++) {
+      if (d === reverseDir) continue;
+      if (enemyCanMove(floor, enemies, index, player, enemy.x, enemy.y, d)) candidates.push(d);
+    }
+    const forwardOpen = candidates.indexOf(forwardDir) >= 0;
+    const roll = enemyRngNext(rng) % 100;
+    let chosen = -1;
+    if (forwardOpen && roll < ENEMY_WANDER_FORWARD_PERCENT) {
+      chosen = forwardDir;
+    } else if (candidates.length > 0) {
+      chosen = candidates[enemyRngNext(rng) % candidates.length];
+    } else if (enemyCanMove(floor, enemies, index, player, enemy.x, enemy.y, reverseDir)) {
+      chosen = reverseDir;
+    }
+    if (chosen < 0) return;
+    enemy.dir = chosen;
+    enemy.x += DIR_DX[chosen];
+    enemy.y += DIR_DY[chosen];
+  }
+
+  /* 軸差の大きい方 (同点は x 優先) を第一候補とする貪欲な向き2件を out[] に積む */
+  function chaseDirs(enemy, player, out) {
+    const dx = player.x - enemy.x;
+    const dy = player.y - enemy.y;
+    const adx = dx < 0 ? -dx : dx;
+    const ady = dy < 0 ? -dy : dy;
+    const xDir = dx > 0 ? 1 : (dx < 0 ? 3 : -1);
+    const yDir = dy > 0 ? 2 : (dy < 0 ? 0 : -1);
+    let count = 0;
+    if (adx >= ady) {
+      if (xDir >= 0) out[count++] = xDir;
+      if (yDir >= 0) out[count++] = yDir;
+    } else {
+      if (yDir >= 0) out[count++] = yDir;
+      if (xDir >= 0) out[count++] = xDir;
+    }
+    return count;
+  }
+
+  /*
+   * 追跡1歩。プレイヤーのセルへ侵入しようとした場合は移動せず true (接触) を返す
+   * (main.c 側は onEnemyContact を呼ぶ)。候補が両方とも塞がっていれば移動しない。
+   */
+  function stepEnemyChase(floor, enemies, index, player) {
+    const enemy = enemies[index];
+    const dirs = [-1, -1];
+    const count = chaseDirs(enemy, player, dirs);
+    for (let i = 0; i < count; i++) {
+      const dir = dirs[i];
+      if (!canTraverse(floor, enemy.x, enemy.y, dir)) continue;
+      const nx = enemy.x + DIR_DX[dir];
+      const ny = enemy.y + DIR_DY[dir];
+      if (nx === player.x && ny === player.y) {
+        enemy.dir = dir;
+        return true;
+      }
+      if (!enemyBlockedCell(floor, enemies, index, player, nx, ny)) {
+        enemy.dir = dir;
+        enemy.x = nx;
+        enemy.y = ny;
+        return false;
+      }
+    }
+    if (count > 0) enemy.dir = dirs[0];
+    return false;
+  }
+
+  /*
+   * 1tick分すべてのアクティブなエネミーを進める。戻り値は今tickでプレイヤーへ
+   * 接触した (侵入をブロックされた) エネミーの index 配列。enemies は in-place で変更する。
+   */
+  function stepEnemies(floor, enemies, player, rng) {
+    const contacts = [];
+    for (let index = 0; index < enemies.length; index++) {
+      const enemy = enemies[index];
+      if (!enemy || !enemy.active) continue;
+      const beforeX = enemy.x;
+      const beforeY = enemy.y;
+      const sees = enemySeesPlayer(floor, enemy, player);
+      if (sees) {
+        enemy.mode = ENEMY_MODE_CHASE;
+        enemy.chaseTimer = ENEMY_CHASE_TIMER;
+      }
+      if (enemy.mode === ENEMY_MODE_CHASE) {
+        const contact = stepEnemyChase(floor, enemies, index, player);
+        if (contact) contacts.push(index);
+        if (!sees) {
+          if (enemy.chaseTimer > 0) enemy.chaseTimer--;
+          if (enemy.chaseTimer <= 0) enemy.mode = ENEMY_MODE_WANDER;
+        }
+      } else {
+        stepEnemyWander(floor, enemies, index, player, rng);
+      }
+      if (enemy.x !== beforeX || enemy.y !== beforeY) enemy.anim ^= 1;
+    }
+    return contacts;
+  }
+
+  /* ------------------------------------------------------------------
    * 補助: パレット変換
    * ------------------------------------------------------------------ */
 
@@ -1364,7 +1719,7 @@
    * 再利用され続け、ロジック修正が既存 ROM 出力へ反映されない (実際にこの不具合が発生した)。
    */
   const core = {
-    version: '2.4.0',
+    version: '2.6.0',
     VIEW_W,
     VIEW_H,
     VIEW_TILE_W,
@@ -1393,6 +1748,17 @@
     BB_FRAME_SIZE,
     BB_FRAME_TILES,
     BB_BUCKET_HEIGHTS,
+    BB_ENEMY_VIEWS,
+    BB_ENEMY_WALK_FRAMES,
+    BB_ENEMY_SOURCE_W,
+    BB_ENEMY_SOURCE_H,
+    DUN_MAX_ENEMIES,
+    ENEMY_MODE_WANDER,
+    ENEMY_MODE_CHASE,
+    ENEMY_SIGHT_RANGE,
+    ENEMY_CHASE_TIMER,
+    ENEMY_WANDER_FORWARD_PERCENT,
+    ENEMY_RNG_DEFAULT_SEED,
     TEXTURE_KINDS,
     ATLAS_LAYOUT_LEGACY,
     ATLAS_LAYOUT_DOOR,
@@ -1430,10 +1796,24 @@
     billboardPose,
     buildBillboardTables,
     renderBillboardSheet,
+    blitBillboardFrame,
+    renderEnemyBillboardSheet,
     losVisible,
     indicesToRgba,
     darkenPalette,
     paletteToVdpColors,
+    xorshift16,
+    makeEnemyRng,
+    enemyRngNext,
+    canTraverse,
+    enemySpawns,
+    enemyBlockedCell,
+    enemyAt,
+    enemyCanMove,
+    enemySeesPlayer,
+    stepEnemyWander,
+    stepEnemyChase,
+    stepEnemies,
   };
 
   if (typeof module !== 'undefined' && module.exports) {

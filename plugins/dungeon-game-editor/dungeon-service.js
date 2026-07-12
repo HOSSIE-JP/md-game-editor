@@ -22,6 +22,7 @@ const CELL_FLAGS = {
   chest: 2,
   stairs_up: 4,
   stairs_down: 8,
+  enemy: 16,
 };
 const DEFAULT_ASSETS = {
   wall_texture: 'dungeon/textures/dungeon_texture_atlas.png#wall',
@@ -31,11 +32,18 @@ const DEFAULT_ASSETS = {
   chest_texture: 'dungeon/textures/dungeon_texture_atlas.png#chest',
   stairs_up_texture: 'dungeon/textures/dungeon_texture_atlas.png#stairs_up',
   stairs_down_texture: 'dungeon/textures/dungeon_texture_atlas.png#stairs_down',
+  /*
+   * 「enemy」タグはどのアトラスレイアウト (LEGACY/DOOR) にも rect が定義されていないため、
+   * loadTexturesForRefs / renderer.js の cropAtlasTexture は常に null を返し、
+   * makeFallbackTexture('enemy') の 192x96 手続き生成プレースホルダーへフォールバックする。
+   * 本物のエネミー素材を用意するまではこの既定参照のままでよい (当面プレースホルダー画像)。
+   */
+  enemy_texture: 'dungeon/textures/dungeon_texture_atlas.png#enemy',
 };
 const ASSET_KEYS = Object.freeze(Object.keys(DEFAULT_ASSETS));
-/* 壁焼き込み4要素 (素材セット単位) と 宝箱/階段3要素 (プロジェクト共通 = settings.common_assets) を分離する */
+/* 壁焼き込み4要素 (素材セット単位) と 宝箱/階段/敵4要素 (プロジェクト共通 = settings.common_assets) を分離する */
 const SET_ASSET_KEYS = Object.freeze(['wall_texture', 'door_texture', 'floor_texture', 'ceiling_texture']);
-const COMMON_ASSET_KEYS = Object.freeze(['chest_texture', 'stairs_up_texture', 'stairs_down_texture']);
+const COMMON_ASSET_KEYS = Object.freeze(['chest_texture', 'stairs_up_texture', 'stairs_down_texture', 'enemy_texture']);
 const ASSET_CONSTRAINTS = Object.freeze({
   wall_texture: { width: 96, height: 96, opaque: true },
   door_texture: { width: 96, height: 96, opaque: true },
@@ -44,6 +52,7 @@ const ASSET_CONSTRAINTS = Object.freeze({
   chest_texture: { width: 48, height: 48, opaque: false },
   stairs_up_texture: { width: 48, height: 48, opaque: false },
   stairs_down_texture: { width: 48, height: 48, opaque: false },
+  enemy_texture: { width: 192, height: 96, opaque: false },
 });
 const DEFAULT_ASSET_SET = Object.freeze({
   id: 'default',
@@ -55,6 +64,7 @@ const DEFAULT_SETTINGS = {
   animation_frames: 8,
   turn_frames: 8,
   move_speed_vblanks: 0,
+  enemy_step_vblanks: 90,
   view_tile_width: 25,
   view_tile_height: 16,
   view_pixel_width: 200,
@@ -65,6 +75,13 @@ const DEFAULT_SETTINGS = {
 const DUN_ANIMATION_STEP_VBLANKS = 2;
 /* move_speed_vblanks の上限 (実機側 dun_extra_step_vblanks は u8 だが、UI上の常識的な上限として抑える) */
 const MOVE_SPEED_VBLANKS_MAX = 60;
+/*
+ * enemy_step_vblanks: エネミーAIの徘徊/追跡の1手あたりの間隔 (vblank数)。
+ * bakeハッシュには含めない (move_speed_vblanksと同じパターン) — exportPatternFiles が
+ * 常に最新の settings から #define を再生成することで、再ベイクなしで反映される。
+ */
+const ENEMY_STEP_VBLANKS_MIN = 5;
+const ENEMY_STEP_VBLANKS_MAX = 240;
 const TILESET_TILES_PER_ROW = 32;
 const PATTERN_TEXTURE_MAX_SIZE = 96;
 const GENERATED_RESOURCE_BEGIN = '// DUNGEON_GENERATED_BEGIN';
@@ -76,6 +93,7 @@ const GENERATED_BB_SHEETS = {
   chest: 'dungeon/generated/dungeon_bb_chest.png',
   stairs_up: 'dungeon/generated/dungeon_bb_stairs_up.png',
   stairs_down: 'dungeon/generated/dungeon_bb_stairs_down.png',
+  enemy: 'dungeon/generated/dungeon_bb_enemy.png',
 };
 const GENERATED_COMMON_CACHE_REL = 'dungeon/generated/common/bake.bin';
 const BAKE_CACHE_REL = 'dungeon/generated/dungeon_bake_cache.json';
@@ -149,6 +167,7 @@ function blankCell(edgeMask = 15) {
     dark: false,
     event: '',
     stairs: '',
+    enemy: false,
   };
 }
 
@@ -164,13 +183,17 @@ function normalizeEdgeMask(value, fallback = 0) {
 
 function normalizeCell(cell) {
   const source = cell && typeof cell === 'object' ? cell : {};
+  const event = String(source.event || '');
+  const stairs = ['up', 'down'].includes(source.stairs) ? source.stairs : '';
   return {
     walls: normalizeEdgeMask(source.walls, 15),
     doors: normalizeEdgeMask(source.doors, 0),
     one_way: normalizeEdgeMask(source.one_way || source.oneWay, 0),
     dark: Boolean(source.dark),
-    event: String(source.event || ''),
-    stairs: ['up', 'down'].includes(source.stairs) ? source.stairs : '',
+    event,
+    stairs,
+    /* 宝箱/階段セルとは排他: エネミーのスポーン地点は宝箱・階段セルには重ねられない */
+    enemy: Boolean(source.enemy) && !stairs && event !== 'chest',
   };
 }
 
@@ -180,6 +203,17 @@ function normalizeStart(start, width, height) {
     y: clampInt(start?.y, 0, height - 1, 1),
     dir: clampInt(start?.dir, 0, 3, 1),
   };
+}
+
+/*
+ * フロア単位の enemy_step_vblanks 上書き。0/未指定 = プロジェクト既定 (settings.enemy_step_vblanks)
+ * を継承する。1..4 のような ENEMY_STEP_VBLANKS_MIN 未満の非0値は「継承」と紛れないよう
+ * MIN (5) へ切り上げる (0 だけが特別な継承値であり、それ以外は通常の下限クランプを受ける)。
+ */
+function normalizeFloorEnemyStepVblanks(value) {
+  const parsed = Number.parseInt(String(value ?? 0), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.max(ENEMY_STEP_VBLANKS_MIN, Math.min(ENEMY_STEP_VBLANKS_MAX, parsed));
 }
 
 function normalizeFloor(floor = {}, fallbackOrder = 1, fallbackName = `Floor ${fallbackOrder}`) {
@@ -197,6 +231,7 @@ function normalizeFloor(floor = {}, fallbackOrder = 1, fallbackName = `Floor ${f
     height,
     start: normalizeStart(floor.start || {}, width, height),
     asset_set_id: String(floor.asset_set_id || floor.assetSetId || '').trim(),
+    enemy_step_vblanks: normalizeFloorEnemyStepVblanks(floor.enemy_step_vblanks),
     cells,
   };
   if (floor.assets && typeof floor.assets === 'object') {
@@ -254,6 +289,7 @@ function normalizeSettings(settings = {}) {
     animation_frames: animationFrames,
     turn_frames: clampInt(incoming.turn_frames, 2, 8, animationFrames),
     move_speed_vblanks: clampInt(incoming.move_speed_vblanks, 0, MOVE_SPEED_VBLANKS_MAX, DEFAULT_SETTINGS.move_speed_vblanks),
+    enemy_step_vblanks: clampInt(incoming.enemy_step_vblanks, ENEMY_STEP_VBLANKS_MIN, ENEMY_STEP_VBLANKS_MAX, DEFAULT_SETTINGS.enemy_step_vblanks),
     view_tile_width: DEFAULT_SETTINGS.view_tile_width,
     view_tile_height: DEFAULT_SETTINGS.view_tile_height,
     view_pixel_width: DEFAULT_SETTINGS.view_pixel_width,
@@ -358,6 +394,10 @@ function validateProjectState(floors, settings) {
   floors.forEach((floor) => {
     if (!ids.has(String(floor.asset_set_id || ''))) {
       throw new Error(`フロア「${floor.name || floor.id}」の素材セットが存在しません: ${floor.asset_set_id || '(未設定)'}`);
+    }
+    const enemyCount = (floor.cells || []).flat().filter((cell) => cell && cell.enemy).length;
+    if (enemyCount > core.DUN_MAX_ENEMIES) {
+      throw new Error(`フロア「${floor.name || floor.id}」のエネミーは${core.DUN_MAX_ENEMIES}体までです (${enemyCount}体)`);
     }
   });
   return true;
@@ -594,6 +634,19 @@ function makeGeneratedFloor(payload = {}) {
     if (x === floor.start.x && y === floor.start.y) continue;
     if (floor.cells[y][x].stairs) continue;
     floor.cells[y][x].dark = true;
+  }
+
+  /* エネミー: 1〜4体をランダム配置 (開始セル・宝箱・階段セルは避ける、上限 DUN_MAX_ENEMIES) */
+  const enemyBudget = Math.min(core.DUN_MAX_ENEMIES, 1 + Math.floor(Math.random() * 4));
+  let enemiesPlaced = 0;
+  for (let attempt = 0; enemiesPlaced < enemyBudget && attempt < enemyBudget * 20; attempt++) {
+    const x = Math.floor(Math.random() * width);
+    const y = Math.floor(Math.random() * height);
+    if (x === floor.start.x && y === floor.start.y) continue;
+    const cell = floor.cells[y][x];
+    if (cell.stairs || cell.event === 'chest' || cell.enemy) continue;
+    cell.enemy = true;
+    enemiesPlaced++;
   }
 
   return floor;
@@ -950,7 +1003,7 @@ function loadTexturesForRefs(projectDir, kinds, refs, options = {}) {
 }
 
 const SET_TEXTURE_KINDS = Object.freeze(['wall', 'door', 'floor', 'ceiling']);
-const COMMON_TEXTURE_KINDS = Object.freeze(['chest', 'stairs_up', 'stairs_down']);
+const COMMON_TEXTURE_KINDS = Object.freeze(['chest', 'stairs_up', 'stairs_down', 'enemy']);
 
 function loadSetTextures(projectDir, assetSet, options = {}) {
   return loadTexturesForRefs(projectDir, SET_TEXTURE_KINDS, assetSet?.assets || {}, options);
@@ -996,6 +1049,7 @@ function flagValue(cell) {
   if (cell.event === 'chest') flags |= CELL_FLAGS.chest;
   if (cell.stairs === 'up') flags |= CELL_FLAGS.stairs_up;
   if (cell.stairs === 'down') flags |= CELL_FLAGS.stairs_down;
+  if (cell.enemy) flags |= CELL_FLAGS.enemy;
   return flags;
 }
 
@@ -1003,7 +1057,7 @@ function cArray(values, indent = '    ') {
   return values.map((value, index) => `${index % 12 === 0 ? indent : ''}${value}${index === values.length - 1 ? '' : ','}`).join('\n');
 }
 
-function exportSource(projectDir, floors, setIndexById = new Map()) {
+function exportSource(projectDir, floors, setIndexById = new Map(), settings = DEFAULT_SETTINGS) {
   const outPath = path.join(projectDir, 'src', 'dungeon_data.c');
   const chunks = [
     '/* Generated by dungeon-game-editor */',
@@ -1028,7 +1082,9 @@ function exportSource(projectDir, floors, setIndexById = new Map()) {
     const startDir = clampInt(floor.start.dir, 0, 3, 1);
     const viewSet = setIndexById.get(floor.asset_set_id);
     if (!Number.isInteger(viewSet)) throw new Error(`unknown asset set for floor ${floor.name}: ${floor.asset_set_id}`);
-    chunks.push(`    { ${floor.width}, ${floor.height}, ${floor.start.x}, ${floor.start.y}, ${startDir}, ${viewSet}, dungeon_floor_${index + 1}_edges, dungeon_floor_${index + 1}_flags },`);
+    /* 0/未指定はプロジェクト既定 (settings.enemy_step_vblanks) を継承する */
+    const enemyStepVblanks = floor.enemy_step_vblanks || settings.enemy_step_vblanks;
+    chunks.push(`    { ${floor.width}, ${floor.height}, ${floor.start.x}, ${floor.start.y}, ${startDir}, ${viewSet}, ${enemyStepVblanks}, dungeon_floor_${index + 1}_edges, dungeon_floor_${index + 1}_flags },`);
   });
   chunks.push('};', '');
   ensureDir(path.dirname(outPath));
@@ -1109,6 +1165,7 @@ function buildBillboardExport(settings, commonTextures) {
     chest: core.renderBillboardSheet(commonTextures.chest, spritePalette),
     stairs_up: core.renderBillboardSheet(commonTextures.stairs_up, spritePalette),
     stairs_down: core.renderBillboardSheet(commonTextures.stairs_down, spritePalette),
+    enemy: core.renderEnemyBillboardSheet(commonTextures.enemy, spritePalette),
   };
   const billboards = core.buildBillboardTables(settings);
   return { spritePalette, sheets, billboards };
@@ -1173,6 +1230,8 @@ function updateGeneratedResources(projectDir, setExports = [], commonDescriptor)
       `SPRITE ${symbols.chest} "${paths.billboards.chest}" ${core.BB_FRAME_TILES} ${core.BB_FRAME_TILES} NONE 0`,
       `SPRITE ${symbols.stairsUp} "${paths.billboards.stairs_up}" ${core.BB_FRAME_TILES} ${core.BB_FRAME_TILES} NONE 0`,
       `SPRITE ${symbols.stairsDown} "${paths.billboards.stairs_down}" ${core.BB_FRAME_TILES} ${core.BB_FRAME_TILES} NONE 0`,
+      /* 384x384 (8方向×歩行行 x 8距離バケット列): rescomp が 6x6タイルのフレーム寸法から 8anim x 8frame を導出する */
+      `SPRITE ${symbols.enemy} "${paths.billboards.enemy}" ${core.BB_FRAME_TILES} ${core.BB_FRAME_TILES} NONE 0`,
     );
   }
   generatedLines.push(GENERATED_RESOURCE_END);
@@ -1228,6 +1287,7 @@ function generatedCommonDescriptor() {
       chest: `${prefix}_bb_chest`,
       stairsUp: `${prefix}_bb_stairs_up`,
       stairsDown: `${prefix}_bb_stairs_down`,
+      enemy: `${prefix}_bb_enemy`,
     },
     paths: {
       billboards: GENERATED_BB_SHEETS,
@@ -1317,6 +1377,13 @@ function exportPatternFiles(projectDir, setEntries, commonView, settings) {
     `#define DUN_TURN_ANIMATION_FRAMES ${settings.turn_frames}`,
     `#define DUN_ANIMATION_STEP_VBLANKS ${DUN_ANIMATION_STEP_VBLANKS}`,
     `#define DUN_MOVE_SPEED_VBLANKS_DEFAULT ${settings.move_speed_vblanks}`,
+    /*
+     * enemy_step_vblanks はフロア単位で上書き可能 (DungeonFloorData.enemy_step_vblanks,
+     * dungeon_data.c 側で 0=継承をこの値に解決して焼き込む)。main.c は実行時にこの define を
+     * 直接読まず、常にフロア構造体のフィールドを読む (フロア切替で即座にペースが変わるため)。
+     * この define はプロジェクト既定値のドキュメント用途のみ (bakeハッシュ非含有、常に最新値から生成)。
+     */
+    `#define DUN_ENEMY_STEP_VBLANKS_DEFAULT ${settings.enemy_step_vblanks}`,
     `#define DUN_FWD_FRAMES ${fwdCount}`,
     `#define DUN_TURN_FRAMES ${turnCount}`,
     `#define DUN_MOVE_EDGE_COUNT ${spaces.move.length}`,
@@ -1671,7 +1738,7 @@ function exportDungeonData(projectDir) {
   const usedSets = referencedAssetSets(floors, effective.settings);
   const setIndexById = new Map(usedSets.map((set, index) => [set.id, index]));
   const headerPath = exportHeader(projectDir, floors);
-  const sourcePath = exportSource(projectDir, floors, setIndexById);
+  const sourcePath = exportSource(projectDir, floors, setIndexById, effective.settings);
   const view = exportViewAssets(projectDir, floors, effective.settings);
   return {
     ok: true,

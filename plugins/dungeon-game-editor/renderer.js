@@ -25,6 +25,7 @@ const TOOLS = [
   { id: 'chest', label: '宝箱' },
   { id: 'stairs_up', label: '上階段' },
   { id: 'stairs_down', label: '下階段' },
+  { id: 'enemy', label: '敵' },
   { id: 'start', label: '開始' },
   { id: 'erase', label: '消去' },
 ];
@@ -36,6 +37,7 @@ const DEFAULT_ASSET_REFS = {
   chest_texture: 'dungeon/textures/dungeon_texture_atlas.png#chest',
   stairs_up_texture: 'dungeon/textures/dungeon_texture_atlas.png#stairs_up',
   stairs_down_texture: 'dungeon/textures/dungeon_texture_atlas.png#stairs_down',
+  enemy_texture: 'dungeon/textures/dungeon_texture_atlas.png#enemy',
 };
 const ASSET_META = Object.freeze({
   wall_texture: { label: '壁', kind: 'wall', fileName: 'wall', width: 96, height: 96, opaque: true },
@@ -45,11 +47,12 @@ const ASSET_META = Object.freeze({
   chest_texture: { label: '宝箱', kind: 'chest', fileName: 'chest', width: 48, height: 48, opaque: false },
   stairs_up_texture: { label: '上り階段', kind: 'stairs_up', fileName: 'stairs_up', width: 48, height: 48, opaque: false },
   stairs_down_texture: { label: '下り階段', kind: 'stairs_down', fileName: 'stairs_down', width: 48, height: 48, opaque: false },
+  enemy_texture: { label: '敵', kind: 'enemy', fileName: 'enemy', width: 192, height: 96, opaque: false },
 });
 const ASSET_KEYS = Object.freeze(Object.keys(ASSET_META));
-/* 壁焼き込み4要素は素材セット単位、宝箱/階段3要素はプロジェクト共通 (settings.common_assets) */
+/* 壁焼き込み4要素は素材セット単位、宝箱/階段/敵4要素はプロジェクト共通 (settings.common_assets) */
 const SET_ASSET_KEYS = Object.freeze(['wall_texture', 'door_texture', 'floor_texture', 'ceiling_texture']);
-const COMMON_ASSET_KEYS = Object.freeze(['chest_texture', 'stairs_up_texture', 'stairs_down_texture']);
+const COMMON_ASSET_KEYS = Object.freeze(['chest_texture', 'stairs_up_texture', 'stairs_down_texture', 'enemy_texture']);
 const COMMON_CARD_SENTINEL = '__common__';
 const MAX_ASSET_SETS = 255;
 const VIEW_W = 200;
@@ -58,6 +61,14 @@ const ANIMATION_FRAMES_MIN = 2;
 const ANIMATION_FRAMES_MAX = 8;
 /* dungeon-service.js の MOVE_SPEED_VBLANKS_MAX と揃える */
 const MOVE_SPEED_VBLANKS_MAX = 60;
+/* dungeon-service.js の ENEMY_STEP_VBLANKS_MIN/MAX と揃える */
+const ENEMY_STEP_VBLANKS_MIN = 5;
+const ENEMY_STEP_VBLANKS_MAX = 240;
+const ENEMY_MAX_PER_FLOOR = 8;
+/* エネミーAIの実時間ティック駆動 (main.c の vblank タイマー相当)。50ms周期でポーリングし、
+ * 経過時間が enemy_step_vblanks*VBLANK_MS 以上になったら1tick進める。 */
+const ENEMY_TICK_POLL_MS = 50;
+const MINIMAP_ENEMY_COLOR = '#ff5f5f';
 /* 実機の必須DMA転送 = DUN_ANIMATION_STEP_VBLANKS(2) vblank (dungeon_view.c flushFrame と同じ値)。
  * 1 vblank ≒ 16.67ms (NTSC 60Hz)。実際のプレビュー間隔は settings.move_speed_vblanks
  * (エディタで設定する起動時デフォルトのペーシング) を加えて frameStepMs() で求める。 */
@@ -83,6 +94,14 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     visitedByFloor: new Map(),
     /* ミニマップ表示モード: 'visited' (自分が歩いた場所のみ, 既定) / 'full' (全体表示) */
     minimapMode: 'visited',
+    /* エネミーのシミュ状態: floorId -> [{x,y,dir,mode,anim,chaseTimer,active}, ...]。
+     * visitedByFloor と同じリセット規則 (handleMapClick / resizeFloor は該当フロアのみ、
+     * refresh / restoreCommittedState は全リセット)。RNG はセッション単位 (実機の
+     * enemy_rng_state と同じくフロア非依存の単一系列) で、全リセット時のみ再シードする。 */
+    enemiesByFloor: new Map(),
+    enemyRng: null,
+    enemyLastTick: 0,
+    enemyIntervalId: null,
     textureCache: new Map(),
     textureCacheEpoch: 0,
     textures: null,
@@ -126,6 +145,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
               <label class="dge-field">幅<input class="dge-width" type="number" min="4" max="20"></label>
               <label class="dge-field">高さ<input class="dge-height" type="number" min="4" max="20"></label>
             </div>
+            <label class="dge-field">エネミー移動間隔 (このフロア)
+              <input class="dge-enemy-step" type="number" min="0" max="240" step="1" placeholder="0">
+              <small class="dge-enemy-step-hint"></small>
+            </label>
             <button class="dge-wide" data-action="generate">ランダム自動生成</button>
             <div class="dge-tool-title">配置</div>
             <div class="dge-tools"></div>
@@ -182,6 +205,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     name: root.querySelector('.dge-floor-name'),
     width: root.querySelector('.dge-width'),
     height: root.querySelector('.dge-height'),
+    enemyStep: root.querySelector('.dge-enemy-step'),
+    enemyStepHint: root.querySelector('.dge-enemy-step-hint'),
     tools: root.querySelector('.dge-tools'),
     map: root.querySelector('.dge-map'),
     view: root.querySelector('.dge-view'),
@@ -203,7 +228,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   minimapCtx.imageSmoothingEnabled = false;
 
   function blankCell(walls = 15) {
-    return { walls, doors: 0, one_way: 0, dark: false, event: '', stairs: '' };
+    return { walls, doors: 0, one_way: 0, dark: false, event: '', stairs: '', enemy: false };
   }
 
   function blankFloor(order = 1) {
@@ -217,6 +242,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       height,
       start: { x: 1, y: 1, dir: 1 },
       asset_set_id: firstAssetSet()?.id || '',
+      enemy_step_vblanks: 0,
       cells: Array.from({ length: height }, () => Array.from({ length: width }, () => blankCell(15))),
     };
   }
@@ -285,6 +311,83 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (mode === 'full') return true;
     if (isPreviewVisited(floorId, x, y)) return true;
     return hasNeighbor && isPreviewVisited(floorId, nx, ny);
+  }
+
+  /* ------------------------------------------------------------------
+   * エネミーAIプレビュー・シミュレーション — 実機 (main.c) の dun_enemies /
+   * stepEnemies / vblank タイマー tick を core.stepEnemies 経由で再現する。
+   * visitedByFloor と同じ Map<floorId, [...]> パターンでフロア切替をまたいで
+   * 生存状態を保持する (実機のフロア別RAM永続パターンに対応)。
+   * ------------------------------------------------------------------ */
+
+  function getEnemiesForFloor(floor) {
+    if (!floor) return [];
+    let list = state.enemiesByFloor.get(floor.id);
+    if (!list) {
+      list = core.enemySpawns(floor).map((spawn) => ({
+        x: spawn.x,
+        y: spawn.y,
+        dir: 0,
+        mode: 0,
+        anim: 0,
+        chaseTimer: 0,
+        active: true,
+      }));
+      state.enemiesByFloor.set(floor.id, list);
+    }
+    return list;
+  }
+
+  function resetEnemiesForFloor(floorId) {
+    state.enemiesByFloor.delete(floorId || '');
+  }
+
+  function resetAllEnemies() {
+    state.enemiesByFloor.clear();
+    state.enemyRng = null;
+  }
+
+  /*
+   * 実機の floor->enemy_step_vblanks 相当: 現在フロアの上書き値があればそれを、
+   * 0/未設定ならプロジェクト既定 (settings.enemy_step_vblanks) を使う。
+   * フロア切替 (階段移動・フロア選択) で歩速が変わる実機の挙動とプレビューを一致させる。
+   */
+  function enemyTickIntervalMs() {
+    const raw = Number(state.current?.enemy_step_vblanks) || Number(state.settings?.enemy_step_vblanks) || 90;
+    const vblanks = Math.max(ENEMY_STEP_VBLANKS_MIN, Math.min(ENEMY_STEP_VBLANKS_MAX, raw));
+    return vblanks * VBLANK_MS;
+  }
+
+  function startEnemyLoop() {
+    stopEnemyLoop();
+    state.enemyLastTick = performance.now();
+    state.enemyIntervalId = setInterval(tickEnemyLoop, ENEMY_TICK_POLL_MS);
+  }
+
+  function stopEnemyLoop() {
+    if (state.enemyIntervalId != null) clearInterval(state.enemyIntervalId);
+    state.enemyIntervalId = null;
+  }
+
+  /*
+   * setInterval(50ms) + 経過時間ゲート: 実機の vblank タイマー駆動と同じ「間隔が
+   * 経過したら1tick進める」パターンを実時間で近似する。プレイヤーが移動アニメ中
+   * (state.animation) はエネミーも静止する (実機のブロッキングアニメ中と同じ仕様)。
+   */
+  function tickEnemyLoop() {
+    if (!root.classList.contains('active')) return;
+    const floor = state.current;
+    if (!floor || state.animation) return;
+    const now = performance.now();
+    if (now - state.enemyLastTick < enemyTickIntervalMs()) return;
+    state.enemyLastTick = now;
+    const enemies = getEnemiesForFloor(floor);
+    if (!enemies.length) return;
+    if (!state.enemyRng) state.enemyRng = core.makeEnemyRng(core.ENEMY_RNG_DEFAULT_SEED);
+    const player = { x: state.preview.x, y: state.preview.y, dir: state.preview.dir };
+    const contacts = core.stepEnemies(floor, enemies, player, state.enemyRng);
+    if (contacts.length) setStatus(`エネミーが接触しました (${contacts.length}体)`);
+    renderPreview();
   }
 
   function setDirty(value) {
@@ -377,11 +480,20 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     };
   }
 
+  /* 「0 = 設定タブの既定値 (現在 N)」ヒント: プロジェクト既定値 (settings.enemy_step_vblanks) を表示する */
+  function updateEnemyStepHint() {
+    if (!ui.enemyStepHint) return;
+    const projectDefault = Math.max(ENEMY_STEP_VBLANKS_MIN, Math.min(ENEMY_STEP_VBLANKS_MAX, Number(state.settings?.enemy_step_vblanks) || 90));
+    ui.enemyStepHint.textContent = `0 = 設定タブの既定値 (現在 ${projectDefault})`;
+  }
+
   function syncForm() {
     if (!state.current) return;
     ui.name.value = state.current.name || '';
     ui.width.value = state.current.width;
     ui.height.value = state.current.height;
+    ui.enemyStep.value = state.current.enemy_step_vblanks || 0;
+    updateEnemyStepHint();
     renderFloorAssetSetSelect();
     if (!state.assetEditorSetId) state.assetEditorSetId = state.current.asset_set_id || firstAssetSet()?.id || '';
     state.preview = { ...state.current.start };
@@ -395,6 +507,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (!state.current) return;
     state.current.name = ui.name.value || state.current.name;
     resizeFloor(Number(ui.width.value), Number(ui.height.value));
+    const rawEnemyStep = Number.parseInt(ui.enemyStep.value, 10);
+    state.current.enemy_step_vblanks = Number.isFinite(rawEnemyStep) && rawEnemyStep > 0
+      ? Math.max(ENEMY_STEP_VBLANKS_MIN, Math.min(ENEMY_STEP_VBLANKS_MAX, rawEnemyStep))
+      : 0;
   }
 
   function resizeFloor(width, height) {
@@ -402,8 +518,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const nextW = Math.max(4, Math.min(MAX_SIZE, Number(width || state.current.width)));
     const nextH = Math.max(4, Math.min(MAX_SIZE, Number(height || state.current.height)));
     if (nextW === state.current.width && nextH === state.current.height) return;
-    /* セル配列そのものが作り直されるため、踏破済み記録は無効になる */
+    /* セル配列そのものが作り直されるため、踏破済み記録・エネミーのシミュ状態は無効になる */
     resetVisitedForFloor(state.current.id);
+    resetEnemiesForFloor(state.current.id);
     const old = state.current.cells;
     state.current.cells = Array.from({ length: nextH }, (_, y) => (
       Array.from({ length: nextW }, (_, x) => old[y]?.[x] ? { ...old[y][x] } : blankCell(15))
@@ -458,6 +575,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         if (cell.event === 'chest') drawMapText('宝', px, py, size, '#f3b44b');
         if (cell.stairs === 'up') drawMapText('↑', px, py, size, '#9fd3ff');
         if (cell.stairs === 'down') drawMapText('↓', px, py, size, '#c7a0ff');
+        if (cell.enemy) drawMapText('敵', px, py, size, MINIMAP_ENEMY_COLOR);
       }
     }
     drawEdges(floor, ox, oy, size, 'walls', '#d7c8a0', 4);
@@ -550,6 +668,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         chest: core.renderBillboardSheet(textures.chest, spritePalette),
         stairs_up: core.renderBillboardSheet(textures.stairs_up, spritePalette),
         stairs_down: core.renderBillboardSheet(textures.stairs_down, spritePalette),
+        enemy: core.renderEnemyBillboardSheet(textures.enemy, spritePalette),
       },
       billboards: core.buildBillboardTables(settings),
     };
@@ -685,26 +804,40 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     return out;
   }
 
-  /* ビルボード: 実機のスプライト描画と同じテーブル・同じ LOS ルールで合成する */
+  /*
+   * ビルボード: 実機のスプライト描画と同じテーブル・同じ LOS ルールで合成する。
+   * エネミーの実位置検索 (enemies配列) をセルのフラグ (宝箱/階段) 参照より先に行う
+   * (実機 updateBillboards の enemyAt() 優先ルールと同じ)。
+   */
   function drawBillboardsInto(rgba, model, frame, floor) {
     const cells = model.billboards.cells;
     const size = core.BB_FRAME_SIZE;
+    const enemies = state.enemiesByFloor.get(floor.id) || [];
+    const dir = frame.base.dir & 3;
     for (let i = 0; i < cells.length; i++) {
       const pose = frame.bbPoses[i];
       if (!pose || pose.frame < 0) continue;
       let dd = cells[i].dd;
       let dl = cells[i].dl;
       if (frame.mirrored) dl = -dl;
-      const dir = frame.base.dir & 3;
       const right = (dir + 1) & 3;
       const ax = frame.base.x + dd * DIRS[dir].dx + dl * DIRS[right].dx;
       const ay = frame.base.y + dd * DIRS[dir].dy + dl * DIRS[right].dy;
-      const cell = (ax >= 0 && ay >= 0 && ax < floor.width && ay < floor.height) ? floor.cells[ay][ax] : null;
-      if (!cell) continue;
+      if (ax < 0 || ay < 0 || ax >= floor.width || ay >= floor.height) continue;
+      const enemy = core.enemyAt(enemies, ax, ay);
       let sheet = null;
-      if (cell.event === 'chest') sheet = model.sheets.chest;
-      else if (cell.stairs === 'up') sheet = model.sheets.stairs_up;
-      else if (cell.stairs === 'down') sheet = model.sheets.stairs_down;
+      let rowOffset = 0;
+      if (enemy) {
+        sheet = model.sheets.enemy;
+        let rel = ((enemy.dir - dir) + 4) & 3;
+        if (frame.mirrored) rel = (4 - rel) & 3;
+        rowOffset = ((rel * 2) + (enemy.anim & 1)) * size;
+      } else {
+        const cell = floor.cells[ay][ax];
+        if (cell.event === 'chest') sheet = model.sheets.chest;
+        else if (cell.stairs === 'up') sheet = model.sheets.stairs_up;
+        else if (cell.stairs === 'down') sheet = model.sheets.stairs_down;
+      }
       if (!sheet) continue;
       if (!core.losVisible(floor, frame.base.x, frame.base.y, dir, dd, dl)) continue;
       const sx0 = frame.mirrored ? (VIEW_W - pose.x - size) : pose.x;
@@ -712,10 +845,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       for (let y = 0; y < size; y++) {
         const dy = pose.y + y;
         if (dy < 0 || dy >= VIEW_H) continue;
+        const sourceRow = rowOffset + y;
         for (let x = 0; x < size; x++) {
           const dx = sx0 + x;
           if (dx < 0 || dx >= VIEW_W) continue;
-          const paletteIndex = sheet.pixels[(y * sheet.width) + frameOffset + x];
+          const paletteIndex = sheet.pixels[(sourceRow * sheet.width) + frameOffset + x];
           if (!paletteIndex) continue;
           const color = model.spritePalette[paletteIndex];
           const dest = ((dy * VIEW_W) + dx) * 4;
@@ -773,6 +907,12 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     }
     drawMiniEdges(ctx, floor, ox, oy, size, 'walls', '#d7c8a0', 2);
     drawMiniEdges(ctx, floor, ox, oy, size, 'doors', '#d98a42', 2);
+    /* エネミー: 踏破済みセル上のみ描画 (FULL時は常時) — 実機ミニマップと同じルール */
+    (state.enemiesByFloor.get(floorId) || []).forEach((enemy) => {
+      if (!enemy.active) return;
+      if (!shouldDrawMinimapCell(mode, floorId, enemy.x, enemy.y)) return;
+      drawMiniDot(ctx, ox, oy, size, enemy.x, enemy.y, MINIMAP_ENEMY_COLOR);
+    });
     const px = ox + pose.x * size;
     const py = oy + pose.y * size;
     const angle = pose.angle;
@@ -1096,6 +1236,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const animationFrames = Math.max(ANIMATION_FRAMES_MIN, Math.min(ANIMATION_FRAMES_MAX, Number(settings.animation_frames) || ANIMATION_FRAMES_MAX));
     const turnFrames = Math.max(ANIMATION_FRAMES_MIN, Math.min(ANIMATION_FRAMES_MAX, Number(settings.turn_frames) || animationFrames));
     const moveSpeed = Math.max(0, Math.min(MOVE_SPEED_VBLANKS_MAX, Number(settings.move_speed_vblanks) || 0));
+    const enemyStep = Math.max(ENEMY_STEP_VBLANKS_MIN, Math.min(ENEMY_STEP_VBLANKS_MAX, Number(settings.enemy_step_vblanks) || 90));
     ui.settings.innerHTML = `
       <div class="dge-settings-form">
         <h2>ダンジョン設定</h2>
@@ -1105,6 +1246,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
           値が大きいほど1マスの移動がゆっくりになり、0で最速 (追加待ちなし) になります。
           ここで設定するのは起動時の既定値で、ゲーム内のパワーアップ演出などから DUN_setMoveSpeed() を
           呼ぶことで実行中に変更できます (このプレビューは既定値のみを反映します)。
+          エネミー移動間隔は徘徊/追跡の1手ごとに待つvblank数です (焼き込みには影響せず、保存のたびに
+          再ベイクなしで反映されます)。
         </p>
         <label class="dge-field">前進/後退アニメーションフレーム数 (${ANIMATION_FRAMES_MIN}〜${ANIMATION_FRAMES_MAX})
           <input type="number" min="${ANIMATION_FRAMES_MIN}" max="${ANIMATION_FRAMES_MAX}" step="1" data-settings-field="animation_frames" value="${animationFrames}">
@@ -1114,6 +1257,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         </label>
         <label class="dge-field">移動速度: 追加待ちvblank数 (0〜${MOVE_SPEED_VBLANKS_MAX}, 0=最速)
           <input type="number" min="0" max="${MOVE_SPEED_VBLANKS_MAX}" step="1" data-settings-field="move_speed_vblanks" value="${moveSpeed}">
+        </label>
+        <label class="dge-field">エネミー移動間隔: vblank数 (${ENEMY_STEP_VBLANKS_MIN}〜${ENEMY_STEP_VBLANKS_MAX}, 既定90≒1.5秒)
+          <input type="number" min="${ENEMY_STEP_VBLANKS_MIN}" max="${ENEMY_STEP_VBLANKS_MAX}" step="1" data-settings-field="enemy_step_vblanks" value="${enemyStep}">
         </label>
         <button type="button" class="dge-wide" data-action="settings-save">設定を保存</button>
       </div>
@@ -1125,10 +1271,17 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const animInput = ui.settings.querySelector('[data-settings-field="animation_frames"]');
     const turnInput = ui.settings.querySelector('[data-settings-field="turn_frames"]');
     const speedInput = ui.settings.querySelector('[data-settings-field="move_speed_vblanks"]');
+    const enemyStepInput = ui.settings.querySelector('[data-settings-field="enemy_step_vblanks"]');
     const animationFrames = Math.max(ANIMATION_FRAMES_MIN, Math.min(ANIMATION_FRAMES_MAX, Number(animInput?.value) || ANIMATION_FRAMES_MAX));
     const turnFrames = Math.max(ANIMATION_FRAMES_MIN, Math.min(ANIMATION_FRAMES_MAX, Number(turnInput?.value) || animationFrames));
     const moveSpeed = Math.max(0, Math.min(MOVE_SPEED_VBLANKS_MAX, Number(speedInput?.value) || 0));
-    return { animation_frames: animationFrames, turn_frames: turnFrames, move_speed_vblanks: moveSpeed };
+    const enemyStep = Math.max(ENEMY_STEP_VBLANKS_MIN, Math.min(ENEMY_STEP_VBLANKS_MAX, Number(enemyStepInput?.value) || 90));
+    return {
+      animation_frames: animationFrames,
+      turn_frames: turnFrames,
+      move_speed_vblanks: moveSpeed,
+      enemy_step_vblanks: enemyStep,
+    };
   }
 
   async function saveSettingsForm() {
@@ -1151,6 +1304,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     setStatus('設定を保存しました');
     renderSettings();
     renderPreview();
+    updateEnemyStepHint();
   }
 
   function renderAssetCard(set, key) {
@@ -1750,14 +1904,36 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     }
     if (state.tool === 'one_way') toggleEdge(x, y, edge, 'one_way');
     if (state.tool === 'dark') cell.dark = !cell.dark;
-    if (state.tool === 'chest') cell.event = cell.event === 'chest' ? '' : 'chest';
-    if (state.tool === 'stairs_up') cell.stairs = cell.stairs === 'up' ? '' : 'up';
-    if (state.tool === 'stairs_down') cell.stairs = cell.stairs === 'down' ? '' : 'down';
+    if (state.tool === 'chest') {
+      cell.event = cell.event === 'chest' ? '' : 'chest';
+      /* 宝箱/階段セルとはエネミーのスポーンが排他 (normalizeCell と同じ規則) */
+      if (cell.event === 'chest') cell.enemy = false;
+    }
+    if (state.tool === 'stairs_up') {
+      cell.stairs = cell.stairs === 'up' ? '' : 'up';
+      if (cell.stairs) cell.enemy = false;
+    }
+    if (state.tool === 'stairs_down') {
+      cell.stairs = cell.stairs === 'down' ? '' : 'down';
+      if (cell.stairs) cell.enemy = false;
+    }
+    if (state.tool === 'enemy') {
+      if (cell.enemy) {
+        cell.enemy = false;
+      } else if (cell.event === 'chest' || cell.stairs) {
+        setStatus('宝箱・階段のセルにはエネミーを配置できません');
+      } else {
+        const count = floor.cells.flat().filter((c) => c.enemy).length;
+        if (count >= ENEMY_MAX_PER_FLOOR) setStatus(`エネミーは1フロアにつき${ENEMY_MAX_PER_FLOOR}体までです`);
+        else cell.enemy = true;
+      }
+    }
     if (state.tool === 'start') state.current.start = { x, y, dir: DIR_INDEX[edge] ?? 1 };
     if (state.tool === 'erase') Object.assign(cell, blankCell(0));
-    /* マップを編集したフロアの踏破済み記録は無効になる。プレビュー位置は
+    /* マップを編集したフロアの踏破済み記録・エネミーのシミュ状態は無効になる。プレビュー位置は
      * 従来どおり開始セルへ戻るので、そのセルだけを歩き直しとして記録する */
     resetVisitedForFloor(floor.id);
+    resetEnemiesForFloor(floor.id);
     state.preview = { ...state.current.start };
     markPreviewVisited(state.current, state.preview.x, state.preview.y);
     ui.cellInfo.textContent = `X:${x} Y:${y} edge:${edge}`;
@@ -1769,12 +1945,20 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
    * プレビュー移動 (実機と同じ離散フレーム再生)
    * ------------------------------------------------------------------ */
 
+  /*
+   * core.canTraverse 経由 (プレイヤーと同じ壁/一方通行ルール) + エネミー占有ブロックの合成。
+   * 旧実装は one_way を一切見ていなかった (実機の canMove は見ている) — この修正で
+   * プレビューと実機の一方通行挙動が一致するようになる (意図した挙動変更)。
+   */
   function canPreviewMove(dirIndex) {
+    const floor = state.current;
+    if (!floor) return false;
+    if (!core.canTraverse(floor, state.preview.x, state.preview.y, dirIndex)) return false;
     const dir = DIRS[dirIndex];
-    const cell = cellAt(state.preview.x, state.preview.y);
-    if (!cell || (cell.walls & dir.bit)) return false;
-    const target = cellAt(state.preview.x + dir.dx, state.preview.y + dir.dy);
-    return Boolean(target);
+    const nx = state.preview.x + dir.dx;
+    const ny = state.preview.y + dir.dy;
+    const enemies = state.enemiesByFloor.get(floor.id) || [];
+    return !enemies.some((enemy) => enemy.active && enemy.x === nx && enemy.y === ny);
   }
 
   /* 階段遷移: 前のフロアの下り階段 / 次のフロアの上り階段の位置そのものへ */
@@ -1802,6 +1986,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     ui.name.value = target.name || '';
     ui.width.value = target.width;
     ui.height.value = target.height;
+    ui.enemyStep.value = target.enemy_step_vblanks || 0;
+    updateEnemyStepHint();
     setStatus(`${target.name || target.id} へ移動しました`);
     renderAll();
     void loadTexturesForCurrent();
@@ -1901,6 +2087,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       : (state.current.asset_set_id || firstAssetSet()?.id || '');
     /* 未保存の変更を破棄してコミット済みデータへ巻き戻す = データの再読込と同義 */
     resetAllVisited();
+    resetAllEnemies();
     clearTextureCache();
     state.textures = null;
     state.assetTextures = null;
@@ -1974,6 +2161,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     state.floors = (result.floors || []).map(normalizeFloorForUi);
     /* フロアデータをディスクから再読込した = 新しいプレビューセッションとして扱う */
     resetAllVisited();
+    resetAllEnemies();
     state.current = state.floors.find((floor) => floor.id === previousFloorId) || state.floors[0] || blankFloor(1);
     state.assetEditorSetId = assetSetById(state.current.asset_set_id)
       ? state.current.asset_set_id
@@ -2169,7 +2357,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     renderAll();
     void Promise.all([loadTexturesForCurrent(), loadTexturesForAssetEditor()]);
   });
-  [ui.name, ui.width, ui.height].forEach((input) => input.addEventListener('input', () => {
+  [ui.name, ui.width, ui.height, ui.enemyStep].forEach((input) => input.addEventListener('input', () => {
     readFormIntoCurrent();
     setDirty(true);
     renderAll();
@@ -2184,12 +2372,14 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 
   registerCapability('dungeon-game-editor', { root, refresh: () => refresh({ guard: true }) });
   observePageActivation();
+  startEnemyLoop();
   void refresh({ guard: false });
 
   return {
     deactivate() {
       cancelAnimationFrame(state.animationFrame);
       state.activationObserver?.disconnect?.();
+      stopEnemyLoop();
     },
   };
 }

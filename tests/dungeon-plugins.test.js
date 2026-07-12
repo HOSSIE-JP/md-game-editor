@@ -70,7 +70,7 @@ test('dungeon plugins declare MD editor and builder capabilities', () => {
   assert.equal(editor.hasRenderer, true);
   assert.equal(editor.renderer.page, 'dungeon-game-editor');
   assert.deepEqual(editor.renderer.capabilities, ['page', 'dungeon-game-editor']);
-  assert.equal(editor.version, '1.1.0');
+  assert.equal(editor.version, '1.2.0');
   assert.ok(editor.permissions.includes('dialog.openFile'));
   assert.ok(editor.dependencies.includes('asset-manager'));
   assert.ok(editor.dependencies.includes('image-resize-converter'));
@@ -199,13 +199,34 @@ test('dungeon render core is UMD and keeps compose == direct render', () => {
   const pool = core.makeTilePool();
   const frames = core.buildFrames(settings);
 
-  /* 足元 (dd=0, dl=0) のビルボードは常に最至近バケットへ固定表示され、pose に依存しない */
+  /*
+   * 足元 (dd=0, dl=0) のビルボードは static/turn ポーズ (プレイヤーがそのセルに留まっている
+   * 間) では常に最至近バケットへ固定表示される (allowUnderfoot=true)。一方 fwd ポーズ
+   * (前進/後退アニメーションの中間フレーム) では allowUnderfoot=false を渡し、セルを離れた
+   * 瞬間にカリングされる (frame=-1) — 移動アニメーション中ずっと表示され続けて
+   * 「スプライトが追いかけてくる」ように見える不具合の修正。
+   */
   assert.ok(core.buildBillboardCells().some((cell) => cell.dd === 0 && cell.dl === 0));
-  const underfoot = core.billboardPose(frames.staticPose, { dd: 0, dl: 0 });
+  const underfoot = core.billboardPose(frames.staticPose, { dd: 0, dl: 0 }, true);
   assert.equal(underfoot.frame, 0);
   assert.equal(underfoot.x, Math.round(core.VIEW_W / 2) - (core.BB_FRAME_SIZE / 2));
   assert.ok(underfoot.y > 0 && underfoot.y + core.BB_FRAME_SIZE < core.VIEW_H);
-  assert.deepEqual(underfoot, core.billboardPose(frames.fwdPoses[0], { dd: 0, dl: 0 }));
+  assert.deepEqual(underfoot, core.billboardPose(frames.turnPoses[0], { dd: 0, dl: 0 }, true));
+  const underfootFwd = core.billboardPose(frames.fwdPoses[0], { dd: 0, dl: 0 }, false);
+  assert.deepEqual(underfootFwd, { x: 0, y: 0, frame: -1 });
+  assert.notDeepEqual(underfootFwd, underfoot);
+
+  /*
+   * buildBillboardTables (実際に共通ベイク/JSプレビューが読む経路) でも同じ挙動になることを
+   * 確認する belt-and-braces チェック: dun_bb_static/dun_bb_turn は (0,0) セルで frame=0 の
+   * ままだが、dun_bb_fwd の全フレームで (0,0) セルは frame=-1 にカリングされる。
+   */
+  const billboardTables = core.buildBillboardTables(settings);
+  const underfootCellIndex = billboardTables.cells.findIndex((cell) => cell.dd === 0 && cell.dl === 0);
+  assert.ok(underfootCellIndex >= 0);
+  assert.equal(billboardTables.staticPoses[underfootCellIndex].frame, 0);
+  billboardTables.turnPoses.forEach((poses) => assert.equal(poses[underfootCellIndex].frame, 0));
+  billboardTables.fwdPoses.forEach((poses) => assert.equal(poses[underfootCellIndex].frame, -1));
 
   const service = require('../plugins/dungeon-game-editor/dungeon-service');
   const floor = service.makeGeneratedFloor({ width: 10, height: 10 });
@@ -518,8 +539,9 @@ test('dungeon asset sets migrate legacy floors and export per-set resources with
   assert.equal((resources.match(/SPRITE dun_common_bb_chest /g) || []).length, 1);
   assert.equal((resources.match(/PALETTE dun_common_bb_palette /g) || []).length, 1);
   const dataSource = fs.readFileSync(path.join(projectDir, 'src', 'dungeon_data.c'), 'utf-8');
-  assert.match(dataSource, /\{ 8, 8, \d+, \d+, \d+, 0, dungeon_floor_1_edges/);
-  assert.match(dataSource, /\{ 8, 8, \d+, \d+, \d+, 1, dungeon_floor_2_edges/);
+  /* 末尾から2番目の数値がフロア構造体の enemy_step_vblanks (両フロアともプロジェクト既定90を継承) */
+  assert.match(dataSource, /\{ 8, 8, \d+, \d+, \d+, 0, 90, dungeon_floor_1_edges/);
+  assert.match(dataSource, /\{ 8, 8, \d+, \d+, \d+, 1, 90, dungeon_floor_2_edges/);
 
   const cached = plugin.exportDungeonData({}, { projectDir, logger: logger() });
   assert.equal(cached.cached, true);
@@ -913,4 +935,437 @@ test('dungeon template starts with valid settings and plugin roles', () => {
   assert.match(settings.common_assets.stairs_up_texture, /#stairs_up$/);
   assert.match(settings.common_assets.stairs_down_texture, /#stairs_down$/);
   assert.equal(fs.existsSync(path.join(templateDir, 'res', 'dungeon', 'textures', 'dungeon_texture_atlas.png')), true);
+});
+
+/* ==================================================================
+ * ダンジョンエネミー: AI (render-core.js) / 焼き込み / 設定 / Cソース / renderer
+ * ================================================================== */
+
+function blankEnemyTestCell() {
+  return { walls: 0, doors: 0, one_way: 0, dark: false, event: '', stairs: '', enemy: false };
+}
+
+function makeEnemyTestFloor(width, height) {
+  return {
+    width,
+    height,
+    cells: Array.from({ length: height }, () => Array.from({ length: width }, blankEnemyTestCell)),
+  };
+}
+
+test('dungeon enemy AI: xorshift16 RNG anchor sequence (seed 0x2025) for cross-checking the C port', () => {
+  const core = require('../plugins/dungeon-game-editor/render-core.js');
+  const rng = core.makeEnemyRng(0x2025);
+  const seq = [];
+  for (let i = 0; i < 5; i++) seq.push(core.enemyRngNext(rng));
+  /*
+   * このアンカー系列は main.c の enemyRngNext (同一 shift 定数 7,9,8、u16 暗黙切り詰め) と
+   * 一致するはずの参照値。C側を変更した場合はこの値を実機/エミュレータ側で同様に出力させ、
+   * 一致することを確認すること (losVisible と同じ二重実装の照合パターン)。
+   */
+  assert.deepEqual(seq, [0x8ebc, 0x04d4, 0x8de3, 0x215d, 0x159a]);
+  assert.equal(core.ENEMY_RNG_DEFAULT_SEED, 0x2025);
+  assert.equal(core.DUN_MAX_ENEMIES, 8);
+  assert.equal(core.ENEMY_SIGHT_RANGE, 3);
+  assert.equal(core.ENEMY_CHASE_TIMER, 5);
+  assert.equal(core.ENEMY_WANDER_FORWARD_PERCENT, 75);
+});
+
+test('dungeon enemy AI: canTraverse/enemySpawns/enemyBlockedCell/enemyAt/enemyCanMove/enemySeesPlayer', () => {
+  const core = require('../plugins/dungeon-game-editor/render-core.js');
+
+  /* canTraverse: 壁は遮る、扉は通行可 */
+  const wallFloor = makeEnemyTestFloor(4, 4);
+  wallFloor.cells[1][1].walls |= 2; /* east wall at (1,1) */
+  assert.equal(core.canTraverse(wallFloor, 1, 1, 1), false);
+  wallFloor.cells[1][1].walls = 0;
+  wallFloor.cells[1][1].doors |= 2;
+  assert.equal(core.canTraverse(wallFloor, 1, 1, 1), true);
+
+  /* canTraverse: one_way は現在セル・移動先セル両方のルールを尊重する */
+  const owFloor = makeEnemyTestFloor(4, 4);
+  owFloor.cells[1][1].one_way |= 2; /* (1,1) は東方向のみ退出可 */
+  assert.equal(core.canTraverse(owFloor, 1, 1, 1), true);
+  assert.equal(core.canTraverse(owFloor, 1, 1, 0), false);
+  assert.equal(core.canTraverse(owFloor, 1, 1, 2), false);
+  const owFloor2 = makeEnemyTestFloor(4, 4);
+  owFloor2.cells[1][2].one_way |= 8; /* (2,1) は西方向のみ (=東からの進入のみ許可) */
+  assert.equal(core.canTraverse(owFloor2, 1, 1, 1), true, '進入方向が one_way と一致すれば許可');
+  const owFloor3 = makeEnemyTestFloor(4, 4);
+  owFloor3.cells[1][2].one_way |= 2; /* (2,1) は東方向のみ (=西からの進入は不可) */
+  assert.equal(core.canTraverse(owFloor3, 1, 1, 1), false, '進入方向が one_way と不一致なら拒否');
+
+  /* enemySpawns: cell.enemy===true のセルを走査順で、DUN_MAX_ENEMIES件を上限に返す */
+  const spawnFloor = makeEnemyTestFloor(3, 3);
+  spawnFloor.cells[0][2].enemy = true;
+  spawnFloor.cells[2][0].enemy = true;
+  spawnFloor.cells[1][1].enemy = true;
+  const spawns = core.enemySpawns(spawnFloor);
+  assert.deepEqual(spawns, [{ x: 2, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 2 }]);
+  const fullFloor = makeEnemyTestFloor(4, 4);
+  fullFloor.cells.flat().forEach((cell) => { cell.enemy = true; });
+  assert.equal(core.enemySpawns(fullFloor).length, core.DUN_MAX_ENEMIES);
+
+  /* enemyBlockedCell: プレイヤー・宝箱・階段・他のアクティブなエネミーで占有 */
+  const occFloor = makeEnemyTestFloor(5, 5);
+  occFloor.cells[2][3].event = 'chest';
+  occFloor.cells[3][2].stairs = 'up';
+  const enemies = [
+    { x: 4, y: 4, dir: 0, mode: 0, anim: 0, chaseTimer: 0, active: true },
+    { x: 0, y: 0, dir: 0, mode: 0, anim: 0, chaseTimer: 0, active: false },
+  ];
+  const player = { x: 1, y: 1 };
+  assert.equal(core.enemyBlockedCell(occFloor, enemies, -1, player, 1, 1), true, 'プレイヤーのセルはブロック');
+  assert.equal(core.enemyBlockedCell(occFloor, enemies, -1, player, 3, 2), true, '宝箱のセルはブロック');
+  assert.equal(core.enemyBlockedCell(occFloor, enemies, -1, player, 2, 3), true, '階段のセルはブロック');
+  assert.equal(core.enemyBlockedCell(occFloor, enemies, -1, player, 4, 4), true, '他のアクティブなエネミーのセルはブロック');
+  assert.equal(core.enemyBlockedCell(occFloor, enemies, 0, player, 4, 4), false, 'exclude指定した自分自身のセルはブロックしない');
+  assert.equal(core.enemyBlockedCell(occFloor, enemies, -1, player, 0, 0), false, '非アクティブなエネミーのセルはブロックしない');
+  assert.equal(core.enemyBlockedCell(occFloor, enemies, -1, player, 2, 2), false, '無関係な空セルはブロックしない');
+
+  /* enemyAt: (x,y) にいるアクティブなエネミーを返す */
+  assert.equal(core.enemyAt(enemies, 4, 4), enemies[0]);
+  assert.equal(core.enemyAt(enemies, 0, 0), null, '非アクティブは対象外');
+  assert.equal(core.enemyAt(enemies, 1, 1), null);
+
+  /* enemyCanMove: canTraverse + 占有ブロックの合成 */
+  const moveFloor = makeEnemyTestFloor(5, 5);
+  moveFloor.cells[2][2].walls |= 2; /* east wall */
+  const moveEnemies = [{ x: 2, y: 2, dir: 1, mode: 0, anim: 0, chaseTimer: 0, active: true }];
+  assert.equal(core.enemyCanMove(moveFloor, moveEnemies, 0, null, 2, 2, 1), false, '壁でブロック');
+  assert.equal(core.enemyCanMove(moveFloor, moveEnemies, 0, null, 2, 2, 2), true, '南は開いている');
+  const movePlayer = { x: 2, y: 3 };
+  assert.equal(core.enemyCanMove(moveFloor, moveEnemies, 0, movePlayer, 2, 2, 2), false, 'プレイヤー占有セルへはブロック');
+
+  /* enemySeesPlayer: 正面直線3マス以内、壁と扉どちらも遮る (LOSのlosVisibleとは異なるルール) */
+  const sightFloor = makeEnemyTestFloor(6, 6);
+  const enemyLooking = (dir) => ({ x: 2, y: 2, dir, mode: 0, anim: 0, chaseTimer: 0, active: true });
+  assert.equal(core.enemySeesPlayer(sightFloor, enemyLooking(1), { x: 5, y: 2 }), true, '東3マス先、遮蔽なし');
+  assert.equal(core.enemySeesPlayer(sightFloor, enemyLooking(1), { x: 6, y: 2 }), false, '射程外 (4マス先)');
+  assert.equal(core.enemySeesPlayer(sightFloor, enemyLooking(0), { x: 2, y: 5 }), false, '背後は見えない');
+  const doorSightFloor = makeEnemyTestFloor(6, 6);
+  doorSightFloor.cells[2][3].doors |= 2; /* (3,2) の東に扉 */
+  assert.equal(core.enemySeesPlayer(doorSightFloor, enemyLooking(1), { x: 5, y: 2 }), false, '扉も視線を遮る (壁と同様)');
+  const wallSightFloor = makeEnemyTestFloor(6, 6);
+  wallSightFloor.cells[2][3].walls |= 2;
+  assert.equal(core.enemySeesPlayer(wallSightFloor, enemyLooking(1), { x: 5, y: 2 }), false, '壁も視線を遮る');
+});
+
+test('dungeon enemy AI: stepEnemies chase converges to contact and reverts to wander after the chase timer expires', () => {
+  const core = require('../plugins/dungeon-game-editor/render-core.js');
+
+  /* 追跡→接触: プレイヤーの正面3マス先にエネミーを配置し、収束するまでstepEnemiesを回す */
+  const floor = makeEnemyTestFloor(7, 7);
+  const enemies = [{ x: 3, y: 0, dir: 2 /* S */, mode: core.ENEMY_MODE_WANDER, anim: 0, chaseTimer: 0, active: true }];
+  const player = { x: 3, y: 3, dir: 0 };
+  const rng = core.makeEnemyRng(0x2025);
+
+  const tick1 = core.stepEnemies(floor, enemies, player, rng);
+  assert.equal(enemies[0].mode, core.ENEMY_MODE_CHASE, '視界に入ったら即座に追跡モードへ');
+  assert.deepEqual([enemies[0].x, enemies[0].y], [3, 1]);
+  assert.deepEqual(tick1, []);
+
+  const tick2 = core.stepEnemies(floor, enemies, player, rng);
+  assert.deepEqual([enemies[0].x, enemies[0].y], [3, 2]);
+  assert.deepEqual(tick2, []);
+
+  const tick3 = core.stepEnemies(floor, enemies, player, rng);
+  /* プレイヤーのセルへ侵入しようとしたので接触。移動はブロックされ、位置は変わらない */
+  assert.deepEqual(tick3, [0]);
+  assert.deepEqual([enemies[0].x, enemies[0].y], [3, 2]);
+  assert.equal(enemies[0].active, true, '接触してもエネミーは非アクティブ化しない (将来の戦闘フック用の空実装)');
+
+  const tick4 = core.stepEnemies(floor, enemies, player, rng);
+  assert.deepEqual(tick4, [0], '隣接して視界がある限り毎tick接触する');
+
+  /* タイマー復帰: 見失った状態が続くと ENEMY_CHASE_TIMER tick で徘徊へ戻る */
+  const timerFloor = makeEnemyTestFloor(6, 6);
+  const timerEnemies = [{ x: 0, y: 0, dir: 1 /* E, プレイヤーへ向いていない */, mode: core.ENEMY_MODE_CHASE, anim: 0, chaseTimer: 2, active: true }];
+  const timerPlayer = { x: 5, y: 5 };
+  const timerRng = core.makeEnemyRng(0x2025);
+  core.stepEnemies(timerFloor, timerEnemies, timerPlayer, timerRng);
+  assert.equal(timerEnemies[0].mode, core.ENEMY_MODE_CHASE);
+  assert.equal(timerEnemies[0].chaseTimer, 1);
+  core.stepEnemies(timerFloor, timerEnemies, timerPlayer, timerRng);
+  assert.equal(timerEnemies[0].chaseTimer, 0);
+  assert.equal(timerEnemies[0].mode, core.ENEMY_MODE_WANDER, 'chaseTimerが尽きたら徘徊モードへ復帰');
+});
+
+test('dungeon enemy AI: wander/chase never occupy the player, another enemy, chest, or stairs cell across many ticks', () => {
+  const core = require('../plugins/dungeon-game-editor/render-core.js');
+  const service = require('../plugins/dungeon-game-editor/dungeon-service');
+  const floor = service.makeGeneratedFloor({ width: 12, height: 12, name: 'Invariant Floor' });
+  const spawns = core.enemySpawns(floor).length ? core.enemySpawns(floor) : [{ x: 1, y: 2 }, { x: 2, y: 1 }];
+  spawns.forEach((spawn) => { floor.cells[spawn.y][spawn.x].enemy = true; });
+  const enemies = core.enemySpawns(floor).map((spawn) => ({ x: spawn.x, y: spawn.y, dir: 0, mode: 0, anim: 0, chaseTimer: 0, active: true }));
+  assert.ok(enemies.length >= 1);
+  const player = { x: floor.start.x, y: floor.start.y, dir: floor.start.dir };
+  const rng = core.makeEnemyRng(0x2025);
+  for (let tick = 0; tick < 80; tick++) {
+    core.stepEnemies(floor, enemies, player, rng);
+    enemies.forEach((enemy, index) => {
+      const cell = floor.cells[enemy.y][enemy.x];
+      assert.notDeepEqual([enemy.x, enemy.y], [player.x, player.y], `tick ${tick}: enemy ${index} on player cell`);
+      assert.notEqual(cell.event, 'chest', `tick ${tick}: enemy ${index} on chest cell`);
+      assert.equal(cell.stairs, '', `tick ${tick}: enemy ${index} on stairs cell`);
+      enemies.forEach((other, otherIndex) => {
+        if (otherIndex === index) return;
+        assert.notDeepEqual([enemy.x, enemy.y], [other.x, other.y], `tick ${tick}: enemy ${index} overlapping enemy ${otherIndex}`);
+      });
+    });
+  }
+});
+
+test('dungeon enemy billboard sheet: 384x384 dimensions and byte-identical chest sheet after the blitBillboardFrame refactor', () => {
+  const core = require('../plugins/dungeon-game-editor/render-core.js');
+  const enemyTexture = core.makeFallbackTexture('enemy');
+  assert.deepEqual([enemyTexture.width, enemyTexture.height], [192, 96]);
+  const palette = core.buildSpritePalette({});
+  const enemySheet = core.renderEnemyBillboardSheet(enemyTexture, palette);
+  assert.deepEqual([enemySheet.width, enemySheet.height], [384, 384]);
+
+  /* 既存のチェストシート (単一行、384x48) は blitBillboardFrame 抽出後もバイト一致する */
+  const chestTexture = core.makeFallbackTexture('chest');
+  const chestSheet = core.renderBillboardSheet(chestTexture, palette);
+  assert.deepEqual([chestSheet.width, chestSheet.height], [384, 48]);
+  let nonZero = 0;
+  for (let i = 0; i < chestSheet.pixels.length; i++) if (chestSheet.pixels[i]) nonZero++;
+  assert.ok(nonZero > 0, 'chest sheet should have drawn pixels');
+});
+
+test('dungeon enemy export: cell flag bit16, 384x384 indexed PNG, single resources.res SPRITE line, and DUN_ENEMY_STEP_VBLANKS_DEFAULT define', () => {
+  const projectDir = path.join(makeTempDir('md-editor-dungeon-enemy-export-'), 'demo');
+  const plugin = require('../plugins/dungeon-game-editor');
+  const service = require('../plugins/dungeon-game-editor/dungeon-service');
+  const context = { projectDir, logger: logger() };
+  writeFastSettings(projectDir);
+
+  const floor = service.makeGeneratedFloor({ id: 'enemy-floor', name: 'Enemy Floor', order: 1, width: 10, height: 10, asset_set_id: 'default' });
+  /* 生成済みのランダム配置を上書きし、既知の2セルにエネミーを立てる (排他性を尊重する) */
+  floor.cells.flat().forEach((cell) => { cell.enemy = false; });
+  const spot1 = floor.cells.flat().find((cell) => !cell.stairs && cell.event !== 'chest');
+  spot1.enemy = true;
+  const saved = plugin.saveDungeonState({ create: true, floor, settings: service.DEFAULT_SETTINGS }, context);
+  assert.equal(saved.ok, true);
+
+  const exported = saved.export;
+  assert.equal(exported.ok, true);
+  assert.ok(exported.common);
+  assert.equal(fs.existsSync(path.join(projectDir, 'res', exported.common.paths.billboards.enemy)), true);
+
+  const sheet = readIndexedPng(path.join(projectDir, 'res', exported.common.paths.billboards.enemy));
+  assert.deepEqual([sheet.width, sheet.height], [384, 384]);
+  assert.deepEqual(Array.from(sheet.plte.subarray(0, 3)), [255, 0, 255], 'palette index 0 is magenta (transparent key)');
+
+  const dataSource = fs.readFileSync(path.join(projectDir, 'src', 'dungeon_data.c'), 'utf-8');
+  /* flagValue: DUN_FLAG_ENEMY = 0x10 = 16 は cell.enemy がある行に現れる */
+  assert.match(dataSource, /dungeon_floor_1_flags/);
+  const savedFloorCell = saved.floor.cells.flat().find((cell) => cell.enemy);
+  assert.ok(savedFloorCell, 'エネミーセルが保存されている');
+
+  const resources = fs.readFileSync(path.join(projectDir, 'res', 'resources.res'), 'utf-8');
+  assert.match(resources, /SPRITE dun_common_bb_enemy "dungeon\/generated\/dungeon_bb_enemy\.png" 6 6 NONE 0/);
+  assert.equal((resources.match(/SPRITE dun_common_bb_enemy /g) || []).length, 1);
+
+  const patternHeader = fs.readFileSync(path.join(projectDir, 'inc', 'dungeon_patterns.h'), 'utf-8');
+  assert.match(patternHeader, /#define DUN_ENEMY_STEP_VBLANKS_DEFAULT 90/);
+});
+
+test('dungeon enemy_step_vblanks setting round-trips and keeps the bake cache; enemy_texture change invalidates only the common bake', () => {
+  const projectDir = path.join(makeTempDir('md-editor-dungeon-enemy-settings-'), 'demo');
+  const plugin = require('../plugins/dungeon-game-editor');
+  const service = require('../plugins/dungeon-game-editor/dungeon-service');
+  const context = { projectDir, logger: logger() };
+  writeFastSettings(projectDir);
+
+  /* 既定値90 (1.5秒相当、旧45が速すぎるというユーザー報告を受けて引き上げ) */
+  assert.equal(service.normalizeSettings({}).enemy_step_vblanks, 90);
+  assert.equal(service.normalizeSettings({ enemy_step_vblanks: 1 }).enemy_step_vblanks, 5);
+  assert.equal(service.normalizeSettings({ enemy_step_vblanks: 9999 }).enemy_step_vblanks, 240);
+  assert.equal(service.normalizeSettings({ enemy_step_vblanks: 30.9 }).enemy_step_vblanks, 30);
+
+  const generated = plugin.generateDungeonFloor({ width: 10, height: 10, name: 'Enemy Settings Test' }, context);
+  assert.equal(generated.ok, true);
+  const listed = plugin.listDungeonSettings({}, context);
+  assert.equal(listed.ok, true);
+
+  /* 既定値 (90) と異なる値へ変更し、実際に反映されたことを確認する (既定値と同じ値では round-trip の証明にならない) */
+  const savedStep = plugin.saveDungeonSettings({ settings: { ...listed.settings, enemy_step_vblanks: 60 } }, context);
+  assert.equal(savedStep.ok, true);
+  assert.equal(savedStep.settings.enemy_step_vblanks, 60);
+  assert.equal(savedStep.export.cached, true, 'enemy_step_vblanks alone should not invalidate the bake cache');
+  assert.equal(savedStep.export.common.cached, true);
+  const patternHeader = fs.readFileSync(path.join(projectDir, 'inc', 'dungeon_patterns.h'), 'utf-8');
+  assert.match(patternHeader, /#define DUN_ENEMY_STEP_VBLANKS_DEFAULT 60/);
+
+  const withEnemyTexture = { ...savedStep.settings, common_assets: { ...savedStep.settings.common_assets, enemy_texture: 'dungeon/textures/dungeon_texture_atlas.png#chest' } };
+  const savedTexture = plugin.saveDungeonSettings({ settings: withEnemyTexture }, context);
+  assert.equal(savedTexture.ok, true);
+  assert.equal(savedTexture.export.cached, false);
+  assert.equal(savedTexture.export.common.cached, false, 'enemy_texture change invalidates the common billboard bake');
+  assert.equal(savedTexture.export.assetSets[0].cached, true, 'per-set wall/door/floor/ceiling bake is unaffected');
+});
+
+test('dungeon per-floor enemy_step_vblanks: normalizeFloor clamping rules and export inherit-vs-override', () => {
+  const service = require('../plugins/dungeon-game-editor/dungeon-service');
+
+  /*
+   * 0/未指定 = プロジェクト既定を継承。1..4 のような ENEMY_STEP_VBLANKS_MIN (5) 未満の
+   * 非0値は「継承」の0と紛れないよう MIN へ切り上げる。負値/非数は0 (継承) 扱いにする。
+   */
+  assert.equal(service.normalizeFloor({ enemy_step_vblanks: 0 }).enemy_step_vblanks, 0);
+  assert.equal(service.normalizeFloor({}).enemy_step_vblanks, 0);
+  assert.equal(service.normalizeFloor({ enemy_step_vblanks: 1 }).enemy_step_vblanks, 5);
+  assert.equal(service.normalizeFloor({ enemy_step_vblanks: 4 }).enemy_step_vblanks, 5);
+  assert.equal(service.normalizeFloor({ enemy_step_vblanks: 5 }).enemy_step_vblanks, 5);
+  assert.equal(service.normalizeFloor({ enemy_step_vblanks: 120 }).enemy_step_vblanks, 120);
+  assert.equal(service.normalizeFloor({ enemy_step_vblanks: 9999 }).enemy_step_vblanks, 240);
+  assert.equal(service.normalizeFloor({ enemy_step_vblanks: -5 }).enemy_step_vblanks, 0);
+  assert.equal(service.normalizeFloor({ enemy_step_vblanks: 'not-a-number' }).enemy_step_vblanks, 0);
+
+  const projectDir = path.join(makeTempDir('md-editor-dungeon-floor-enemy-step-'), 'demo');
+  const plugin = require('../plugins/dungeon-game-editor');
+  const context = { projectDir, logger: logger() };
+  writeFastSettings(projectDir);
+
+  /* フロア1: enemy_step_vblanks 未指定 = プロジェクト既定 (90) を継承してエクスポートされる */
+  const inheritFloor = service.makeGeneratedFloor({ id: 'inherit-floor', name: 'Inherit', order: 1, width: 8, height: 8, asset_set_id: 'default' });
+  assert.equal(inheritFloor.enemy_step_vblanks, 0);
+  const savedInherit = plugin.saveDungeonState({ create: true, floor: inheritFloor, settings: service.DEFAULT_SETTINGS }, context);
+  assert.equal(savedInherit.ok, true);
+
+  /* フロア2: 明示的に30を指定 = プロジェクト既定と無関係にそのままエクスポートされる */
+  const overrideFloor = service.makeGeneratedFloor({ id: 'override-floor', name: 'Override', order: 2, width: 8, height: 8, asset_set_id: 'default' });
+  overrideFloor.enemy_step_vblanks = 30;
+  const savedOverride = plugin.saveDungeonState({ create: true, floor: overrideFloor, settings: savedInherit.settings }, context);
+  assert.equal(savedOverride.ok, true);
+  assert.equal(savedOverride.floor.enemy_step_vblanks, 30);
+
+  const dataSource = fs.readFileSync(path.join(projectDir, 'src', 'dungeon_data.c'), 'utf-8');
+  assert.match(dataSource, /\{ 8, 8, \d+, \d+, \d+, 0, 90, dungeon_floor_1_edges/);
+  assert.match(dataSource, /\{ 8, 8, \d+, \d+, \d+, 0, 30, dungeon_floor_2_edges/);
+});
+
+test('dungeon enemy spawn validation rejects a 9th enemy on a single floor', () => {
+  const projectDir = path.join(makeTempDir('md-editor-dungeon-enemy-cap-'), 'demo');
+  const service = require('../plugins/dungeon-game-editor/dungeon-service');
+  writeFastSettings(projectDir);
+
+  const floor = service.makeGeneratedFloor({ id: 'cap-floor', name: 'Cap Floor', order: 1, width: 10, height: 10, asset_set_id: 'default' });
+  floor.cells.flat().forEach((cell) => { cell.enemy = false; });
+  const eligible = floor.cells.flat().filter((cell) => !cell.stairs && cell.event !== 'chest');
+  eligible.slice(0, 9).forEach((cell) => { cell.enemy = true; });
+  assert.ok(eligible.slice(0, 9).length === 9, 'test fixture needs at least 9 eligible cells');
+
+  assert.throws(
+    () => service.validateProjectState([floor], service.DEFAULT_SETTINGS),
+    /エネミーは8体までです/,
+  );
+
+  /* normalizeCell の排他規則: 宝箱/階段セルに立てた enemy フラグは保存時に自動的に落ちる */
+  const exclusiveCell = service.normalizeFloor({
+    id: 'x', name: 'x', order: 1, width: 2, height: 2,
+    cells: [[{ event: 'chest', enemy: true }, { stairs: 'up', enemy: true }], [{}, {}]],
+  }).cells;
+  assert.equal(exclusiveCell[0][0].enemy, false);
+  assert.equal(exclusiveCell[0][1].enemy, false);
+});
+
+test('dungeon-game-builder generates enemy AI C source matching render-core.js constants (dual-implementation cross-check)', () => {
+  const projectDir = path.join(makeTempDir('md-editor-dungeon-enemy-csource-'), 'demo');
+  const builder = require('../plugins/dungeon-game-builder');
+  const context = { projectDir, assets: [], logger: logger() };
+  writeFastSettings(projectDir);
+
+  const generated = builder.generateSource([], context);
+  assert.equal(generated.ok, true);
+
+  const gameHeader = fs.readFileSync(path.join(projectDir, 'inc', 'dungeon_game.h'), 'utf-8');
+  assert.match(gameHeader, /#define DUN_FLAG_ENEMY\s+0x10/);
+  assert.match(gameHeader, /#define DUN_MAX_ENEMIES 8/);
+  assert.match(gameHeader, /#define DUN_ENEMY_SIGHT_RANGE 3/);
+  assert.match(gameHeader, /#define DUN_ENEMY_CHASE_TIMER 5/);
+  assert.match(gameHeader, /#define DUN_ENEMY_WANDER_FORWARD_PCT 75/);
+  assert.match(gameHeader, /#define DUN_ENEMY_RNG_SEED_DEFAULT 0x2025/);
+  assert.match(gameHeader, /typedef struct DunEnemy/);
+  /*
+   * per-floor エネミー速度: u8 スカラーはポインタメンバより前に置く (既存の
+   * width/height/start_x/start_y/start_dir/view_set と同じグループ)。
+   * dungeon-service.js の exportSource 行エミッタもこの順序と一致させる。
+   */
+  assert.match(
+    gameHeader,
+    /typedef struct DungeonFloorData\s*\{\s*u8 width;\s*u8 height;\s*u8 start_x;\s*u8 start_y;\s*u8 start_dir;\s*u8 view_set;\s*u8 enemy_step_vblanks;\s*const u16 \*edges;\s*const u8 \*flags;\s*\} DungeonFloorData;/,
+  );
+
+  const viewHeader = fs.readFileSync(path.join(projectDir, 'inc', 'dungeon_view.h'), 'utf-8');
+  assert.match(viewHeader, /void DUN_setEnemies\(const DunEnemy \*list, u8 count\);/);
+  assert.match(viewHeader, /void DUN_refreshBillboards\(void\);/);
+
+  const viewSource = fs.readFileSync(path.join(projectDir, 'src', 'dungeon_view.c'), 'utf-8');
+  assert.match(viewSource, /void DUN_setEnemies\(const DunEnemy \*list, u8 count\)/);
+  assert.match(viewSource, /void DUN_refreshBillboards\(void\)/);
+  assert.match(viewSource, /static const DunEnemy \*enemyAt\(/);
+  assert.match(viewSource, /SPR_setAnimAndFrame\(bb_sprites\[used\], anim_row, pose->frame\)/);
+  assert.match(viewSource, /#define MM_COLOR_ENEMY 10/);
+  assert.match(viewSource, /dun_common_bb_enemy/);
+  /* エネミー優先ルール: フラグ参照 (billboardDefForFlags) より先に enemyAt() を検索する */
+  const enemyAtIndex = viewSource.indexOf('enemy = enemyAt(ax, ay)');
+  const flagsIndex = viewSource.indexOf('billboardDefForFlags(flags)');
+  assert.ok(enemyAtIndex > 0 && flagsIndex > enemyAtIndex, 'enemyAt lookup must run before the flags fallback');
+
+  const mainSource = generated.sourceCode;
+  assert.match(mainSource, /static DunEnemy dun_enemies\[DUNGEON_FLOOR_COUNT\]\[DUN_MAX_ENEMIES\];/);
+  assert.match(mainSource, /static u16 enemy_rng_state;/);
+  /* xorshift16: JS/C同一のshift定数 (7, 9, 8) */
+  assert.match(mainSource, /x \^= \(u16\)\(x << 7\);/);
+  assert.match(mainSource, /x \^= \(u16\)\(x >> 9\);/);
+  assert.match(mainSource, /x \^= \(u16\)\(x << 8\);/);
+  assert.match(mainSource, /static bool enemySeesPlayer\(/);
+  assert.match(mainSource, /static void stepEnemyWander\(/);
+  assert.match(mainSource, /static bool stepEnemyChase\(/);
+  assert.match(mainSource, /static void stepEnemies\(void\)/);
+  assert.match(mainSource, /static void onEnemyContact\(u8 enemy_index\)/);
+  assert.match(mainSource, /static void initEnemies\(void\)/);
+  /* 接触はプレイヤーセルへの侵入試行時のみ発火し、移動はブロックされる */
+  assert.match(mainSource, /if \(stepEnemyChase\(floor, index\)\) onEnemyContact\(index\);/);
+  /* プレイヤー移動もエネミー占有セルでブロックされる (双方向ブロック) */
+  assert.match(mainSource, /if \(cellHasEnemy\(nx, ny\)\) return FALSE;/);
+  /* vtimer 差分は符号付きキャストでラップアラウンド安全に比較する */
+  assert.match(mainSource, /if \(\(s32\)\(vtimer - enemy_next_step_vtime\) >= 0\)/);
+  assert.match(mainSource, /DUN_refreshBillboards\(\);/);
+  /*
+   * per-floor エネミー速度: main.c はもう static u8 enemy_step_vblanks を持たず、
+   * 常にフロア構造体のフィールドを読む (フロア切替で即座にペースが変わるようにするため)。
+   */
+  assert.doesNotMatch(mainSource, /static u8 enemy_step_vblanks;/);
+  assert.match(mainSource, /enemy_next_step_vtime = vtimer \+ dungeon_floors\[floor_index\]\.enemy_step_vblanks;/);
+  assert.match(mainSource, /enemy_next_step_vtime = vtimer \+ enemy_floor->enemy_step_vblanks;/);
+});
+
+test('dungeon-game-editor renderer wires the enemy tool, sim state, and settings field', () => {
+  const rendererSource = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'dungeon-game-editor', 'renderer.js'), 'utf-8');
+  assert.match(rendererSource, /\{ id: 'enemy', label: '敵' \}/);
+  assert.match(rendererSource, /enemiesByFloor: new Map\(\)/);
+  assert.match(rendererSource, /function getEnemiesForFloor\(floor\)/);
+  assert.match(rendererSource, /function resetEnemiesForFloor\(floorId\)/);
+  assert.match(rendererSource, /function resetAllEnemies\(\)/);
+  assert.match(rendererSource, /function startEnemyLoop\(\)/);
+  assert.match(rendererSource, /function stopEnemyLoop\(\)/);
+  assert.match(rendererSource, /function tickEnemyLoop\(\)/);
+  assert.match(rendererSource, /core\.stepEnemies\(floor, enemies, player, state\.enemyRng\)/);
+  assert.match(rendererSource, /core\.enemySpawns\(floor\)/);
+  assert.match(rendererSource, /core\.enemyAt\(enemies, ax, ay\)/);
+  assert.match(rendererSource, /core\.canTraverse\(floor, state\.preview\.x, state\.preview\.y, dirIndex\)/);
+  assert.match(rendererSource, /data-settings-field="enemy_step_vblanks"/);
+  assert.match(rendererSource, /resetEnemiesForFloor\(floor\.id\);/);
+  assert.match(rendererSource, /resetEnemiesForFloor\(state\.current\.id\);/);
+  assert.match(rendererSource, /resetAllEnemies\(\);/);
+  assert.match(rendererSource, /MINIMAP_ENEMY_COLOR/);
+  assert.match(rendererSource, /エネミーは1フロアにつき/);
+  /* per-floor エネミー速度上書き: フロア編集フォームの入力欄と、現在フロア優先で読む enemyTickIntervalMs */
+  assert.match(rendererSource, /class="dge-enemy-step"/);
+  assert.match(rendererSource, /enemyStep: root\.querySelector\('\.dge-enemy-step'\)/);
+  assert.match(rendererSource, /Number\(state\.current\?\.enemy_step_vblanks\) \|\| Number\(state\.settings\?\.enemy_step_vblanks\) \|\| 90/);
+  assert.match(rendererSource, /state\.current\.enemy_step_vblanks = Number\.isFinite\(rawEnemyStep\)/);
 });

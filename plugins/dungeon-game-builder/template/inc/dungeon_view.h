@@ -15,6 +15,15 @@ void DUN_setMoveSpeed(u8 extra_vblanks);
 #define DUN_MINIMAP_VISITED 0
 #define DUN_MINIMAP_FULL    1
 void DUN_setMinimapMode(u8 mode);
+/* エネミー: main.c が所有する現在フロアのリストへのポインタ+件数を渡す。DUN_drawStatic /
+ * DUN_playForward 等の描画呼び出しより前に (毎フレーム) 呼んでおくこと。 */
+void DUN_setEnemies(const DunEnemy *list, u8 count);
+/*
+ * プレイヤー静止中にエネミーだけが動いた場合の軽量リフレッシュ。壁タイルの再ステージ・
+ * DMA 転送は行わず、直近の DUN_drawStatic 呼び出し位置でビルボード (スプライト) だけを
+ * 更新する。main.c のエネミー tick (vblank タイマー駆動) から毎tick呼ぶ想定。
+ */
+void DUN_refreshBillboards(void);
 void DUN_drawStatic(const DungeonFloorData *floor, u8 x, u8 y, u8 dir);
 void DUN_playForward(const DungeonFloorData *floor, u8 x, u8 y, u8 dir);
 void DUN_playBackward(const DungeonFloorData *floor, u8 target_x, u8 target_y, u8 dir);

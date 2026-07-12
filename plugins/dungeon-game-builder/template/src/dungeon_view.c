@@ -37,6 +37,15 @@ static u8 back_bank;
 static bool view_dark;
 static const DunViewSet *active_view_set;
 static Sprite *bb_sprites[DUN_SPRITE_COUNT];
+/* main.c が所有するフロア別 dun_enemies へのポインタ (DUN_setEnemies 経由)。所有権は
+ * main.c のまま — dungeon_view.c は読み取り専用の参照として保持するだけ。 */
+static const DunEnemy *active_enemies;
+static u8 active_enemy_count;
+/* DUN_refreshBillboards 用: 直近の DUN_drawStatic 呼び出し時のカメラ位置 (静止中のみ更新) */
+static const DungeonFloorData *last_static_floor;
+static u8 last_static_x;
+static u8 last_static_y;
+static u8 last_static_dir;
 /* flushFrame の必須 2 vblank DMA 転送に追加する待ち vblank 数 (0 = 追加なし)。
  * 起動時は DUN_MOVE_SPEED_VBLANKS_DEFAULT で初期化し、DUN_setMoveSpeed で
  * ゲーム側 (パワーアップ等) から実行時に変更できる。 */
@@ -69,7 +78,8 @@ static const u16 dun_mm_palette[16] = {
     0x02EE, /* 7: 宝箱 (黄) */
     0x0EC8, /* 8: 上り階段 (水色) */
     0x0C4A, /* 9: 下り階段 (紫) */
-    0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+    0x044E, /* 10: エネミー (赤) */
+    0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
 };
 static void mmWriteTileMap(void);
 
@@ -116,6 +126,9 @@ void DUN_initView(void)
     back_bank = 0;
     view_dark = FALSE;
     active_view_set = NULL;
+    active_enemies = NULL;
+    active_enemy_count = 0;
+    last_static_floor = NULL;
     dun_extra_step_vblanks = DUN_MOVE_SPEED_VBLANKS_DEFAULT;
     dun_minimap_mode = DUN_MINIMAP_VISITED;
     DUN_applyViewSet(0);
@@ -140,6 +153,24 @@ void DUN_setMoveSpeed(u8 extra_vblanks)
 void DUN_setMinimapMode(u8 mode)
 {
     dun_minimap_mode = mode;
+}
+
+/* main.c から毎フレーム (描画呼び出しの前に) 呼び、現在フロアのエネミーリストを渡す */
+void DUN_setEnemies(const DunEnemy *list, u8 count)
+{
+    active_enemies = list;
+    active_enemy_count = count;
+}
+
+/* (ax, ay) にいるアクティブなエネミーを返す。フラグ参照 (billboardDefForFlags) より先に呼ぶ */
+static const DunEnemy *enemyAt(s16 ax, s16 ay)
+{
+    u8 i;
+    for (i = 0; i < active_enemy_count; i++)
+    {
+        if (active_enemies[i].active && active_enemies[i].x == ax && active_enemies[i].y == ay) return &active_enemies[i];
+    }
+    return NULL;
 }
 
 /* ------------------------------------------------------------
@@ -371,8 +402,9 @@ static void updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
         s8 dl;
         s16 ax;
         s16 ay;
-        u8 flags;
         const SpriteDefinition *def;
+        const DunEnemy *enemy;
+        u8 anim_row = 0;
         s16 sx;
         s16 sy;
         if (pose->frame < 0) continue;
@@ -382,8 +414,20 @@ static void updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
         ax = (s16)x + (s16)dd * dir_dx[dir] + (s16)dl * dir_dx[right];
         ay = (s16)y + (s16)dd * dir_dy[dir] + (s16)dl * dir_dy[right];
         if (!inBounds(floor, ax, ay)) continue;
-        flags = floor->flags[DUN_INDEX(floor, ax, ay)];
-        def = billboardDefForFlags(flags);
+        /* エネミーの実位置検索をフラグ参照より先に行う (エネミーが優先される) */
+        enemy = enemyAt(ax, ay);
+        if (enemy)
+        {
+            u8 rel = (u8)(((s16)enemy->dir - (s16)dir + 4) & 3);
+            if (mirrored) rel = (u8)((4 - rel) & 3);
+            def = &dun_common_bb_enemy;
+            anim_row = (u8)((rel * 2) + (enemy->anim & 1));
+        }
+        else
+        {
+            const u8 flags = floor->flags[DUN_INDEX(floor, ax, ay)];
+            def = billboardDefForFlags(flags);
+        }
         if (!def) continue;
         if (!losVisible(floor, x, y, dir, dd, dl)) continue;
         sx = pose->x;
@@ -397,7 +441,8 @@ static void updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
         }
         SPR_setDefinition(bb_sprites[used], def);
         SPR_setPosition(bb_sprites[used], sx, sy);
-        SPR_setFrame(bb_sprites[used], pose->frame);
+        if (enemy) SPR_setAnimAndFrame(bb_sprites[used], anim_row, pose->frame);
+        else SPR_setFrame(bb_sprites[used], pose->frame);
         SPR_setVisibility(bb_sprites[used], VISIBLE);
         used++;
     }
@@ -420,6 +465,7 @@ static void updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
 #define MM_COLOR_CHEST 7
 #define MM_COLOR_STAIRS_UP 8
 #define MM_COLOR_STAIRS_DOWN 9
+#define MM_COLOR_ENEMY 10
 
 static void mmSetPixel(u16 px, u16 py, u16 color)
 {
@@ -505,6 +551,23 @@ void DUN_drawMinimap(const DungeonFloorData *floor, const u8 *visited, u8 px, u8
                 mmFillRect(bx + cell - 1, by, 1, cell, (edges & DUN_DOOR_E) ? MM_COLOR_DOOR : MM_COLOR_WALL);
         }
     }
+    /* エネミー: 踏破済みセル上のみ描画 (FULL時は常時)。プレビュー側も同ルールで #ff5f5f ドット */
+    {
+        u16 i;
+        for (i = 0; i < active_enemy_count; i++)
+        {
+            const DunEnemy *enemy = &active_enemies[i];
+            u16 ex;
+            u16 ey;
+            bool enemy_visited;
+            if (!enemy->active) continue;
+            enemy_visited = (dun_minimap_mode == DUN_MINIMAP_FULL) || mmIsVisited(floor, visited, enemy->x, enemy->y);
+            if (!enemy_visited) continue;
+            ex = ox + (enemy->x * cell);
+            ey = oy + (enemy->y * cell);
+            mmFillRect(ex + 1, ey + 1, cell - 2, cell - 2, MM_COLOR_ENEMY);
+        }
+    }
     /* プレイヤー位置 (2x2) と向き (1px) は表示モードに関わらず常に描く */
     {
         const u16 bx = ox + (px * cell);
@@ -523,10 +586,25 @@ void DUN_drawMinimap(const DungeonFloorData *floor, const u8 *visited, u8 px, u8
 
 void DUN_drawStatic(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
 {
+    last_static_floor = floor;
+    last_static_x = x;
+    last_static_y = y;
+    last_static_dir = dir & 3;
     evaluateEdgeStates(floor, x, y, dir & 3, dun_edges_move, DUN_MOVE_EDGE_COUNT);
     stageFrame(active_view_set->frame_static, FALSE);
     updateBillboards(floor, x, y, dir & 3, dun_bb_static, FALSE);
     flushFrame();
+}
+
+/*
+ * プレイヤー静止中にエネミーだけが動いた場合の軽量リフレッシュ。壁タイルの再ステージ・
+ * DMA 転送は行わず、直近の DUN_drawStatic のカメラ位置でビルボードだけを更新する。
+ */
+void DUN_refreshBillboards(void)
+{
+    if (!last_static_floor) return;
+    updateBillboards(last_static_floor, last_static_x, last_static_y, last_static_dir, dun_bb_static, FALSE);
+    SPR_update();
 }
 
 void DUN_playForward(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
