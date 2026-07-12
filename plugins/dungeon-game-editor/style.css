@@ -644,6 +644,85 @@
   border-top: 1px solid #2d3634;
 }
 
+.dge-model-modal .dge-model-modal-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  padding: 10px 18px 18px;
+  align-items: start;
+}
+
+.dge-model-modal-controls {
+  display: grid;
+  gap: 14px;
+}
+
+.dge-model-modal-controls label {
+  display: grid;
+  gap: 6px;
+  color: #bac7bf;
+  font-size: 12px;
+}
+
+.dge-model-modal-controls select,
+.dge-model-modal-controls input[type="range"] {
+  width: 100%;
+}
+
+.dge-model-modal-controls select {
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid #3d4945;
+  border-radius: 4px;
+  background: #0f1312;
+  color: #edf2e8;
+}
+
+.dge-model-modal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dge-model-modal-filename {
+  color: #8fa099;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.dge-model-modal-preview {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  align-content: start;
+}
+
+.dge-model-preview-canvas {
+  width: 100%;
+  max-width: 576px;
+  aspect-ratio: 192 / 96;
+  image-rendering: pixelated;
+  border: 1px solid #3d4945;
+  background:
+    linear-gradient(45deg, #24302c 25%, transparent 25%, transparent 75%, #24302c 75%, #24302c),
+    linear-gradient(45deg, #24302c 25%, #171d1c 25%, #171d1c 75%, #24302c 75%, #24302c);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+.dge-model-modal-status {
+  color: #8fa099;
+  font-size: 11px;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .dge-model-modal .dge-model-modal-body {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 1180px) {
   .dge-assets-workspace {
     grid-template-columns: 1fr;

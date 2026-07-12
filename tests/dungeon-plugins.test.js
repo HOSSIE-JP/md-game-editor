@@ -70,7 +70,7 @@ test('dungeon plugins declare MD editor and builder capabilities', () => {
   assert.equal(editor.hasRenderer, true);
   assert.equal(editor.renderer.page, 'dungeon-game-editor');
   assert.deepEqual(editor.renderer.capabilities, ['page', 'dungeon-game-editor']);
-  assert.equal(editor.version, '1.2.0');
+  assert.equal(editor.version, '1.3.0');
   assert.ok(editor.permissions.includes('dialog.openFile'));
   assert.ok(editor.dependencies.includes('asset-manager'));
   assert.ok(editor.dependencies.includes('image-resize-converter'));
@@ -1306,7 +1306,7 @@ test('dungeon-game-builder generates enemy AI C source matching render-core.js c
   assert.match(viewSource, /void DUN_setEnemies\(const DunEnemy \*list, u8 count\)/);
   assert.match(viewSource, /void DUN_refreshBillboards\(void\)/);
   assert.match(viewSource, /static const DunEnemy \*enemyAt\(/);
-  assert.match(viewSource, /SPR_setAnimAndFrame\(bb_sprites\[used\], anim_row, pose->frame\)/);
+  assert.match(viewSource, /SPR_setAnimAndFrame\(bb_sprites\[used\], anim_row, \(u8\)draw_frame\)/);
   assert.match(viewSource, /#define MM_COLOR_ENEMY 10/);
   assert.match(viewSource, /dun_common_bb_enemy/);
   /* エネミー優先ルール: フラグ参照 (billboardDefForFlags) より先に enemyAt() を検索する */
@@ -1340,7 +1340,26 @@ test('dungeon-game-builder generates enemy AI C source matching render-core.js c
    */
   assert.doesNotMatch(mainSource, /static u8 enemy_step_vblanks;/);
   assert.match(mainSource, /enemy_next_step_vtime = vtimer \+ dungeon_floors\[floor_index\]\.enemy_step_vblanks;/);
-  assert.match(mainSource, /enemy_next_step_vtime = vtimer \+ enemy_floor->enemy_step_vblanks;/);
+  assert.match(mainSource, /const u16 interval = enemy_floor->enemy_step_vblanks;/);
+  assert.match(mainSource, /enemy_next_step_vtime = vtimer \+ interval;/);
+  /*
+   * 移動スライド: 直前tick開始時のセル (prev_x/prev_y) を記録し、毎フレーム進行度を
+   * DUN_setEnemySlide で更新して tick 間もセル間を補間する。DunEnemy 構造体・DUN_setEnemySlide
+   * 宣言/定義・スライド静的変数・updateBillboards の補間式・main.c の毎フレーム更新を確認する。
+   */
+  assert.match(gameHeader, /typedef struct DunEnemy\s*\{[\s\S]*u8 prev_x;\s*u8 prev_y;[\s\S]*\} DunEnemy;/);
+  assert.match(viewHeader, /void DUN_setEnemySlide\(u16 num, u16 den\);/);
+  assert.match(viewSource, /void DUN_setEnemySlide\(u16 num, u16 den\)/);
+  assert.match(viewSource, /static u16 enemy_slide_num;/);
+  assert.match(viewSource, /enemy_slide_num < enemy_slide_den/);
+  assert.match(viewSource, /\(\(s32\)\(cur_sx - prev_sx\) \* enemy_slide_num\) \/ enemy_slide_den/);
+  /* 距離バケット (サイズ) も補間して移動中に拡大縮小する (最近傍丸め) */
+  assert.match(viewSource, /draw_frame = \(s16\)\(prev_pose->frame \+ \(\(fn < 0\) \? -q : q\)\)/);
+  assert.match(viewSource, /SPR_setAnimAndFrame\(bb_sprites\[used\], anim_row, \(u8\)draw_frame\)/);
+  assert.match(mainSource, /enemy->prev_x = before_x;/);
+  assert.match(mainSource, /static u32 enemy_last_step_vtime;/);
+  assert.match(mainSource, /enemy_last_step_vtime = vtimer;/);
+  assert.match(mainSource, /DUN_setEnemySlide\(\(u16\)slide, interval\);/);
 });
 
 test('dungeon-game-editor renderer wires the enemy tool, sim state, and settings field', () => {
@@ -1368,4 +1387,200 @@ test('dungeon-game-editor renderer wires the enemy tool, sim state, and settings
   assert.match(rendererSource, /enemyStep: root\.querySelector\('\.dge-enemy-step'\)/);
   assert.match(rendererSource, /Number\(state\.current\?\.enemy_step_vblanks\) \|\| Number\(state\.settings\?\.enemy_step_vblanks\) \|\| 90/);
   assert.match(rendererSource, /state\.current\.enemy_step_vblanks = Number\.isFinite\(rawEnemyStep\)/);
+  /* 移動スライド: 毎フレーム再描画ループ + drawBillboardsInto の補間 (実機と同一式) */
+  assert.match(rendererSource, /function stepEnemySlideLoop\(\)/);
+  assert.match(rendererSource, /function enemySlideProgress\(\)/);
+  assert.match(rendererSource, /core\.billboardSlideLerp\(prevSx0, sx0, slide\.num, slide\.den\)/);
+  assert.match(rendererSource, /core\.billboardSlideLerp\(posePrev\.y, pose\.y, slide\.num, slide\.den\)/);
+  assert.match(rendererSource, /core\.billboardSlideFrame\(posePrev\.frame, pose\.frame, slide\.num, slide\.den\)/);
+});
+
+test('dungeon enemy movement: stepEnemies records the previous cell and billboardSlideLerp interpolates', () => {
+  const core = require('../plugins/dungeon-game-editor/render-core.js');
+  /* billboardSlideLerp: num=0 で prev、num=den で cur、中間は 0方向切り捨て (C の整数除算と一致) */
+  assert.equal(core.billboardSlideLerp(10, 40, 0, 4), 10);
+  assert.equal(core.billboardSlideLerp(10, 40, 4, 4), 40);
+  assert.equal(core.billboardSlideLerp(10, 40, 2, 4), 25);
+  assert.equal(core.billboardSlideLerp(40, 10, 1, 4), 33); /* 40 + trunc(-30*1/4)=40-7 */
+  assert.equal(core.billboardSlideLerp(10, 40, 3, 0), 40); /* den=0 は cur */
+
+  /* billboardSlideFrame: 距離バケット (サイズ) の最近傍丸め補間。中央でサイズが切り替わり、
+   * 末尾ポップを避ける。lerp と違い round のため両端が prev/cur、中間で切り替わる。 */
+  assert.equal(core.billboardSlideFrame(6, 4, 0, 4), 6);
+  assert.equal(core.billboardSlideFrame(6, 4, 4, 4), 4);
+  assert.equal(core.billboardSlideFrame(6, 4, 2, 4), 5);
+  assert.equal(core.billboardSlideFrame(4, 5, 1, 4), 4); /* 中央未満はまだ prev サイズ */
+  assert.equal(core.billboardSlideFrame(4, 5, 2, 4), 5); /* 中央で cur サイズへ切替 */
+  assert.equal(core.billboardSlideFrame(4, 4, 2, 4), 4); /* 横移動 (距離不変) はサイズ変化なし */
+  assert.equal(core.billboardSlideFrame(6, 4, 3, 0), 4); /* den=0 は cur */
+
+  const blank = () => ({ walls: 0, doors: 0, one_way: 0, dark: false, event: '', stairs: '', enemy: false });
+  const mk = (w, h) => ({ width: w, height: h, cells: Array.from({ length: h }, () => Array.from({ length: w }, blank)) });
+  const floor = mk(6, 6);
+  const enemies = core.enemySpawns(floor);
+  enemies.push({ x: 2, y: 2, dir: 1, mode: 0, chaseTimer: 0, anim: 0, active: true, prevX: 2, prevY: 2 });
+  const e = enemies[enemies.length - 1];
+  const rng = core.makeEnemyRng(0x2025);
+  const before = { x: e.x, y: e.y };
+  core.stepEnemies(floor, enemies, { x: 5, y: 5, dir: 0 }, rng);
+  /* prevX/prevY は tick開始時のセルを保持する (移動有無に関わらず) */
+  assert.equal(e.prevX, before.x);
+  assert.equal(e.prevY, before.y);
+  if (e.x === before.x && e.y === before.y) {
+    assert.equal(e.prevX, e.x, '移動しなければ prev===cur');
+  }
+});
+
+/* ==================================================================
+ * エネミースプライトを3Dモデル+モーションから生成する機能
+ * (plugins/dungeon-game-editor/enemy-model-geometry.js, enemy-model-render.js,
+ *  vendor/three, renderer.js配線)。
+ *
+ * enemy-model-render.js は Three.js を静的 import する ES module であり、
+ * このテストハーネス (Node, --testでCommonJS require) では実行できない
+ * (DOM/WebGLも無い)。そのため方向→列マッピングの純関数 (viewYaw/cellOrigin) は
+ * 依存フリーな enemy-model-geometry.js (UMD, render-core.js と同じ規約) に
+ * 分離してあり、ここで直接 require() してテストする。描画・量子化ロジック本体は
+ * ソースパターン断言のみ (手動E2Eが必須、DUNGEON_MAINTENANCE.md参照)。
+ * ================================================================== */
+
+test('enemy model geometry: viewYaw yaw table (back/right/front/left) and frontYawOffset', () => {
+  const geometry = require('../plugins/dungeon-game-editor/enemy-model-geometry.js');
+  assert.equal(geometry.VIEWS, 4);
+  assert.equal(geometry.WALK_FRAMES, 2);
+  assert.equal(geometry.CELL, 48);
+  assert.equal(geometry.SOURCE_W, 192);
+  assert.equal(geometry.SOURCE_H, 96);
+
+  /*
+   * 列順 = [背面, 右, 前, 左] (C engine の rel=(enemyDir-camDir)&3、rel0=背 rel2=前 と同じ規約)。
+   * render-core.js の paintFallbackEnemyCell (view2=両目中央/正面、view1=目が右端、
+   * view3=目が左端、view0=目なし/背面) が検証アンカー: 生成した「右」列(view=1)は
+   * スプライト右側に顔/目が来ること (手動E2Eで確認、DUNGEON_MAINTENANCE.md参照)。
+   */
+  assert.equal(geometry.viewYaw(0, 0), 180, '背面 (view=0) は180°');
+  assert.equal(geometry.viewYaw(1, 0), 90, '右 (view=1) は+90°');
+  assert.equal(geometry.viewYaw(2, 0), 0, '前 (view=2) は0°');
+  assert.equal(geometry.viewYaw(3, 0), -90, '左 (view=3) は-90°');
+
+  /* frontYawOffset (φ) は加算オフセット (モデルが-Z向きの場合の0/180トグル等) */
+  assert.equal(geometry.viewYaw(2, 180), 180, '前 (view=2) + φ180 = 180');
+  assert.equal(geometry.viewYaw(0, 180), 360, '背面 (view=0) + φ180 = 360');
+  assert.equal(geometry.viewYaw(1, -10), 80, '右 (view=1) + φ-10 = 80');
+
+  /* view は 0..3 の範囲外でも4を法として正規化する */
+  assert.equal(geometry.viewYaw(4, 0), geometry.viewYaw(0, 0));
+  assert.equal(geometry.viewYaw(-1, 0), geometry.viewYaw(3, 0));
+});
+
+test('enemy model geometry: cellOrigin maps (view,walk) to the 48x48 grid used by the 192x96 sheet', () => {
+  const geometry = require('../plugins/dungeon-game-editor/enemy-model-geometry.js');
+  assert.deepEqual(geometry.cellOrigin(0, 0), { x: 0, y: 0 });
+  assert.deepEqual(geometry.cellOrigin(1, 0), { x: 48, y: 0 });
+  assert.deepEqual(geometry.cellOrigin(2, 0), { x: 96, y: 0 });
+  assert.deepEqual(geometry.cellOrigin(3, 0), { x: 144, y: 0 });
+  assert.deepEqual(geometry.cellOrigin(0, 1), { x: 0, y: 48 });
+  assert.deepEqual(geometry.cellOrigin(3, 1), { x: 144, y: 48 });
+  /* makeFallbackEnemyTexture (render-core.js) と同じ (view*cellW, walk*cellH) 規約 */
+  const core = require('../plugins/dungeon-game-editor/render-core.js');
+  const cellW = core.BB_ENEMY_SOURCE_W / core.BB_ENEMY_VIEWS;
+  const cellH = core.BB_ENEMY_SOURCE_H / core.BB_ENEMY_WALK_FRAMES;
+  assert.equal(cellW, geometry.CELL);
+  assert.equal(cellH, geometry.CELL);
+});
+
+test('enemy model geometry module is UMD (no import/export/require), matching render-core.js convention', () => {
+  const geometrySource = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'dungeon-game-editor', 'enemy-model-geometry.js'),
+    'utf-8',
+  );
+  assert.doesNotMatch(geometrySource, /^\s*import\s/m);
+  assert.doesNotMatch(geometrySource, /^\s*export\s/m);
+  assert.doesNotMatch(geometrySource, /require\(/);
+  assert.match(geometrySource, /module\.exports = api/);
+  assert.match(geometrySource, /globalThis\.DungeonEnemyModelGeometry = api/);
+});
+
+test('vendor/three: three.module.js / GLTFLoader.js / BufferGeometryUtils.js are vendored with rewritten relative imports', () => {
+  const vendorDir = path.join(__dirname, '..', 'plugins', 'dungeon-game-editor', 'vendor', 'three');
+  assert.ok(fs.existsSync(path.join(vendorDir, 'three.module.js')), 'three.module.js is vendored');
+  assert.ok(fs.existsSync(path.join(vendorDir, 'GLTFLoader.js')), 'GLTFLoader.js is vendored');
+  assert.ok(fs.existsSync(path.join(vendorDir, 'BufferGeometryUtils.js')), 'BufferGeometryUtils.js is vendored');
+  assert.ok(fs.existsSync(path.join(vendorDir, 'LICENSE')), 'LICENSE is vendored');
+
+  const gltfLoaderSource = fs.readFileSync(path.join(vendorDir, 'GLTFLoader.js'), 'utf-8');
+  const bufferUtilsSource = fs.readFileSync(path.join(vendorDir, 'BufferGeometryUtils.js'), 'utf-8');
+  /* file:// はbare specifierを解決できないため、'three'への importは相対パスへ書き換え済みでなければならない */
+  assert.doesNotMatch(gltfLoaderSource, /from\s+['"]three['"]/);
+  assert.doesNotMatch(bufferUtilsSource, /from\s+['"]three['"]/);
+  assert.doesNotMatch(gltfLoaderSource, /from\s+['"]\.\.\/utils\/BufferGeometryUtils\.js['"]/);
+  assert.match(gltfLoaderSource, /from\s+['"]\.\/three\.module\.js['"]/);
+  assert.match(gltfLoaderSource, /from\s+['"]\.\/BufferGeometryUtils\.js['"]/);
+  assert.match(bufferUtilsSource, /from\s+['"]\.\/three\.module\.js['"]/);
+  assert.match(gltfLoaderSource, /class GLTFLoader/);
+
+  const threeSource = fs.readFileSync(path.join(vendorDir, 'three.module.js'), 'utf-8');
+  assert.doesNotMatch(threeSource, /from\s+['"]three['"]/, 'three.module.js core has no external imports');
+});
+
+test('enemy-model-render.js is an ES module that statically imports vendored Three.js and exposes the generator API', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'plugins', 'dungeon-game-editor', 'enemy-model-render.js'),
+    'utf-8',
+  );
+  assert.match(source, /import \* as THREE from '\.\/vendor\/three\/three\.module\.js'/);
+  assert.match(source, /import \{ GLTFLoader \} from '\.\/vendor\/three\/GLTFLoader\.js'/);
+  assert.match(source, /await import\(new URL\('\.\/enemy-model-geometry\.js', import\.meta\.url\)\)/);
+  assert.match(source, /async function parseModel\(arrayBuffer\)/);
+  assert.match(source, /async function renderGrid\(session, model, params/);
+  assert.match(source, /async function toIndexedEnemyPng\(imageData, api\)/);
+  assert.match(source, /function createSession\(/);
+  assert.match(source, /function disposeSession\(session\)/);
+  assert.match(source, /renderer\.dispose\(\)/);
+  assert.match(source, /renderer\.forceContextLoss\(\)/);
+
+  /* DRACO/KTX2/meshopt は非対応: parse前に日本語メッセージでreject */
+  assert.match(source, /KHR_draco_mesh_compression/);
+  assert.match(source, /KHR_texture_basisu/);
+  assert.match(source, /EXT_meshopt_compression/);
+  assert.match(source, /非対応の圧縮形式/);
+
+  /* 16色化必須: imageDataToIndexedPng は減色しないため、ローカル量子化→クリーンRGBA再構成を経由する */
+  assert.match(source, /function quantizeLocal16\(/);
+  assert.match(source, /maxOpaqueColors = 15/);
+  assert.match(source, /function reconstructRgba\(/);
+  assert.match(source, /function snapChannelTo3Bit\(/);
+  assert.match(source, /capabilities\?\.get\?\.\('image-quantize'\)/);
+  assert.match(source, /imageDataToIndexedPng/);
+
+  /* 焼き込み・エクスポート側・render-core.jsからは参照されない (エディター専用) */
+  const coreSource = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'dungeon-game-editor', 'render-core.js'), 'utf-8');
+  const serviceSource = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'dungeon-game-editor', 'dungeon-service.js'), 'utf-8');
+  assert.doesNotMatch(coreSource, /enemy-model-render/);
+  assert.doesNotMatch(coreSource, /THREE/);
+  assert.doesNotMatch(serviceSource, /enemy-model-render/);
+  assert.doesNotMatch(serviceSource, /vendor\/three/);
+});
+
+test('dungeon-game-editor renderer wires the "3Dモデルから生成" button, lazy-loaded modal, and commit path', () => {
+  const rendererSource = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'dungeon-game-editor', 'renderer.js'), 'utf-8');
+
+  /* enemy_texture カードだけに出るボタン */
+  assert.match(rendererSource, /key === 'enemy_texture' \? '<button type="button" data-action="asset-model-gen"/);
+  /* ルートクリックハンドラの配線 */
+  assert.match(rendererSource, /if \(action === 'asset-model-gen'\) void openEnemyModelGenerator\(\);/);
+  /* モーダルを開いた時だけ遅延import (起動時に~1MBのThree.jsを読まない) */
+  assert.match(rendererSource, /async function openEnemyModelGenerator\(\)/);
+  assert.match(rendererSource, /await import\(new URL\('\.\/enemy-model-render\.js', import\.meta\.url\)\)/);
+  assert.match(rendererSource, /3Dモデル機能のライブラリ \(vendor\/three\) が見つかりません/);
+  /* 全終了経路でセッションをdispose */
+  assert.match(rendererSource, /session\?\.dispose\?\.\(\);/);
+  /* commitEnemyTextureDataUrl は importAssetForSet のtailと同じ検証・書き込み経路を通る */
+  assert.match(rendererSource, /async function commitEnemyTextureDataUrl\(dataUrl\)/);
+  assert.match(rendererSource, /isRequiredIndexedPng\(inspection\.png\)/);
+  assert.match(rendererSource, /validateAssetInspection\(inspection, meta\)/);
+  assert.match(rendererSource, /targetSubdir: 'dungeon\/textures\/common'|const targetSubdir = 'dungeon\/textures\/common'/);
+  assert.match(rendererSource, /targetFileName = `\$\{meta\.fileName\}\.png`/);
+  assert.match(rendererSource, /state\.settings\.common_assets\[key\] = relativePath/);
+  assert.match(rendererSource, /refreshTextureConsumers\(null, \{ common: true \}\)/);
 });

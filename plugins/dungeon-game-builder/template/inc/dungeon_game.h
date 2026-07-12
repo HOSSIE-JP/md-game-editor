@@ -78,6 +78,10 @@ typedef struct DunEnemy
     u8 anim;
     u8 chase_timer;
     u8 active;
+    /* prev_x/prev_y: 描画側のスライド補間用に、直前tick開始時点のセルを保持する
+     * (render-core.js の enemy.prevX/prevY と同一。移動しなければ prev===cur)。 */
+    u8 prev_x;
+    u8 prev_y;
     u8 _pad;
 } DunEnemy;
 

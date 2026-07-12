@@ -50,6 +50,7 @@ plugins/dungeon-game-builder/template/
 - 占有ルール: エネミーはプレイヤー/宝箱/階段/他エネミーのセルへ侵入・通過不可。プレイヤー側も `canMove()` / `canPreviewMove()` (→ `core.canTraverse`) でエネミーセルをブロック。接触フックは**追跡ステップがプレイヤーセルへ侵入を試みたときのみ**発火 (徘徊は候補から除外されるため発火しない)。
 - ティック間隔はフロア別 (`DungeonFloorData.enemy_step_vblanks`、0=プロジェクト既定を継承、エクスポート時に解決して焼き込み)。実機はティックごとに現在フロアの構造体から読むため、フロア遷移で自動的に切り替わる。
 - 位置だけ変わる再描画は `DUN_refreshBillboards()` (壁の再ステージなし)。壁タイルまで再送すると無駄に 2 vblank 消費する。
+- **移動スライド (瞬間移動に見せない)**: 敵は tick で論理セルを1マス進めるが、描画は tick 間を補間して滑らかにスライドさせる。仕組みは**実行時3D投影ではなく、直前セルと現セルの「焼き込み済みビルボードポーズ (画面座標)」の整数線形補間**なので、焼き込みテーブルは不変 (=`core.version` バンプ不要、既存キャッシュ有効) かつ 68k は整数演算のみ。要素: ① `DunEnemy.prev_x/prev_y` (= JS `enemy.prevX/prevY`) に tick 開始時のセルを記録 (AI分岐より前、JS/C同一位置)。② グローバルなスライド進捗 num/den (全敵共通、単一tick期限。C=`vtimer - enemy_last_step_vtime` / 間隔、JS=経過ms/間隔ms) を `DUN_setEnemySlide()` で毎フレーム view へ渡す。③ `updateBillboards`/`drawBillboardsInto` の敵分岐で、直前セルの相対 (dd,dl) を `dun_bb_cells`/`model.billboards.cells` から逆引きして両ポーズを取り、画面座標を `core.billboardSlideLerp` = `prev + trunc((cur-prev)*num/den)` (**0方向切り捨て**で JS `Math.trunc`=C 整数除算が一致) で補間。**距離バケット (スプライトサイズ) も `core.billboardSlideFrame` で補間**する — MD には連続スプライト拡縮が無いため8段階の焼き込み済みバケットを進行度で切り替え、移動中に距離変化で拡大縮小させる。バケットは**最近傍丸め** (対称・符号ごとに正の除算 `(2*|Δ*num|+den)/(2*den)`) で JS/C 一致させる (位置の切り捨てと違い、丸めないと末尾でサイズがポップする)。横移動 (距離不変) は prev/cur バケットが同じなのでサイズ変化しない。バケット数を増やすと段階が細かくなるが焼き込み変更 (シート幅・`core.version` バンプ) が要るため未対応。④ tick 間も動かすため毎フレーム再描画する (C=アイドル毎 `DUN_refreshBillboards`、JS=`requestAnimationFrame` の `stepEnemySlideLoop`)。視覚は論理セルへ**1tick遅れ**でスライドする (AI/当たり判定は論理セルを使う)。直前セルが視界窓外/カリング時は補間せず現セルへ描く (境界ポップは許容)。
 
 ## 5. 焼き込みキャッシュ — 最大の罠
 
@@ -73,6 +74,55 @@ plugins/dungeon-game-builder/template/
 - 素材参照は `path#tag` 形式。未定義タグは `makeFallbackTexture(kind)` の手続き生成へフォールバック — 新ビルボード種別のプレースホルダーは「アトラスに存在しないタグを既定refにする」だけで実現できる (enemy がこの方式)。
 - **旧フォーマット互換は3世代ある**: ① フロア内蔵 inline `assets` (asset_sets 以前) ② asset_sets 内に宝箱/階段があった v1.1 ③ 現行 common_assets 分離。`resolveEffectiveState` / `normalizeCommonAssets` が読み込み時に前方変換する。migration を触るときは「settings.common_assets が明示されていれば尊重 → asset_sets から非既定値を採用 → フロア inline から補完」の優先順を崩さない (テストが3世代とも保持)。
 - `persistedFloor()` が保存時に inline assets を剥がすため、フロア由来の migration は旧ファイルが残っている間だけ効く自己終息設計。
+
+## 6.5. エネミースプライトの3Dモデル生成 (enemy-model-render.js) — エディター専用
+
+`enemy_texture` (192x96、4方向列×歩行2フレーム行の48x48グリッド) を glTF/GLB + モーションから
+ラスタライズしてPNGバイト列を差し替えるだけの機能。**焼き込み・スプライトシート寸法・SGDK Cテンプレート
+は一切変更しない** (=`core.version` バンプ不要)。関連ファイル:
+
+```
+plugins/dungeon-game-editor/
+  vendor/three/             … Three.js r160 サブセット (three.module.js / GLTFLoader.js /
+                               BufferGeometryUtils.js / LICENSE / README.md)。バージョン更新手順は
+                               vendor/three/README.md 参照。DRACO/KTX2/meshoptはvendorしない。
+  enemy-model-geometry.js   … 依存フリーの純関数 (viewYaw/cellOrigin)。render-core.js と同じUMD規約
+                               (import/export/requireを書かず module.exports + globalThis 両対応)。
+                               Node (テスト) とブラウザ両方から読める。
+  enemy-model-render.js     … 本体。ES module、vendor/threeを静的import。renderer.js はモーダルを
+                               開いた時だけ `await import(new URL('./enemy-model-render.js', ...))`
+                               で遅延ロードする (render-core.jsの兄弟importと同じ規約。起動時に
+                               ~1MBのThree.jsを読まない)。
+```
+
+- **方向→列マッピング (最重要)**: ソース列 = view 0..3 = **[背, 右, 前, 左]** (C engineの
+  `rel=(enemyDir-camDir)&3`、rel0=背 rel2=前 と同じ規約)。モデルGroupをworld +Y周りに
+  `frontYawOffset(φ) + θ_col` 回転させる。θ: 背=180° 右=+90° 前=0° 左=-90°
+  (`enemy-model-geometry.js` の `VIEW_YAW_DEG`)。φはユーザーの正面補正 (モデルが-Z向きなら180)。
+  **検証アンカー**: `paintFallbackEnemyCell` (render-core.js:205-213) は view2=両目中央(前)、
+  view1=目がスプライト右端、view3=目がスプライト左端、view0=目なし(背)。生成した「右」列(view=1)は
+  スプライト右側に顔が来ること。テスト用の合成モデル (フロントマーカーを持つ非対称ジオメトリ) で
+  WebGL経由の実描画を行い、view1で前マーカーの重心Xがセル右半分、view3で左半分に来ることを
+  実地確認済み (カメラは常に+Z側に固定、モデルGroupのみ回転、three.jsの標準lookAt規約
+  `right=cross(forward,up)` で world+X=screen右になることに依拠)。将来この対応を崩す変更を
+  加える場合は同様の合成モデルテストで再確認すること。
+- **16色化は必須**: `imageDataToIndexedPng` (renderer/renderer.js) は減色しない (ユニーク色を
+  256まで収集するだけ)。リット済みの3D描画は数百色になり `validateAssetInspection` (<=16色) に
+  落ちる。そのため `enemy-model-render.js` 内にローカル量子化 (`quantizeLocal16`: MD 3bit/chスナップ
+  `snapChannelTo3Bit` [/36丸め、`paletteToVdpColors`と同じ規約] + 人気色法で不透明15色以下を選出) を
+  実装し、`reconstructRgba` でクリーンなRGBA (各ピクセル=パレット色@alpha255、または透過@alpha0) へ
+  再構成してから `image-quantize` capabilityの `imageDataToIndexedPng` へ渡す。透過はalpha<128の
+  2値化のみで実現 (マゼンタcolor-keyは無関係、それは`blitBillboardFrame`側の別のフォールバック)。
+- **エディター専用の境界**: `dungeon-service.js` / `render-core.js` / `plugins/dungeon-game-builder/**`
+  からは一切参照されない (テストがソースパターンで保証)。生成物は既存の `commitEnemyTextureDataUrl`
+  (renderer.js、`importAssetForSet` のtailと同じ検証・書き込み経路) を通って
+  `dungeon/textures/common/enemy.png` へ書かれ、`common_assets.enemy_texture` を更新するだけなので、
+  焼き込みキャッシュ無効化は既存の「画像バイナリ変更 → `computeCommonBakeHash` 変化」の仕組みに
+  自然に乗る。
+- **v1はセッション内メモリのみ**: 読み込んだモデルファイル・パラメータはディスクへ保存しない
+  (モーダル再オープン時のみ、同一セッション内で最後のパラメータを復元)。sidecar保存はv2送り。
+- パッケージング: `electron-builder.yml` は `plugins/**` を丸ごと `from: plugins / to: plugins` で
+  同梱するため、`vendor/three/` を含め新規ファイルの追加設定は不要。
 
 ## 7. テストと検証手順
 

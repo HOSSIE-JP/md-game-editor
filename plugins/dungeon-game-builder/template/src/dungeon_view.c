@@ -41,6 +41,10 @@ static Sprite *bb_sprites[DUN_SPRITE_COUNT];
  * main.c のまま — dungeon_view.c は読み取り専用の参照として保持するだけ。 */
 static const DunEnemy *active_enemies;
 static u8 active_enemy_count;
+/* エネミー移動スライドの進行度 (num/den、0..den)。main.c が毎フレーム DUN_setEnemySlide で
+ * 更新する。updateBillboards が直前セル→現セルの画面座標補間に使う。 */
+static u16 enemy_slide_num;
+static u16 enemy_slide_den = 1;
 /* DUN_refreshBillboards 用: 直近の DUN_drawStatic 呼び出し時のカメラ位置 (静止中のみ更新) */
 static const DungeonFloorData *last_static_floor;
 static u8 last_static_x;
@@ -156,6 +160,12 @@ void DUN_setMinimapMode(u8 mode)
 }
 
 /* main.c から毎フレーム (描画呼び出しの前に) 呼び、現在フロアのエネミーリストを渡す */
+void DUN_setEnemySlide(u16 num, u16 den)
+{
+    enemy_slide_den = den ? den : 1;
+    enemy_slide_num = (num > enemy_slide_den) ? enemy_slide_den : num;
+}
+
 void DUN_setEnemies(const DunEnemy *list, u8 count)
 {
     active_enemies = list;
@@ -407,6 +417,7 @@ static void updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
         u8 anim_row = 0;
         s16 sx;
         s16 sy;
+        s16 draw_frame;
         if (pose->frame < 0) continue;
         dd = dun_bb_cells[i].dd;
         dl = dun_bb_cells[i].dl;
@@ -430,10 +441,54 @@ static void updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
         }
         if (!def) continue;
         if (!losVisible(floor, x, y, dir, dd, dl)) continue;
-        sx = pose->x;
-        if (mirrored) sx = (s16)(DUN_VIEW_PIXEL_W - pose->x - (DUN_BB_FRAME_TILES * 8));
-        sx += DUN_VIEW_X * 8;
-        sy = (s16)(pose->y + (DUN_VIEW_Y * 8));
+        {
+            s16 cur_sx = pose->x;
+            const s16 cur_sy = pose->y;
+            if (mirrored) cur_sx = (s16)(DUN_VIEW_PIXEL_W - pose->x - (DUN_BB_FRAME_TILES * 8));
+            sx = cur_sx;
+            sy = cur_sy;
+            draw_frame = pose->frame;
+            /* エネミーは直前セル (prev_x/prev_y) の焼き込みポーズと現セルのポーズを num/den で
+             * 補間してスライドさせる (renderer.js drawBillboardsInto と同一式・同一の0方向切り捨て
+             * 整数除算)。移動していない・直前セルが視界窓外/カリング時は補間せず現セルへ描く。 */
+            if (enemy && (enemy->prev_x != enemy->x || enemy->prev_y != enemy->y)
+                && enemy_slide_num < enemy_slide_den)
+            {
+                const s16 podx = (s16)enemy->prev_x - (s16)x;
+                const s16 pody = (s16)enemy->prev_y - (s16)y;
+                const s8 pdd = (s8)((podx * dir_dx[dir]) + (pody * dir_dy[dir]));
+                const s8 pdl_world = (s8)((podx * dir_dx[right]) + (pody * dir_dy[right]));
+                const s8 want_dl = mirrored ? (s8)(-pdl_world) : pdl_world;
+                u16 j;
+                for (j = 0; j < DUN_BB_CELL_COUNT; j++)
+                {
+                    if (dun_bb_cells[j].dd == pdd && dun_bb_cells[j].dl == want_dl)
+                    {
+                        const DunBBPose *prev_pose = &poses[j];
+                        if (prev_pose->frame >= 0)
+                        {
+                            s16 prev_sx = prev_pose->x;
+                            if (mirrored) prev_sx = (s16)(DUN_VIEW_PIXEL_W - prev_pose->x - (DUN_BB_FRAME_TILES * 8));
+                            sx = (s16)(prev_sx + ((s32)(cur_sx - prev_sx) * enemy_slide_num) / enemy_slide_den);
+                            sy = (s16)(prev_pose->y + ((s32)(cur_sy - prev_pose->y) * enemy_slide_num) / enemy_slide_den);
+                            /* 距離バケット (スプライトサイズ) も補間し、移動に合わせて拡大縮小を
+                             * 段階変化させる。最近傍丸め (対称) で render-core.js billboardSlideFrame
+                             * と一致させる (0方向切り捨てだと末尾でサイズがポップするため)。 */
+                            {
+                                const s16 fd = (s16)pose->frame - (s16)prev_pose->frame;
+                                const s32 fn = (s32)fd * enemy_slide_num;
+                                const s32 absn = (fn < 0) ? -fn : fn;
+                                const s16 q = (s16)((2 * absn + enemy_slide_den) / (2 * enemy_slide_den));
+                                draw_frame = (s16)(prev_pose->frame + ((fn < 0) ? -q : q));
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            sx += DUN_VIEW_X * 8;
+            sy += DUN_VIEW_Y * 8;
+        }
         if (!bb_sprites[used])
         {
             bb_sprites[used] = SPR_addSprite(def, sx, sy, TILE_ATTR(PAL1, TRUE, FALSE, FALSE));
@@ -441,7 +496,7 @@ static void updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
         }
         SPR_setDefinition(bb_sprites[used], def);
         SPR_setPosition(bb_sprites[used], sx, sy);
-        if (enemy) SPR_setAnimAndFrame(bb_sprites[used], anim_row, pose->frame);
+        if (enemy) SPR_setAnimAndFrame(bb_sprites[used], anim_row, (u8)draw_frame);
         else SPR_setFrame(bb_sprites[used], pose->frame);
         SPR_setVisibility(bb_sprites[used], VISIBLE);
         used++;

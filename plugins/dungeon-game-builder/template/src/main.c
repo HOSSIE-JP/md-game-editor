@@ -33,6 +33,8 @@ static u16 prev_joy;
 static DunEnemy dun_enemies[DUNGEON_FLOOR_COUNT][DUN_MAX_ENEMIES];
 static u16 enemy_rng_state;
 static u32 enemy_next_step_vtime;
+/* 直近に stepEnemies() を実行した vtimer。スライド進行度 (vtimer - この値) / 間隔 の起点。 */
+static u32 enemy_last_step_vtime;
 
 /*
  * ミニマップ自動マッピング用の踏破ビットフィールド (フロアごとに 1 セル = 1 bit)。
@@ -308,6 +310,10 @@ static void stepEnemies(void)
         if (!enemy->active) continue;
         before_x = enemy->x;
         before_y = enemy->y;
+        /* スライド補間の起点。AI分岐より前で記録する (render-core.js stepEnemies と同一位置)。
+         * 移動しなければ prev===cur になりスライドは発生しない。 */
+        enemy->prev_x = before_x;
+        enemy->prev_y = before_y;
         sees = enemySeesPlayer(floor, enemy);
         if (sees)
         {
@@ -358,6 +364,8 @@ static void initEnemies(void)
                 dun_enemies[f][count].anim = 0;
                 dun_enemies[f][count].chase_timer = 0;
                 dun_enemies[f][count].active = TRUE;
+                dun_enemies[f][count].prev_x = (u8)x;
+                dun_enemies[f][count].prev_y = (u8)y;
                 count++;
             }
         }
@@ -550,6 +558,7 @@ int main(bool hardReset)
      * 「0=継承」を解決する既定値として dungeon-service.js のエクスポート時にのみ使われ、
      * 実機側では参照しない (ドキュメント用途で define 自体は残す)。 */
     enemy_next_step_vtime = vtimer + dungeon_floors[floor_index].enemy_step_vblanks;
+    enemy_last_step_vtime = vtimer;
     resetPlayer();
     drawCurrentView(&dungeon_floors[floor_index]);
 
@@ -582,15 +591,27 @@ int main(bool hardReset)
          * (SGDK の一般的なイディオム)。ブロッキングアニメ中の複数回分の経過は
          * 1ステップに集約される (deadline を現在時刻基準で毎回引き直すため)。
          */
-        if ((s32)(vtimer - enemy_next_step_vtime) >= 0)
         {
             /* floor ではなく dungeon_floors[floor_index] を直接引く: 同じループ周回内で
              * START/階段によりフロアが切り替わっていた場合でも、切り替え後のフロアの
              * 間隔を即座に反映するため (ローカルの floor はループ先頭でのスナップショット)。 */
             const DungeonFloorData *enemy_floor = &dungeon_floors[floor_index];
-            stepEnemies();
-            enemy_next_step_vtime = vtimer + enemy_floor->enemy_step_vblanks;
-            DUN_setEnemies(dun_enemies[floor_index], DUN_MAX_ENEMIES);
+            const u16 interval = enemy_floor->enemy_step_vblanks;
+            s32 slide;
+            if ((s32)(vtimer - enemy_next_step_vtime) >= 0)
+            {
+                enemy_last_step_vtime = vtimer;
+                stepEnemies();
+                enemy_next_step_vtime = vtimer + interval;
+                DUN_setEnemies(dun_enemies[floor_index], DUN_MAX_ENEMIES);
+            }
+            /* 毎フレーム、直前 tick からの経過でスライド進行度を更新しビルボードを描き直す
+             * (tick 間もセル間を補間して滑らかに動かす)。DUN_refreshBillboards は壁 DMA を
+             * 伴わずスプライトだけ更新するので毎フレーム呼んでよい。 */
+            slide = (s32)(vtimer - enemy_last_step_vtime);
+            if (slide < 0) slide = 0;
+            if (slide > (s32)interval) slide = (s32)interval;
+            DUN_setEnemySlide((u16)slide, interval);
             DUN_refreshBillboards();
         }
 

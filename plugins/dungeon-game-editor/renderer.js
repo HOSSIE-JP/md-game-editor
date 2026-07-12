@@ -102,6 +102,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     enemyRng: null,
     enemyLastTick: 0,
     enemyIntervalId: null,
+    /* エネミースライド描画専用の requestAnimationFrame ハンドル (AI論理ステップの
+     * setInterval とは独立)。stepPreviewAnimation の state.animationFrame と同じ役割。 */
+    enemySlideFrame: null,
     textureCache: new Map(),
     textureCacheEpoch: 0,
     textures: null,
@@ -327,6 +330,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       list = core.enemySpawns(floor).map((spawn) => ({
         x: spawn.x,
         y: spawn.y,
+        prevX: spawn.x,
+        prevY: spawn.y,
         dir: 0,
         mode: 0,
         anim: 0,
@@ -358,15 +363,33 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     return vblanks * VBLANK_MS;
   }
 
+  /*
+   * エネミー移動スライドの現在の進行度。0 = 直前tickのセル (prevX/prevY)、
+   * 1 (=den/den) = 現tickのセル (x/y) を描く。num/den の形で返すのは C 側
+   * (dungeon_view.c の enemy_slide_num/den, vblank単位の整数) と同じ式の形を
+   * JS 側 (経過ms/間隔ms) でも保つため — core.billboardSlideLerp はどちらの
+   * 単位でも同じ整数除算の形で呼べる。
+   */
+  function enemySlideProgress() {
+    const den = enemyTickIntervalMs();
+    if (!(den > 0)) return { num: 1, den: 1 };
+    const elapsed = performance.now() - state.enemyLastTick;
+    const num = Math.max(0, Math.min(den, elapsed));
+    return { num, den };
+  }
+
   function startEnemyLoop() {
     stopEnemyLoop();
     state.enemyLastTick = performance.now();
     state.enemyIntervalId = setInterval(tickEnemyLoop, ENEMY_TICK_POLL_MS);
+    state.enemySlideFrame = requestAnimationFrame(stepEnemySlideLoop);
   }
 
   function stopEnemyLoop() {
     if (state.enemyIntervalId != null) clearInterval(state.enemyIntervalId);
     state.enemyIntervalId = null;
+    if (state.enemySlideFrame != null) cancelAnimationFrame(state.enemySlideFrame);
+    state.enemySlideFrame = null;
   }
 
   /*
@@ -387,6 +410,22 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const player = { x: state.preview.x, y: state.preview.y, dir: state.preview.dir };
     const contacts = core.stepEnemies(floor, enemies, player, state.enemyRng);
     if (contacts.length) setStatus(`エネミーが接触しました (${contacts.length}体)`);
+    renderPreview();
+  }
+
+  /*
+   * tickEnemyLoop が論理セルを進めるのは間隔ごとだが、その間もセル間を補間して滑らかに
+   * スライドさせるため requestAnimationFrame で毎フレーム再描画する (実機 main.c の
+   * アイドル毎フレーム DUN_refreshBillboards に対応)。ページ非アクティブ・プレイヤー移動
+   * アニメ中・エネミー不在時は再描画しない (tickEnemyLoop と同じガード)。
+   */
+  function stepEnemySlideLoop() {
+    state.enemySlideFrame = requestAnimationFrame(stepEnemySlideLoop);
+    if (!root.classList.contains('active')) return;
+    const floor = state.current;
+    if (!floor || state.animation) return;
+    const enemies = state.enemiesByFloor.get(floor.id);
+    if (!enemies || !enemies.length) return;
     renderPreview();
   }
 
@@ -814,6 +853,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const size = core.BB_FRAME_SIZE;
     const enemies = state.enemiesByFloor.get(floor.id) || [];
     const dir = frame.base.dir & 3;
+    /* エネミーのセル間スライド進行度 (num/den)。静止フレーム以外 (プレイヤー移動アニメ中) は
+     * enemyLastTick が進まないため num は den へ張り付き、実質 cur セルで静止する。 */
+    const slide = enemySlideProgress();
     for (let i = 0; i < cells.length; i++) {
       const pose = frame.bbPoses[i];
       if (!pose || pose.frame < 0) continue;
@@ -841,13 +883,38 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       if (!sheet) continue;
       if (!core.losVisible(floor, frame.base.x, frame.base.y, dir, dd, dl)) continue;
       const sx0 = frame.mirrored ? (VIEW_W - pose.x - size) : pose.x;
-      const frameOffset = pose.frame * size;
+      /* エネミーは直前セル (prevX/prevY) の焼き込みポーズと現セルのポーズを num/den で
+       * 補間してスライドさせる (実機 dungeon_view.c updateBillboards と同一式)。移動して
+       * いない・直前セルが視界窓外/カリング時は補間せず現セルへ描く (境界でのポップは許容)。 */
+      let drawSx0 = sx0;
+      let drawTop = pose.y;
+      let drawFrame = pose.frame;
+      if (enemy && (enemy.prevX !== enemy.x || enemy.prevY !== enemy.y) && slide.num < slide.den) {
+        const podx = enemy.prevX - frame.base.x;
+        const pody = enemy.prevY - frame.base.y;
+        const pdd = (podx * DIRS[dir].dx) + (pody * DIRS[dir].dy);
+        const pdlWorld = (podx * DIRS[right].dx) + (pody * DIRS[right].dy);
+        const wantDl = frame.mirrored ? -pdlWorld : pdlWorld;
+        let pj = -1;
+        for (let k = 0; k < cells.length; k++) {
+          if (cells[k].dd === pdd && cells[k].dl === wantDl) { pj = k; break; }
+        }
+        const posePrev = pj >= 0 ? frame.bbPoses[pj] : null;
+        if (posePrev && posePrev.frame >= 0) {
+          const prevSx0 = frame.mirrored ? (VIEW_W - posePrev.x - size) : posePrev.x;
+          drawSx0 = core.billboardSlideLerp(prevSx0, sx0, slide.num, slide.den);
+          drawTop = core.billboardSlideLerp(posePrev.y, pose.y, slide.num, slide.den);
+          /* 距離バケット (スプライトサイズ) も補間し、移動に合わせて拡大縮小を段階変化させる */
+          drawFrame = core.billboardSlideFrame(posePrev.frame, pose.frame, slide.num, slide.den);
+        }
+      }
+      const frameOffset = drawFrame * size;
       for (let y = 0; y < size; y++) {
-        const dy = pose.y + y;
+        const dy = drawTop + y;
         if (dy < 0 || dy >= VIEW_H) continue;
         const sourceRow = rowOffset + y;
         for (let x = 0; x < size; x++) {
-          const dx = sx0 + x;
+          const dx = drawSx0 + x;
           if (dx < 0 || dx >= VIEW_W) continue;
           const paletteIndex = sheet.pixels[(sourceRow * sheet.width) + frameOffset + x];
           if (!paletteIndex) continue;
@@ -1353,6 +1420,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         <div class="dge-asset-actions">
           <button type="button" data-action="asset-import" data-asset-key="${key}" data-common="1">${isDefault ? '選択' : '置換'}</button>
           <button type="button" data-action="asset-default" data-asset-key="${key}" data-common="1" ${isDefault ? 'disabled' : ''}>既定に戻す</button>
+          ${key === 'enemy_texture' ? '<button type="button" data-action="asset-model-gen" data-asset-key="enemy_texture">3Dモデルから生成</button>' : ''}
         </div>
       </article>
     `;
@@ -1693,6 +1761,271 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       setStatus(`${meta.label}を設定しました${converted.warning ? ` / ${converted.warning}` : ''}`);
       if (isCommon) refreshTextureConsumers(null, { common: true });
       else refreshTextureConsumers(set.id);
+    } catch (err) {
+      setStatus(`${meta.label}: ${String(err?.message || err)}`);
+      renderAssets();
+      renderPreview();
+    }
+  }
+
+  /*
+   * 「3Dモデルから生成」: glTF/GLB + モーションを読み込み、4方向×歩行2フレームの
+   * enemy_texture (192x96 indexed<=16色) をラスタライズして既存のenemy_texture書き込み
+   * 経路 (commitEnemyTextureDataUrl → importAssetForSet と同じtail) へ流す。
+   * 描画本体は enemy-model-render.js (Three.jsをvendor、モーダルを開いた時だけ遅延import)。
+   * v1はセッション内メモリのみ: モデルファイル自体・パラメータはディスクへ保存せず、
+   * 同一セッション内での再オープン時のみ最後のパラメータをモーダルへ復元する。
+   */
+  const enemyModelDefaultParams = Object.freeze({
+    frontYawOffset: 0,
+    elevationDeg: 0,
+    zoom: 1,
+    clipName: '',
+    sampleFractionA: 0,
+    sampleFractionB: 0.5,
+  });
+
+  function dataUrlToArrayBuffer(dataUrl) {
+    const comma = String(dataUrl || '').indexOf(',');
+    if (comma < 0) throw new Error('不正なデータURLです');
+    const binary = atob(String(dataUrl).slice(comma + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  function drawEnemyModelPreview(canvasEl, imageData) {
+    const ctx = canvasEl.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+    ctx.putImageData(imageData, 0, 0);
+  }
+
+  async function openEnemyModelGenerator() {
+    let renderModule;
+    try {
+      renderModule = await import(new URL('./enemy-model-render.js', import.meta.url));
+    } catch (err) {
+      setStatus('3Dモデル機能のライブラリ (vendor/three) が見つかりません');
+      return;
+    }
+
+    if (!state.enemyModelParams) state.enemyModelParams = { ...enemyModelDefaultParams };
+    const lastParams = state.enemyModelParams;
+
+    const html = `
+      <header class="dge-modal-header"><h2>敵スプライトを3Dモデルから生成</h2></header>
+      <div class="dge-model-modal-body">
+        <div class="dge-model-modal-controls">
+          <div class="dge-model-modal-row">
+            <button type="button" data-model-pick>glTF/GLBを選択…</button>
+            <span class="dge-model-modal-filename" data-model-filename>未選択</span>
+          </div>
+          <label>アニメーション
+            <select data-model-clip><option value="">(静止ポーズ)</option></select>
+          </label>
+          <label>歩行フレームA (サンプル時刻)
+            <input type="range" min="0" max="1" step="0.01" value="${escapeHtml(String(lastParams.sampleFractionA))}" data-model-fraction-a>
+          </label>
+          <label>歩行フレームB (サンプル時刻)
+            <input type="range" min="0" max="1" step="0.01" value="${escapeHtml(String(lastParams.sampleFractionB))}" data-model-fraction-b>
+          </label>
+          <label>モデルの正面
+            <select data-model-front-yaw>
+              <option value="0" ${lastParams.frontYawOffset === 0 ? 'selected' : ''}>+Z向き (既定)</option>
+              <option value="180" ${lastParams.frontYawOffset === 180 ? 'selected' : ''}>-Z向き (180°反転)</option>
+            </select>
+          </label>
+          <label>仰角 <span data-model-elevation-value>${escapeHtml(String(lastParams.elevationDeg))}°</span>
+            <input type="range" min="-30" max="30" step="1" value="${escapeHtml(String(lastParams.elevationDeg))}" data-model-elevation>
+          </label>
+          <label>ズーム <span data-model-zoom-value>${Number(lastParams.zoom).toFixed(2)}×</span>
+            <input type="range" min="0.5" max="2" step="0.05" value="${escapeHtml(String(lastParams.zoom))}" data-model-zoom>
+          </label>
+        </div>
+        <div class="dge-model-modal-preview">
+          <canvas class="dge-model-preview-canvas" width="${core.BB_ENEMY_SOURCE_W}" height="${core.BB_ENEMY_SOURCE_H}" data-model-preview></canvas>
+          <div class="dge-model-modal-status" data-model-status>3Dモデル(.glb/.gltf)を選択してください</div>
+        </div>
+      </div>
+      <div class="dge-modal-actions">
+        <button type="button" data-decision="cancel">キャンセル</button>
+        <button type="button" class="primary" data-decision="apply" disabled>敵テクスチャとして適用</button>
+      </div>
+    `;
+
+    const modal = api.createModal({
+      id: `${plugin.id}-model-modal`,
+      panelClassName: 'app-panel app-panel-lg dge-modal-panel dge-model-modal',
+      html,
+    });
+    modal.panel.innerHTML = html;
+
+    const els = {
+      pick: modal.panel.querySelector('[data-model-pick]'),
+      filename: modal.panel.querySelector('[data-model-filename]'),
+      clip: modal.panel.querySelector('[data-model-clip]'),
+      fractionA: modal.panel.querySelector('[data-model-fraction-a]'),
+      fractionB: modal.panel.querySelector('[data-model-fraction-b]'),
+      frontYaw: modal.panel.querySelector('[data-model-front-yaw]'),
+      elevation: modal.panel.querySelector('[data-model-elevation]'),
+      elevationValue: modal.panel.querySelector('[data-model-elevation-value]'),
+      zoom: modal.panel.querySelector('[data-model-zoom]'),
+      zoomValue: modal.panel.querySelector('[data-model-zoom-value]'),
+      preview: modal.panel.querySelector('[data-model-preview]'),
+      status: modal.panel.querySelector('[data-model-status]'),
+      applyButton: modal.panel.querySelector('[data-decision="apply"]'),
+    };
+
+    let session = null;
+    let model = null;
+    let renderGeneration = 0;
+    let debounceTimer = null;
+    let finished = false;
+
+    const setModalStatus = (text) => { els.status.textContent = text; };
+
+    const currentParams = () => ({
+      frontYawOffset: Number(els.frontYaw.value) || 0,
+      elevationDeg: Number(els.elevation.value) || 0,
+      zoom: Number(els.zoom.value) || 1,
+      clipName: els.clip.value || '',
+      sampleFractionA: Number(els.fractionA.value) || 0,
+      sampleFractionB: Number(els.fractionB.value) || 0,
+    });
+
+    const finish = (decision) => {
+      if (finished) return;
+      finished = true;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      document.removeEventListener('keydown', onKeyDown);
+      session?.dispose?.();
+      session = null;
+      modal.close();
+      modal.destroy();
+      return decision;
+    };
+
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') finish('cancel');
+    };
+
+    async function doRender() {
+      if (!model || !session || finished) return;
+      const generation = ++renderGeneration;
+      const params = currentParams();
+      state.enemyModelParams = params;
+      try {
+        const imageData = await renderModule.renderGrid(session, model, params);
+        if (generation !== renderGeneration || finished) return;
+        drawEnemyModelPreview(els.preview, imageData);
+        els.applyButton.disabled = false;
+        setModalStatus('プレビューを更新しました');
+      } catch (err) {
+        if (generation !== renderGeneration || finished) return;
+        setModalStatus(`描画エラー: ${String(err?.message || err)}`);
+        els.applyButton.disabled = true;
+      }
+    }
+
+    const scheduleRender = () => {
+      if (!model || !session) return;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => { void doRender(); }, 120);
+    };
+
+    els.pick.addEventListener('click', async () => {
+      const picked = await api.electronAPI.pickFile({
+        title: '3Dモデルを選択',
+        properties: ['openFile'],
+        filters: [{ name: 'glTF / GLB', extensions: ['glb', 'gltf'] }],
+      });
+      if (picked?.canceled || !picked?.sourcePath) return;
+      setModalStatus('モデルを読み込み中...');
+      els.applyButton.disabled = true;
+      try {
+        const read = await api.electronAPI.readFileAsDataUrl(picked.sourcePath);
+        if (!read?.dataUrl) throw new Error('ファイルを読み込めません');
+        const arrayBuffer = dataUrlToArrayBuffer(read.dataUrl);
+        model = await renderModule.parseModel(arrayBuffer);
+        els.filename.textContent = String(picked.sourcePath).split(/[\\/]/).pop() || picked.sourcePath;
+        els.clip.innerHTML = `<option value="">(静止ポーズ)</option>${
+          model.clipNames.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')
+        }`;
+        if (!session) session = renderModule.createSession();
+        setModalStatus('モデルを読み込みました');
+        scheduleRender();
+      } catch (err) {
+        model = null;
+        setModalStatus(`読み込みエラー: ${String(err?.message || err)}`);
+      }
+    });
+
+    els.clip.addEventListener('change', scheduleRender);
+    els.fractionA.addEventListener('input', scheduleRender);
+    els.fractionB.addEventListener('input', scheduleRender);
+    els.frontYaw.addEventListener('change', scheduleRender);
+    els.elevation.addEventListener('input', () => {
+      els.elevationValue.textContent = `${els.elevation.value}°`;
+      scheduleRender();
+    });
+    els.zoom.addEventListener('input', () => {
+      els.zoomValue.textContent = `${Number(els.zoom.value).toFixed(2)}×`;
+      scheduleRender();
+    });
+
+    modal.panel.querySelectorAll('[data-decision]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        if (button.dataset.decision === 'cancel') { finish('cancel'); return; }
+        if (button.dataset.decision !== 'apply' || !model || !session) return;
+        els.applyButton.disabled = true;
+        setModalStatus('16色PNGへ変換中...');
+        try {
+          const params = currentParams();
+          const imageData = await renderModule.renderGrid(session, model, params);
+          const dataUrl = await renderModule.toIndexedEnemyPng(imageData, api);
+          state.enemyModelParams = params;
+          finish('apply');
+          await commitEnemyTextureDataUrl(dataUrl);
+        } catch (err) {
+          setModalStatus(`生成エラー: ${String(err?.message || err)}`);
+          els.applyButton.disabled = false;
+        }
+      });
+    });
+    modal.modal.querySelector('[data-modal-close]')?.addEventListener('click', () => finish('cancel'));
+    document.addEventListener('keydown', onKeyDown);
+    modal.open();
+  }
+
+  async function commitEnemyTextureDataUrl(dataUrl) {
+    const key = 'enemy_texture';
+    const meta = ASSET_META[key];
+    try {
+      let inspection = await inspectImageDataUrl(dataUrl);
+      if (!isRequiredIndexedPng(inspection.png)) {
+        const encoder = api.capabilities.get('image-quantize')?.imageDataToIndexedPng || api.imageDataToIndexedPng;
+        if (!encoder) throw new Error('8bit Indexed PNGへ再エンコードできません');
+        dataUrl = await encoder(inspection.imageData);
+        inspection = await inspectImageDataUrl(dataUrl);
+      }
+      const validation = validateAssetInspection(inspection, meta);
+      if (!validation.ok) throw new Error(validation.message);
+
+      const targetSubdir = 'dungeon/textures/common';
+      const targetFileName = `${meta.fileName}.png`;
+      const written = await api.electronAPI.writeAssetFile({
+        targetSubdir,
+        targetFileName,
+        dataUrl,
+      });
+      if (!written?.ok) throw new Error(written?.error || '画像の保存に失敗しました');
+      const relativePath = normalizeSavedAssetPath(written.relativePath || `${targetSubdir}/${targetFileName}`);
+      if (!state.settings.common_assets) state.settings.common_assets = {};
+      state.settings.common_assets[key] = relativePath;
+      setDirty(true);
+      setStatus(`${meta.label}を3Dモデルから生成しました`);
+      refreshTextureConsumers(null, { common: true });
     } catch (err) {
       setStatus(`${meta.label}: ${String(err?.message || err)}`);
       renderAssets();
@@ -2319,6 +2652,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (action === 'set-delete') deleteAssetSet();
     if (action === 'asset-import') void importAssetForSet(actionTarget.dataset.assetKey);
     if (action === 'asset-default') resetAssetToDefault(actionTarget.dataset.assetKey);
+    if (action === 'asset-model-gen') void openEnemyModelGenerator();
     if (action === 'settings-save') void saveSettingsForm();
     if (action === 'minimap-mode') {
       state.minimapMode = state.minimapMode === 'full' ? 'visited' : 'full';

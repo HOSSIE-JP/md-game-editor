@@ -18,6 +18,9 @@ void DUN_setMinimapMode(u8 mode);
 /* エネミー: main.c が所有する現在フロアのリストへのポインタ+件数を渡す。DUN_drawStatic /
  * DUN_playForward 等の描画呼び出しより前に (毎フレーム) 呼んでおくこと。 */
 void DUN_setEnemies(const DunEnemy *list, u8 count);
+/* エネミー移動スライドの進行度 (num/den、0..den) を設定する。main.c が毎フレーム更新し、
+ * updateBillboards が直前セル→現セルの画面座標を補間する。 */
+void DUN_setEnemySlide(u16 num, u16 den);
 /*
  * プレイヤー静止中にエネミーだけが動いた場合の軽量リフレッシュ。壁タイルの再ステージ・
  * DMA 転送は行わず、直近の DUN_drawStatic 呼び出し位置でビルボード (スプライト) だけを

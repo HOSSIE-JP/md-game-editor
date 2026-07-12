@@ -1646,6 +1646,11 @@
   /*
    * 1tick分すべてのアクティブなエネミーを進める。戻り値は今tickでプレイヤーへ
    * 接触した (侵入をブロックされた) エネミーの index 配列。enemies は in-place で変更する。
+   *
+   * prevX/prevY: 描画側のスライド補間 (renderer.js drawBillboardsInto / dungeon_view.c
+   * updateBillboards) 用に、今tick開始時点のセルを記録する。移動しなければ prev===cur に
+   * なりスライドは発生しない。main.c の stepEnemies もこの代入を同じ位置 (AI分岐より前) で
+   * 行うこと — WYSIWYG のため JS/C で「どのセルから」の記録タイミングを一致させる必要がある。
    */
   function stepEnemies(floor, enemies, player, rng) {
     const contacts = [];
@@ -1654,6 +1659,8 @@
       if (!enemy || !enemy.active) continue;
       const beforeX = enemy.x;
       const beforeY = enemy.y;
+      enemy.prevX = beforeX;
+      enemy.prevY = beforeY;
       const sees = enemySeesPlayer(floor, enemy, player);
       if (sees) {
         enemy.mode = ENEMY_MODE_CHASE;
@@ -1672,6 +1679,34 @@
       if (enemy.x !== beforeX || enemy.y !== beforeY) enemy.anim ^= 1;
     }
     return contacts;
+  }
+
+  /*
+   * エネミー移動スライドの整数補間: prevValue (1tick前のセルの画面座標) から
+   * curValue (現在セルの画面座標) へ num/den (0..den) の進行度で線形補間する。
+   * num===den で curValue、num===0 で prevValue を返す。C側 (dungeon_view.c
+   * updateBillboards) は同じ式を s32 の掛け算→整数除算で実装する。JS/C とも
+   * 0方向切り捨て (truncate toward zero) の除算になる (JS: Math.trunc、
+   * C: 符号付き整数の / 演算子) ため、負値の丸め方向まで一致する。
+   */
+  function billboardSlideLerp(prevValue, curValue, num, den) {
+    if (!den) return curValue;
+    return prevValue + Math.trunc(((curValue - prevValue) * num) / den);
+  }
+
+  /*
+   * 移動スライド中の距離バケット (スプライトサイズ) の補間。MD には連続スプライト拡縮が
+   * ないため、直前セルと現セルの焼き込み済み距離バケット (frame index) の間を進行度で
+   * 段階補間し、移動に合わせて拡大縮小を切り替える。0方向ではなく最近傍丸め (対称・
+   * 符号ごとに正の除算) にすることで進行度の中央でサイズが切り替わり、末尾でのポップを
+   * 避ける。C側 (dungeon_view.c) は同じ整数式で実装する。
+   */
+  function billboardSlideFrame(prevFrame, curFrame, num, den) {
+    if (!den) return curFrame;
+    const fn = (curFrame - prevFrame) * num;
+    const absn = fn < 0 ? -fn : fn;
+    const q = Math.trunc((2 * absn + den) / (2 * den));
+    return prevFrame + (fn < 0 ? -q : q);
   }
 
   /* ------------------------------------------------------------------
@@ -1814,6 +1849,8 @@
     stepEnemyWander,
     stepEnemyChase,
     stepEnemies,
+    billboardSlideLerp,
+    billboardSlideFrame,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
