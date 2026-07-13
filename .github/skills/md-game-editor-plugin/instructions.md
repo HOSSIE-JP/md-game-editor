@@ -256,6 +256,8 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 - 各素材カードはcontain表示、pixel smoothingなしのpreviewと、寸法・色数・保存先・検証結果を表示する。上書き後はtexture cacheを破棄し、非同期読込結果には世代番号を持たせる。新規タグなし画像は全体、旧 `path#tag` は3x2/4x2アトラス要素として扱う。
 - 床/天井の32x32パターンはBG_Bの下半分/上半分（各200x64）へ固定反復配置し、decision tableへ焼き込まない。壁/扉はpalette index 0が透明なBG_A動的タイルとして重ねる。previewとgeneratorは共有render coreで同じ合成を行う。
 - 参照中の素材セットごとにSGDK tileset/background/palette/billboard sprite/decision tableを生成し、フロアの素材セットindexと `DunViewSet` registryで初期表示・フロア遷移時に切り替える。未使用セットをROMへ含めず、cacheとbudgetはセット単位に管理する。
+- 壁・扉による宝箱/階段/エネミーの部分遮蔽は、共有render coreで `0=壁なし、1～15=遠→近` に量子化し、8x8タイル内の最小非ゼロ壁コードが重なる全ビルボードのコードより大きい場合だけBG_Aを高Priorityにする。previewとSGDKは同じ厳密比較・整数補間・タイル単位判定を使う。
+- Priority decision tableはテクスチャ非依存の共通1組とし、素材セット追加で複製しない。深度PNG/TILESETを生成せず、SGDK側は低Priorityスプライトの自動VRAM割当・自動タイル転送を使う。画素マスク、8スロット×36タイル固定VRAM、9216B RAM、手動スプライトDMAを再導入しない。
 
 ---
 
@@ -312,7 +314,7 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 
 ---
 
-*Last Updated: 2026-07 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.1 / Dungeon reusable seven-element asset sets / Indexed image import and validation / Fixed BG_B floor-ceiling + transparent BG_A walls / Per-set SGDK resources / Dungeon template / Editor UX guardrails / Bundled WASM split metadata*
+*Last Updated: 2026-07 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Dungeon reusable asset sets and common billboards / Indexed image import and validation / Fixed BG_B floor-ceiling + transparent BG_A walls / Per-set SGDK resources / Dynamic BG_A tile Priority billboard occlusion / Dungeon template / Editor UX guardrails / Bundled WASM split metadata*
 
 
 ## MD/PCE split note

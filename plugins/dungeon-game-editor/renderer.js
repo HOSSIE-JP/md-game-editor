@@ -813,7 +813,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const states = core.sampleEdgeStates(floor, frame.base.x, frame.base.y, frame.base.dir, frame.defs);
     /* 左回転: 鏡像エッジで右回転テーブルを評価し、水平反転で合成する (実機と同一) */
     const defsForRender = frame.mirrored ? frame.turnDefs : frame.defs;
-    let foreground = core.renderView(
+    const rendered = core.renderViewDetailed(
       frame.pose,
       defsForRender,
       states,
@@ -821,14 +821,34 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       model.palette,
       model.transparentBackground,
     );
-    if (frame.mirrored) foreground = mirrorIndices(foreground);
-    const indices = core.compositeView(model.background, foreground);
-
+    let foreground = rendered.pixels;
+    let wallDepth = rendered.depthCodes;
+    if (frame.mirrored) {
+      foreground = mirrorIndices(foreground);
+      wallDepth = mirrorIndices(wallDepth);
+    }
+    const billboards = collectBillboards(model, frame, floor);
+    const tileDepths = core.minimumDepthByTile(wallDepth);
+    const priorityTiles = core.priorityTilesForBillboards(
+      tileDepths,
+      billboards.map((item) => ({ ...item.tileBounds, depthCode: item.depthCode })),
+    );
+    /* ハードウェアの描画順: BG_B → 低Priority BG_A → 低Priority sprite → 高Priority BG_A。 */
+    const indices = new Uint8Array(model.background);
+    for (let y = 0; y < VIEW_H; y++) {
+      for (let x = 0; x < VIEW_W; x++) {
+        const pixel = (y * VIEW_W) + x;
+        const wall = foreground[pixel];
+        const tile = ((y >> 3) * core.VIEW_TILE_W) + (x >> 3);
+        if (wall && !priorityTiles[tile]) indices[pixel] = wall;
+      }
+    }
     const cell = cellAt(state.preview.x, state.preview.y);
     const paletteForView = cell?.dark ? model.darkPalette : model.palette;
     const image = viewCtx.createImageData(VIEW_W, VIEW_H);
     core.indicesToRgba(indices, paletteForView, image.data);
-    drawBillboardsInto(image.data, model, frame, floor);
+    drawBillboardsInto(image.data, model, billboards);
+    drawHighPriorityWalls(image.data, foreground, priorityTiles, paletteForView);
     return image;
   }
 
@@ -848,15 +868,16 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
    * エネミーの実位置検索 (enemies配列) をセルのフラグ (宝箱/階段) 参照より先に行う
    * (実機 updateBillboards の enemyAt() 優先ルールと同じ)。
    */
-  function drawBillboardsInto(rgba, model, frame, floor) {
+  function collectBillboards(model, frame, floor) {
     const cells = model.billboards.cells;
     const size = core.BB_FRAME_SIZE;
     const enemies = state.enemiesByFloor.get(floor.id) || [];
     const dir = frame.base.dir & 3;
+    const items = [];
     /* エネミーのセル間スライド進行度 (num/den)。静止フレーム以外 (プレイヤー移動アニメ中) は
      * enemyLastTick が進まないため num は den へ張り付き、実質 cur セルで静止する。 */
     const slide = enemySlideProgress();
-    for (let i = 0; i < cells.length; i++) {
+    for (let i = 0; i < cells.length && items.length < core.DUN_MAX_ENEMIES; i++) {
       const pose = frame.bbPoses[i];
       if (!pose || pose.frame < 0) continue;
       let dd = cells[i].dd;
@@ -889,6 +910,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       let drawSx0 = sx0;
       let drawTop = pose.y;
       let drawFrame = pose.frame;
+      let drawDepthCode = pose.depthCode || 0;
       if (enemy && (enemy.prevX !== enemy.x || enemy.prevY !== enemy.y) && slide.num < slide.den) {
         const podx = enemy.prevX - frame.base.x;
         const pody = enemy.prevY - frame.base.y;
@@ -906,17 +928,67 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
           drawTop = core.billboardSlideLerp(posePrev.y, pose.y, slide.num, slide.den);
           /* 距離バケット (スプライトサイズ) も補間し、移動に合わせて拡大縮小を段階変化させる */
           drawFrame = core.billboardSlideFrame(posePrev.frame, pose.frame, slide.num, slide.den);
+          drawDepthCode = core.billboardSlideLerp(
+            posePrev.depthCode || 0,
+            pose.depthCode || 0,
+            slide.num,
+            slide.den,
+          );
         }
       }
       const frameOffset = drawFrame * size;
+      const visibleBounds = billboardVisibleBounds(sheet, rowOffset, frameOffset, size);
+      if (!visibleBounds) continue;
+      const tileBounds = core.tileBoundsForRect(
+        drawSx0 + visibleBounds.x,
+        drawTop + visibleBounds.y,
+        visibleBounds.width,
+        visibleBounds.height,
+      );
+      if (!tileBounds) continue;
+      items.push({
+        sheet,
+        rowOffset,
+        frameOffset,
+        x: drawSx0,
+        y: drawTop,
+        depthCode: drawDepthCode,
+        tileBounds,
+      });
+    }
+    return items;
+  }
+
+  function billboardVisibleBounds(sheet, rowOffset, frameOffset, size) {
+    let x0 = size;
+    let y0 = size;
+    let x1 = -1;
+    let y1 = -1;
+    for (let y = 0; y < size; y++) {
+      const sourceRow = rowOffset + y;
+      for (let x = 0; x < size; x++) {
+        if (!sheet.pixels[(sourceRow * sheet.width) + frameOffset + x]) continue;
+        if (x < x0) x0 = x;
+        if (y < y0) y0 = y;
+        if (x > x1) x1 = x;
+        if (y > y1) y1 = y;
+      }
+    }
+    if (x1 < x0 || y1 < y0) return null;
+    return { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
+  }
+
+  function drawBillboardsInto(rgba, model, billboards) {
+    const size = core.BB_FRAME_SIZE;
+    billboards.forEach((item) => {
       for (let y = 0; y < size; y++) {
-        const dy = drawTop + y;
+        const dy = item.y + y;
         if (dy < 0 || dy >= VIEW_H) continue;
-        const sourceRow = rowOffset + y;
+        const sourceRow = item.rowOffset + y;
         for (let x = 0; x < size; x++) {
-          const dx = drawSx0 + x;
+          const dx = item.x + x;
           if (dx < 0 || dx >= VIEW_W) continue;
-          const paletteIndex = sheet.pixels[(sourceRow * sheet.width) + frameOffset + x];
+          const paletteIndex = item.sheet.pixels[(sourceRow * item.sheet.width) + item.frameOffset + x];
           if (!paletteIndex) continue;
           const color = model.spritePalette[paletteIndex];
           const dest = ((dy * VIEW_W) + dx) * 4;
@@ -925,6 +997,23 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
           rgba[dest + 2] = color.b;
           rgba[dest + 3] = 255;
         }
+      }
+    });
+  }
+
+  function drawHighPriorityWalls(rgba, foreground, priorityTiles, palette) {
+    for (let y = 0; y < VIEW_H; y++) {
+      for (let x = 0; x < VIEW_W; x++) {
+        const pixel = (y * VIEW_W) + x;
+        const paletteIndex = foreground[pixel];
+        const tile = ((y >> 3) * core.VIEW_TILE_W) + (x >> 3);
+        if (!paletteIndex || !priorityTiles[tile]) continue;
+        const color = palette[paletteIndex];
+        const dest = pixel * 4;
+        rgba[dest] = color.r;
+        rgba[dest + 1] = color.g;
+        rgba[dest + 2] = color.b;
+        rgba[dest + 3] = 255;
       }
     }
   }

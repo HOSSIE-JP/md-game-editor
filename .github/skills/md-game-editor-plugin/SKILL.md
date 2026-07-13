@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-07 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.1 / Dungeon reusable seven-element asset sets / Indexed image import and validation / Fixed BG_B floor-ceiling + transparent BG_A walls / Per-set SGDK resources / Dungeon template / Editor UX guardrails / Bundled WASM split metadata
+> § Last Updated: 2026-07 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Dungeon reusable asset sets and common billboards / Indexed image import and validation / Fixed BG_B floor-ceiling + transparent BG_A walls / Per-set SGDK resources / Dynamic BG_A tile Priority billboard occlusion / Dungeon template / Editor UX guardrails / Bundled WASM split metadata
 
 ---
 
@@ -343,8 +343,8 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `md-bgm-composer` | `editor`, `converter`, `asset` | Mega Drive 向け BGM tracker、MIDI import、VGM/XGM export、XGM2 アセット登録 |
 | `rhythm-game-editor` | `editor`, `asset` | Mega Drive 向けリズムゲームの楽曲/譜面/波形/アルバムアート/ムードスプライト/システムアセット設定 |
 | `rhythm-game-builder` | `build` | リズムゲームエンジン同期、譜面/RES/C データ生成、builder role による ROM ビルド連携 |
-| `dungeon-game-editor` | `editor` | Mega Drive向け3Dダンジョンの薄壁フロア編集、ランダム生成、フロア別に選べる7要素の再利用可能素材セット、標準SGDK画像pipelineによる取り込み/検証/個別preview、固定BG_B + 透明BG_Aを共有する実機一致3D preview、セット別リソース生成 |
-| `dungeon-game-builder` | `build` | 素材セット別 `DunViewSet` 切替、固定BG_Bの床/天井と透明BG_Aの壁/扉、デシジョンテーブル評価 + VRAMダブルバッファDMA、移動/旋回/階段/LOS/暗闇/ミニマップ、builder roleによるROMビルド連携 |
+| `dungeon-game-editor` | `editor` | Mega Drive向け3Dダンジョンの薄壁フロア編集、ランダム生成、フロア別4要素素材セットとプロジェクト共通ビルボード、標準SGDK画像pipelineによる取り込み/検証/個別preview、固定BG_B + 動的Priority付き透明BG_A壁を共有する実機一致3D preview、セット別リソース生成 |
+| `dungeon-game-builder` | `build` | 素材セット別 `DunViewSet` 切替、固定BG_Bの床/天井と透明BG_Aの壁/扉、共通Priorityデシジョンテーブル、低Priority自動VRAMビルボード、移動/旋回/階段/LOS/暗闇/ミニマップ、builder roleによるROMビルド連携 |
 | `standard-emulator` | `emulator` | WASM Mega Drive エミュレーター |
 | `standard-api-emulator` | `emulator`, `tool` | REST API Mega Drive エミュレーター |
 | `ai-control` | `editor`, `tool` | 外部 AI ツール向け localhost REST / MCP bridge |
@@ -361,6 +361,8 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 - 新規タグなし画像は全体を1要素として扱う。既存の `path#tag` は3x2/4x2アトラス互換として切り出す。上書き時はtexture cacheを無効化し、非同期previewは世代管理して別セットへ古い結果を反映しない。
 - 床/天井の32x32パターンはデシジョンタイルへ焼き込まず、BG_Bの下半分/上半分（各200x64）へ固定反復配置する。壁/扉はpalette index 0を透明にしたBG_A動的タイルとして重ね、rendererとserviceは同じ合成順でWYSIWYGを保つ。
 - ビルドは参照中セットごとに壁/扉tileset、床/天井background tileset、通常/暗闇palette、ビルボードpalette + sprite sheet、decision tableを生成し、`DunViewSet`レジストリとフロアのセットindexで切り替える。未参照セットはROMへ出力せず、cache/budget/warningはセット別と合計で返す。
+- 壁・扉によるビルボード遮蔽は共有render coreの4bit深度コード (`0=壁なし、1～15=遠→近`) を8x8タイル内の最小非ゼロ値へ縮約し、重なる全ビルボードについて `tile_min_wall_depth > billboard_depth` の場合だけBG_Aを高Priorityにする。同一コード・遠い壁は低Priorityのままとし、previewとSGDKでstatic/fwd/turnおよび敵スライドの深度補間を一致させる。
+- Priority decision table/cacheはテクスチャ非依存でプロジェクトに1組だけ生成し、cache keyはcore versionとanimation/turn frame数だけにする。深度PNG/TILESETは生成しない。SGDK側はSprite Engineの自動VRAM割当・自動タイル転送を使い、全ビルボードを低Priorityにする。画素マスク、固定VRAM、9216B RAM、手動スプライトDMAを再導入しない。
 
 ### 分離後の標準エミュレーター同梱
 

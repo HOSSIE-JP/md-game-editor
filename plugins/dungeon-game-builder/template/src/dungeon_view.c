@@ -25,6 +25,15 @@
 #define DUN_BANK1_INDEX (TILE_USER_INDEX + DUN_BANK_TILES)
 #define DUN_SPRITE_COUNT 8
 
+typedef struct
+{
+    u8 tx0;
+    u8 ty0;
+    u8 tx1;
+    u8 ty1;
+    u8 depth_code;
+} DunPriorityBox;
+
 static const s8 dir_dx[4] = { 0, 1, 0, -1 };
 static const s8 dir_dy[4] = { -1, 0, 1, 0 };
 static const u16 edge_bits[4] = { DUN_EDGE_N, DUN_EDGE_E, DUN_EDGE_S, DUN_EDGE_W };
@@ -33,6 +42,15 @@ static const u16 door_bits[4] = { DUN_DOOR_N, DUN_DOOR_E, DUN_DOOR_S, DUN_DOOR_W
 static u8 edge_state[DUN_EDGE_STATE_MAX];
 static u32 tile_staging[DUN_BANK_TILES * 8];
 static u16 map_staging[DUN_VIEW_TILE_COUNT];
+/* 各8x8壁タイル内の最小非ゼロ4bit深度。画素タイルやVRAM転送は持たない。 */
+static u8 wall_priority_depth[DUN_VIEW_TILE_COUNT];
+static u16 wall_priority_generation;
+static u16 applied_priority_generation;
+static DunPriorityBox bb_priority_boxes[DUN_SPRITE_COUNT];
+static DunPriorityBox applied_priority_boxes[DUN_SPRITE_COUNT];
+static u8 bb_priority_box_count;
+static u8 applied_priority_box_count;
+static bool priority_cache_valid;
 static u8 back_bank;
 static bool view_dark;
 static const DunViewSet *active_view_set;
@@ -127,6 +145,11 @@ void DUN_initView(void)
     PAL_setColors(32, dun_mm_palette, 16, CPU);
     SPR_init();
     for (i = 0; i < DUN_SPRITE_COUNT; i++) bb_sprites[i] = NULL;
+    wall_priority_generation = 0;
+    applied_priority_generation = 0;
+    bb_priority_box_count = 0;
+    applied_priority_box_count = 0;
+    priority_cache_valid = FALSE;
     back_bank = 0;
     view_dark = FALSE;
     active_view_set = NULL;
@@ -247,15 +270,35 @@ static void evaluateEdgeStates(const DungeonFloorData *floor, u8 x, u8 y, u8 dir
  * フレーム合成: デシジョンツリー評価 → タイルステージング → DMA
  * ------------------------------------------------------------ */
 
-static void stageFrame(const DunFrameTable *table, bool mirrored)
+static u16 evaluateFrameLocal(const DunFrameTable *table, u16 tile)
+{
+    u16 ref = table->offsets[tile];
+    while (!(ref & 0x8000))
+    {
+        ref = table->nodes[ref + 1 + edge_state[table->nodes[ref]]];
+    }
+    return (u16)(ref & 0x7fff);
+}
+
+static u16 evaluatePriorityLocal(const DunPriorityTable *table, u16 tile)
+{
+    u16 ref = table->offsets[tile];
+    while (!(ref & 0x8000))
+    {
+        ref = table->nodes[ref + 1 + edge_state[table->nodes[ref]]];
+    }
+    return (u16)(ref & 0x7fff);
+}
+
+static void stageFrame(const DunFrameTable *table, const DunPriorityTable *priority_table, bool mirrored)
 {
     const u16 bank_base = back_bank ? DUN_BANK1_INDEX : DUN_BANK0_INDEX;
     u16 tile;
     for (tile = 0; tile < DUN_VIEW_TILE_COUNT; tile++)
     {
         u16 src_tile = tile;
-        u16 ref;
         u16 local;
+        u16 priority_local;
         u16 global;
         u8 flips;
         const u32 *src;
@@ -266,12 +309,8 @@ static void stageFrame(const DunFrameTable *table, bool mirrored)
             const u16 ty = tile / DUN_VIEW_TILE_W;
             src_tile = (u16)((ty * DUN_VIEW_TILE_W) + (DUN_VIEW_TILE_W - 1 - tx));
         }
-        ref = table->offsets[src_tile];
-        while (!(ref & 0x8000))
-        {
-            ref = table->nodes[ref + 1 + edge_state[table->nodes[ref]]];
-        }
-        local = (u16)(ref & 0x7fff);
+        local = evaluateFrameLocal(table, src_tile);
+        priority_local = evaluatePriorityLocal(priority_table, src_tile);
         global = table->tile_map[local];
         flips = table->tile_flips[local];
         if (mirrored) flips ^= 1;
@@ -286,7 +325,10 @@ static void stageFrame(const DunFrameTable *table, bool mirrored)
         dest[6] = src[6];
         dest[7] = src[7];
         map_staging[tile] = TILE_ATTR_FULL(PAL0, FALSE, (flips & 2) ? 1 : 0, (flips & 1) ? 1 : 0, bank_base + tile);
+        wall_priority_depth[tile] = priority_table->values[priority_local];
     }
+    wall_priority_generation++;
+    if (wall_priority_generation == 0) wall_priority_generation = 1;
 }
 
 /*
@@ -399,12 +441,117 @@ static const SpriteDefinition *billboardDefForFlags(u8 flags)
     return NULL;
 }
 
-static void updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
+static const AnimationFrame *billboardFrame(const SpriteDefinition *def, s16 anim, s16 frame_index)
+{
+    if (anim < 0 || anim >= def->numAnimation) return NULL;
+    if (frame_index < 0 || frame_index >= def->animations[anim]->numFrame) return NULL;
+    return def->animations[anim]->frames[frame_index];
+}
+
+/* ResCompが生成した実際のメタスプライト部品から、ビュー内の外接タイル範囲を得る。 */
+static void addBillboardPriorityBox(const AnimationFrame *frame, s16 sx, s16 sy, u8 depth_code)
+{
+    const FrameVDPSprite *part = frame->frameVDPSprites;
+    const u8 part_count = (u8)frame->numSprite & 0x7f;
+    s16 x0 = 32767;
+    s16 y0 = 32767;
+    s16 x1 = -32768;
+    s16 y1 = -32768;
+    u8 part_index;
+    DunPriorityBox *box;
+    if (!part_count || bb_priority_box_count >= DUN_SPRITE_COUNT) return;
+    for (part_index = 0; part_index < part_count; part_index++, part++)
+    {
+        const s16 left = (s16)(sx + part->offsetX - (DUN_VIEW_X * 8));
+        const s16 top = (s16)(sy + part->offsetY - (DUN_VIEW_Y * 8));
+        const s16 right = (s16)(left + ((((part->size >> 2) & 3) + 1) * 8) - 1);
+        const s16 bottom = (s16)(top + (((part->size & 3) + 1) * 8) - 1);
+        if (left < x0) x0 = left;
+        if (top < y0) y0 = top;
+        if (right > x1) x1 = right;
+        if (bottom > y1) y1 = bottom;
+    }
+    if (x1 < 0 || y1 < 0 || x0 >= DUN_VIEW_PIXEL_W || y0 >= DUN_VIEW_PIXEL_H) return;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= DUN_VIEW_PIXEL_W) x1 = DUN_VIEW_PIXEL_W - 1;
+    if (y1 >= DUN_VIEW_PIXEL_H) y1 = DUN_VIEW_PIXEL_H - 1;
+    box = &bb_priority_boxes[bb_priority_box_count++];
+    box->tx0 = (u8)(x0 >> 3);
+    box->ty0 = (u8)(y0 >> 3);
+    box->tx1 = (u8)(x1 >> 3);
+    box->ty1 = (u8)(y1 >> 3);
+    box->depth_code = depth_code;
+}
+
+static bool priorityBoxesMatchApplied(void)
+{
+    u8 i;
+    if (!priority_cache_valid
+        || applied_priority_generation != wall_priority_generation
+        || applied_priority_box_count != bb_priority_box_count) return FALSE;
+    for (i = 0; i < bb_priority_box_count; i++)
+    {
+        const DunPriorityBox *a = &bb_priority_boxes[i];
+        const DunPriorityBox *b = &applied_priority_boxes[i];
+        if (a->tx0 != b->tx0 || a->ty0 != b->ty0 || a->tx1 != b->tx1
+            || a->ty1 != b->ty1 || a->depth_code != b->depth_code) return FALSE;
+    }
+    return TRUE;
+}
+
+/*
+ * 重なる全ビルボードより壁タイルの最小深度が大きい場合だけPriorityを立てる。
+ * 同一深度・遠い壁は低Priorityのままにし、正しい画素を消す誤遮蔽を避ける。
+ */
+static bool applyBillboardPriorities(void)
+{
+    bool changed = FALSE;
+    u16 tile;
+    u8 i;
+    if (priorityBoxesMatchApplied()) return FALSE;
+    for (tile = 0; tile < DUN_VIEW_TILE_COUNT; tile++)
+    {
+        const u8 tx = (u8)(tile % DUN_VIEW_TILE_W);
+        const u8 ty = (u8)(tile / DUN_VIEW_TILE_W);
+        const u8 wall_depth = wall_priority_depth[tile];
+        bool high = wall_depth > 0;
+        u16 next_attr;
+        if (high)
+        {
+            for (i = 0; i < bb_priority_box_count; i++)
+            {
+                const DunPriorityBox *box = &bb_priority_boxes[i];
+                if (tx < box->tx0 || tx > box->tx1 || ty < box->ty0 || ty > box->ty1) continue;
+                if (wall_depth <= box->depth_code)
+                {
+                    high = FALSE;
+                    break;
+                }
+            }
+        }
+        next_attr = (u16)(map_staging[tile] & (u16)~TILE_ATTR_PRIORITY_MASK);
+        if (high) next_attr |= TILE_ATTR_PRIORITY_MASK;
+        if (next_attr != map_staging[tile])
+        {
+            map_staging[tile] = next_attr;
+            changed = TRUE;
+        }
+    }
+    for (i = 0; i < bb_priority_box_count; i++) applied_priority_boxes[i] = bb_priority_boxes[i];
+    applied_priority_box_count = bb_priority_box_count;
+    applied_priority_generation = wall_priority_generation;
+    priority_cache_valid = TRUE;
+    return changed;
+}
+
+static bool updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
                              const DunBBPose *poses, bool mirrored)
 {
     const u8 right = (u8)((dir + 1) & 3);
     u16 used = 0;
     u16 i;
+    bb_priority_box_count = 0;
     for (i = 0; i < DUN_BB_CELL_COUNT && used < DUN_SPRITE_COUNT; i++)
     {
         const DunBBPose *pose = &poses[i];
@@ -418,6 +565,9 @@ static void updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
         s16 sx;
         s16 sy;
         s16 draw_frame;
+        u8 draw_depth;
+        s16 draw_anim;
+        const AnimationFrame *selected_frame;
         if (pose->frame < 0) continue;
         dd = dun_bb_cells[i].dd;
         dl = dun_bb_cells[i].dl;
@@ -448,6 +598,7 @@ static void updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
             sx = cur_sx;
             sy = cur_sy;
             draw_frame = pose->frame;
+            draw_depth = pose->depth_code;
             /* エネミーは直前セル (prev_x/prev_y) の焼き込みポーズと現セルのポーズを num/den で
              * 補間してスライドさせる (renderer.js drawBillboardsInto と同一式・同一の0方向切り捨て
              * 整数除算)。移動していない・直前セルが視界窓外/カリング時は補間せず現セルへ描く。 */
@@ -481,6 +632,9 @@ static void updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
                                 const s16 q = (s16)((2 * absn + enemy_slide_den) / (2 * enemy_slide_den));
                                 draw_frame = (s16)(prev_pose->frame + ((fn < 0) ? -q : q));
                             }
+                            draw_depth = (u8)((s16)prev_pose->depth_code
+                                + ((s16)((s16)pose->depth_code - (s16)prev_pose->depth_code)
+                                    * (s16)enemy_slide_num) / (s16)enemy_slide_den);
                         }
                         break;
                     }
@@ -489,22 +643,31 @@ static void updateBillboards(const DungeonFloorData *floor, u8 x, u8 y, u8 dir,
             sx += DUN_VIEW_X * 8;
             sy += DUN_VIEW_Y * 8;
         }
+        draw_anim = enemy ? anim_row : 0;
+        selected_frame = billboardFrame(def, draw_anim, draw_frame);
+        if (!selected_frame) continue;
         if (!bb_sprites[used])
         {
-            bb_sprites[used] = SPR_addSprite(def, sx, sy, TILE_ATTR(PAL1, TRUE, FALSE, FALSE));
+            /* 低Priorityスプライトは低Priority BG_Aより前、高Priority BG_Aより後ろに描かれる。 */
+            bb_sprites[used] = SPR_addSprite(def, sx, sy, TILE_ATTR(PAL1, FALSE, FALSE, FALSE));
             if (!bb_sprites[used]) continue;
         }
-        SPR_setDefinition(bb_sprites[used], def);
+        else if (bb_sprites[used]->definition != def && !SPR_setDefinition(bb_sprites[used], def))
+        {
+            SPR_setVisibility(bb_sprites[used], HIDDEN);
+            continue;
+        }
         SPR_setPosition(bb_sprites[used], sx, sy);
-        if (enemy) SPR_setAnimAndFrame(bb_sprites[used], anim_row, (u8)draw_frame);
-        else SPR_setFrame(bb_sprites[used], pose->frame);
+        SPR_setAnimAndFrame(bb_sprites[used], draw_anim, draw_frame);
         SPR_setVisibility(bb_sprites[used], VISIBLE);
+        addBillboardPriorityBox(selected_frame, sx, sy, draw_depth);
         used++;
     }
     for (; used < DUN_SPRITE_COUNT; used++)
     {
         if (bb_sprites[used]) SPR_setVisibility(bb_sprites[used], HIDDEN);
     }
+    return applyBillboardPriorities();
 }
 
 /* ------------------------------------------------------------
@@ -646,7 +809,7 @@ void DUN_drawStatic(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
     last_static_y = y;
     last_static_dir = dir & 3;
     evaluateEdgeStates(floor, x, y, dir & 3, dun_edges_move, DUN_MOVE_EDGE_COUNT);
-    stageFrame(active_view_set->frame_static, FALSE);
+    stageFrame(active_view_set->frame_static, &dun_priority_frame_static, FALSE);
     updateBillboards(floor, x, y, dir & 3, dun_bb_static, FALSE);
     flushFrame();
 }
@@ -658,8 +821,11 @@ void DUN_drawStatic(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
 void DUN_refreshBillboards(void)
 {
     if (!last_static_floor) return;
-    updateBillboards(last_static_floor, last_static_x, last_static_y, last_static_dir, dun_bb_static, FALSE);
-    SPR_update();
+    if (updateBillboards(last_static_floor, last_static_x, last_static_y, last_static_dir, dun_bb_static, FALSE))
+    {
+        VDP_setTileMapDataRect(BG_A, map_staging, DUN_VIEW_X, DUN_VIEW_Y,
+                               DUN_VIEW_TILE_W, DUN_VIEW_TILE_H, DUN_VIEW_TILE_W, DMA_QUEUE);
+    }
 }
 
 void DUN_playForward(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
@@ -668,7 +834,7 @@ void DUN_playForward(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
     evaluateEdgeStates(floor, x, y, dir & 3, dun_edges_move, DUN_MOVE_EDGE_COUNT);
     for (frame = 0; frame < DUN_FWD_FRAMES; frame++)
     {
-        stageFrame(&active_view_set->frames_fwd[frame], FALSE);
+        stageFrame(&active_view_set->frames_fwd[frame], &dun_priority_frames_fwd[frame], FALSE);
         updateBillboards(floor, x, y, dir & 3, dun_bb_fwd[frame], FALSE);
         flushFrame();
     }
@@ -681,7 +847,7 @@ void DUN_playBackward(const DungeonFloorData *floor, u8 target_x, u8 target_y, u
     evaluateEdgeStates(floor, target_x, target_y, dir & 3, dun_edges_move, DUN_MOVE_EDGE_COUNT);
     for (frame = DUN_FWD_FRAMES; frame > 0; frame--)
     {
-        stageFrame(&active_view_set->frames_fwd[frame - 1], FALSE);
+        stageFrame(&active_view_set->frames_fwd[frame - 1], &dun_priority_frames_fwd[frame - 1], FALSE);
         updateBillboards(floor, target_x, target_y, dir & 3, dun_bb_fwd[frame - 1], FALSE);
         flushFrame();
     }
@@ -695,7 +861,7 @@ void DUN_playTurn(const DungeonFloorData *floor, u8 x, u8 y, u8 dir, bool left)
     else evaluateEdgeStates(floor, x, y, dir & 3, dun_edges_turn, DUN_TURN_EDGE_COUNT);
     for (frame = 0; frame < DUN_TURN_FRAMES; frame++)
     {
-        stageFrame(&active_view_set->frames_turn[frame], left);
+        stageFrame(&active_view_set->frames_turn[frame], &dun_priority_frames_turn[frame], left);
         updateBillboards(floor, x, y, dir & 3, dun_bb_turn[frame], left);
         flushFrame();
     }

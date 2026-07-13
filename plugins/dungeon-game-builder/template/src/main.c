@@ -605,9 +605,10 @@ int main(bool hardReset)
                 enemy_next_step_vtime = vtimer + interval;
                 DUN_setEnemies(dun_enemies[floor_index], DUN_MAX_ENEMIES);
             }
-            /* 毎フレーム、直前 tick からの経過でスライド進行度を更新しビルボードを描き直す
-             * (tick 間もセル間を補間して滑らかに動かす)。DUN_refreshBillboards は壁 DMA を
-             * 伴わずスプライトだけ更新するので毎フレーム呼んでよい。 */
+            /* 毎フレーム、直前 tick からの経過でスライド進行度を更新しビルボードを描き直す。
+             * 壁パターンは再転送せず、外接タイル境界/depth/表示数の変化でPriority bitが
+             * 実際に変わった場合だけBG_AマップをDMA更新する。Sprite Engineの反映は
+             * ループ末尾のSPR_update()へ集約する。 */
             slide = (s32)(vtimer - enemy_last_step_vtime);
             if (slide < 0) slide = 0;
             if (slide > (s32)interval) slide = (s32)interval;

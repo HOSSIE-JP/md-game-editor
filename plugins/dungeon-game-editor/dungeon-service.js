@@ -96,8 +96,11 @@ const GENERATED_BB_SHEETS = {
   enemy: 'dungeon/generated/dungeon_bb_enemy.png',
 };
 const GENERATED_COMMON_CACHE_REL = 'dungeon/generated/common/bake.bin';
+const GENERATED_PRIORITY_DIR_REL = 'dungeon/generated/priority';
+const GENERATED_PRIORITY_CACHE_REL = `${GENERATED_PRIORITY_DIR_REL}/bake.bin`;
+const LEGACY_GENERATED_OCCLUSION_DIR_REL = 'dungeon/generated/occlusion';
 const BAKE_CACHE_REL = 'dungeon/generated/dungeon_bake_cache.json';
-const BAKE_CACHE_VERSION = 3;
+const BAKE_CACHE_VERSION = 5;
 const BUDGET_TILE_WARN = 40000;
 const BUDGET_NODE_WORDS_WARN = 24000;
 const BUDGET_TOTAL_BYTES_WARN = 1536 * 1024;
@@ -1156,6 +1159,42 @@ function buildViewExport(settings, textures) {
 }
 
 /*
+ * 壁テクスチャから独立したPriorityデシジョンテーブル。
+ * 葉は画素タイルではなく、8x8内の最小非ゼロ4bit壁深度だけを保持する。
+ */
+function buildPriorityExport(settings) {
+  const spaces = core.buildEdgeSpaces(settings);
+  const bake = (pose, defs) => core.bakePriorityFrame(pose, defs);
+  const staticFrame = bake(spaces.frames.staticPose, spaces.move);
+  const fwdFrames = spaces.frames.fwdPoses.map((pose) => bake(pose, spaces.move));
+  const turnFrames = spaces.frames.turnPoses.map((pose) => bake(pose, spaces.turn));
+  const allFrames = [staticFrame, ...fwdFrames, ...turnFrames];
+  const nodeWordsMax = Math.max(...allFrames.map((frame) => frame.stats.nodeWords));
+  const nodeWordsTotal = allFrames.reduce((sum, frame) => sum + frame.stats.nodeWords, 0);
+  const tableBytes = allFrames.reduce((sum, frame) => (
+    sum + ((frame.offsets.length + frame.nodes.length) * 2) + frame.values.length
+  ), 0);
+  const valueCount = allFrames.reduce((sum, frame) => sum + frame.values.length, 0);
+  return {
+    settings: {
+      animation_frames: settings.animation_frames,
+      turn_frames: settings.turn_frames,
+    },
+    spaces,
+    staticFrame,
+    fwdFrames,
+    turnFrames,
+    budget: {
+      valueCount,
+      nodeWordsMax,
+      nodeWordsTotal,
+      tableBytes,
+      totalBytes: tableBytes,
+    },
+  };
+}
+
+/*
  * 宝箱/上り階段/下り階段のビルボードスプライトシート+パレット+座標テーブルは
  * プロジェクトで1回だけ焼き込む (settings.common_assets 由来、素材セット非依存)。
  */
@@ -1296,6 +1335,15 @@ function generatedCommonDescriptor() {
   };
 }
 
+function generatedPriorityDescriptor() {
+  return {
+    key: 'priority',
+    paths: {
+      cache: GENERATED_PRIORITY_CACHE_REL,
+    },
+  };
+}
+
 /* ==================================================================
  * SGDK エクスポート: dungeon_patterns.h / dungeon_patterns.c
  * ================================================================== */
@@ -1338,8 +1386,16 @@ function emitFrameTable(lines, prefix, frame) {
   return `{ ${prefix}_off, ${prefix}_nodes, ${prefix}_tiles, ${prefix}_flips }`;
 }
 
+function emitPriorityTable(lines, prefix, frame) {
+  const nodes = frame.nodes.length ? frame.nodes : Uint16Array.from([0]);
+  lines.push(...cHexU16Array(`${prefix}_off`, frame.offsets));
+  lines.push(...cHexU16Array(`${prefix}_nodes`, nodes));
+  lines.push(...cU8Array(`${prefix}_values`, frame.values));
+  return `{ ${prefix}_off, ${prefix}_nodes, ${prefix}_values }`;
+}
+
 function emitBillboardPoseRows(poses) {
-  return poses.map((pose) => `{ ${pose.x}, ${pose.y}, ${pose.frame} }`).join(', ');
+  return poses.map((pose) => `{ ${pose.x}, ${pose.y}, ${pose.frame}, ${pose.depthCode || 0} }`).join(', ');
 }
 
 /*
@@ -1349,7 +1405,7 @@ function emitBillboardPoseRows(poses) {
  * view.settings (キャッシュヒット時は旧い値のまま) ではなく常に最新の settings から
  * #define を生成することで、キャッシュヒットでも設定変更が反映されるようにする。
  */
-function exportPatternFiles(projectDir, setEntries, commonView, settings) {
+function exportPatternFiles(projectDir, setEntries, commonView, priorityView, settings) {
   const headerPath = path.join(projectDir, 'inc', 'dungeon_patterns.h');
   const sourcePath = path.join(projectDir, 'src', 'dungeon_patterns.c');
   if (!setEntries.length) throw new Error('referenced dungeon asset set is required');
@@ -1399,13 +1455,19 @@ function exportPatternFiles(projectDir, setEntries, commonView, settings) {
     '',
     'typedef struct { s8 dd; s8 dl; u8 face; } DunEdgeDef;',
     'typedef struct { s8 dd; s8 dl; } DunBBCell;',
-    'typedef struct { s16 x; s16 y; s8 frame; } DunBBPose;',
+    'typedef struct { s16 x; s16 y; s8 frame; u8 depth_code; } DunBBPose;',
     'typedef struct {',
     '    const u16 *offsets;    /* [DUN_VIEW_TILE_COUNT] bit15=葉 */',
     '    const u16 *nodes;      /* [edgeId, 開, 壁, 扉, 上階段, 下階段] の u16 ストリーム */',
     '    const u16 *tile_map;   /* ローカルID → グローバルタイル番号 */',
     '    const u8 *tile_flips;  /* ローカルID → bit0=HFLIP, bit1=VFLIP */',
     '} DunFrameTable;',
+    '',
+    'typedef struct {',
+    '    const u16 *offsets;    /* [DUN_VIEW_TILE_COUNT] bit15=葉 */',
+    '    const u16 *nodes;      /* DunFrameTableと同じ決定木 */',
+    '    const u8 *values;      /* ローカルID → タイル内の最小非ゼロ壁深度 (0..15) */',
+    '} DunPriorityTable;',
     '',
     /* 宝箱/上り階段/下り階段/ビルボードpaletteはセット非依存 (dun_common_bb_* をグローバル参照) */
     'typedef struct {',
@@ -1425,6 +1487,9 @@ function exportPatternFiles(projectDir, setEntries, commonView, settings) {
     'extern const DunBBPose dun_bb_static[DUN_BB_CELL_COUNT];',
     'extern const DunBBPose dun_bb_fwd[DUN_FWD_FRAMES][DUN_BB_CELL_COUNT];',
     'extern const DunBBPose dun_bb_turn[DUN_TURN_FRAMES][DUN_BB_CELL_COUNT];',
+    'extern const DunPriorityTable dun_priority_frame_static;',
+    'extern const DunPriorityTable dun_priority_frames_fwd[DUN_FWD_FRAMES];',
+    'extern const DunPriorityTable dun_priority_frames_turn[DUN_TURN_FRAMES];',
     'extern const DunViewSet dun_view_sets[DUN_VIEW_SET_COUNT];',
     '',
     '#endif /* _DUNGEON_PATTERNS_H_ */',
@@ -1463,6 +1528,21 @@ function exportPatternFiles(projectDir, setEntries, commonView, settings) {
   billboards.turnPoses.forEach((poses, index) => {
     lines.push(`    { ${emitBillboardPoseRows(poses)} }${index === billboards.turnPoses.length - 1 ? '' : ','}`);
   });
+  lines.push('};', '');
+
+  const priorityStaticRef = emitPriorityTable(lines, 'dun_priority_static', priorityView.staticFrame);
+  lines.push(`const DunPriorityTable dun_priority_frame_static = ${priorityStaticRef};`, '');
+  const priorityFwdRefs = priorityView.fwdFrames.map((frame, index) => (
+    emitPriorityTable(lines, `dun_priority_fwd_${index}`, frame)
+  ));
+  lines.push('const DunPriorityTable dun_priority_frames_fwd[DUN_FWD_FRAMES] = {');
+  priorityFwdRefs.forEach((ref, index) => lines.push(`    ${ref}${index === priorityFwdRefs.length - 1 ? '' : ','}`));
+  lines.push('};', '');
+  const priorityTurnRefs = priorityView.turnFrames.map((frame, index) => (
+    emitPriorityTable(lines, `dun_priority_turn_${index}`, frame)
+  ));
+  lines.push('const DunPriorityTable dun_priority_frames_turn[DUN_TURN_FRAMES] = {');
+  priorityTurnRefs.forEach((ref, index) => lines.push(`    ${ref}${index === priorityTurnRefs.length - 1 ? '' : ','}`));
   lines.push('};', '');
 
   const registry = [];
@@ -1549,6 +1629,16 @@ function computeCommonBakeHash(projectDir, commonAssets, settings) {
   return hash.digest('hex');
 }
 
+function computePriorityBakeHash(settings) {
+  const hash = crypto.createHash('sha1');
+  hash.update(`core:${core.version}:priority`);
+  hash.update(JSON.stringify({
+    animation_frames: settings.animation_frames,
+    turn_frames: settings.turn_frames,
+  }));
+  return hash.digest('hex');
+}
+
 function viewOutputPaths(projectDir, descriptor) {
   return [
     path.join(projectDir, 'inc', 'dungeon_patterns.h'),
@@ -1608,8 +1698,30 @@ function exportViewAssets(projectDir, floors, settingsInput = readSettings(proje
   const cachePath = path.join(projectDir, 'res', BAKE_CACHE_REL);
   const rawCache = readJson(cachePath, null);
   const cache = rawCache?.version === BAKE_CACHE_VERSION ? rawCache : null;
-  const nextCache = { version: BAKE_CACHE_VERSION, entries: {}, common: null };
+  const nextCache = { version: BAKE_CACHE_VERSION, entries: {}, common: null, priority: null };
   let rebuilt = 0;
+
+  /* Priority深度はテクスチャ非依存なので、全素材セットで共有する。 */
+  const priorityDescriptor = generatedPriorityDescriptor();
+  const priorityHash = computePriorityBakeHash(settings);
+  const priorityCacheAbsolute = path.join(projectDir, 'res', priorityDescriptor.paths.cache);
+  let priorityView = null;
+  let priorityCached = false;
+  if (cache?.priority?.hash === priorityHash && fs.existsSync(priorityCacheAbsolute)) {
+    try {
+      priorityView = v8.deserialize(fs.readFileSync(priorityCacheAbsolute));
+      priorityCached = true;
+    } catch (_) {
+      priorityView = null;
+    }
+  }
+  if (!priorityView) {
+    priorityView = buildPriorityExport(settings);
+    ensureDir(path.dirname(priorityCacheAbsolute));
+    fs.writeFileSync(priorityCacheAbsolute, v8.serialize(priorityView));
+    rebuilt++;
+  }
+  nextCache.priority = { hash: priorityHash, budget: priorityView.budget };
 
   /* 宝箱/上り階段/下り階段: 素材セット数に関わらず1回だけ焼き込む */
   const commonDescriptor = generatedCommonDescriptor();
@@ -1666,13 +1778,21 @@ function exportViewAssets(projectDir, floors, settingsInput = readSettings(proje
     return entry;
   });
 
-  const { headerPath, sourcePath } = exportPatternFiles(projectDir, entries, commonView, settings);
-  const resourcePath = updateGeneratedResources(projectDir, entries.map((entry) => entry.descriptor), commonDescriptor);
+  const { headerPath, sourcePath } = exportPatternFiles(projectDir, entries, commonView, priorityView, settings);
+  const resourcePath = updateGeneratedResources(
+    projectDir,
+    entries.map((entry) => entry.descriptor),
+    commonDescriptor,
+  );
 
   try {
     const legacyPath = path.join(projectDir, 'res', GENERATED_LEGACY_MAP_REL);
     if (fs.existsSync(legacyPath)) fs.rmSync(legacyPath);
   } catch (_) { /* 旧ファイル削除は失敗しても致命的でない */ }
+  try {
+    /* 2.7以前の画素深度PNG/TILESET/cacheは生成物なので、新方式のexport時に除去する。 */
+    fs.rmSync(path.join(projectDir, 'res', LEGACY_GENERATED_OCCLUSION_DIR_REL), { recursive: true, force: true });
+  } catch (_) { /* 旧生成物削除は失敗しても次回のresources.resには参照されない */ }
 
   const setSummaries = entries.map((entry) => ({
     id: entry.assetSet.id,
@@ -1691,15 +1811,30 @@ function exportViewAssets(projectDir, floors, settingsInput = readSettings(proje
     nodeWordsMax: Math.max(...setSummaries.map((set) => set.budget.nodeWordsMax)),
     nodeWordsTotal: setSummaries.reduce((sum, set) => sum + set.budget.nodeWordsTotal, 0),
     tableBytes: setSummaries.reduce((sum, set) => sum + set.budget.tableBytes, 0),
-    totalBytes: setSummaries.reduce((sum, set) => sum + set.budget.totalBytes, 0),
+    totalBytes: setSummaries.reduce((sum, set) => sum + set.budget.totalBytes, 0) + priorityView.budget.totalBytes,
+    priorityValueCount: priorityView.budget.valueCount,
+    priorityNodeWordsMax: priorityView.budget.nodeWordsMax,
+    priorityNodeWordsTotal: priorityView.budget.nodeWordsTotal,
+    priorityTableBytes: priorityView.budget.tableBytes,
+    priorityTotalBytes: priorityView.budget.totalBytes,
   };
   const warnings = setSummaries.flatMap((set) => set.warnings.map((warning) => `${set.name}: ${warning}`));
+  if (budget.totalBytes > BUDGET_TOTAL_BYTES_WARN) {
+    warnings.push(`ダンジョンビュー+Priorityデータが ${(budget.totalBytes / 1024).toFixed(0)}KB あります (推奨 ${(BUDGET_TOTAL_BYTES_WARN / 1024).toFixed(0)}KB 以下)。`);
+  }
   const first = entries[0];
   const commonSummary = {
     key: commonDescriptor.key,
     cached: commonCached,
     paths: commonDescriptor.paths,
     sheetPaths: Object.fromEntries(Object.entries(commonDescriptor.paths.billboards).map(([key, rel]) => [key, path.join(projectDir, 'res', rel)])),
+  };
+  const prioritySummary = {
+    key: priorityDescriptor.key,
+    cached: priorityCached,
+    paths: priorityDescriptor.paths,
+    cachePath: priorityCacheAbsolute,
+    budget: priorityView.budget,
   };
   const summary = {
     headerPath,
@@ -1715,6 +1850,9 @@ function exportViewAssets(projectDir, floors, settingsInput = readSettings(proje
     turnFrameCount: first.view.turnFrames.length,
     assetSets: setSummaries,
     common: commonSummary,
+    priority: prioritySummary,
+    /* 2.7以前の内部呼び出し互換。内容はPriority summaryで、深度TILESETは持たない。 */
+    occlusion: prioritySummary,
     budget,
     warnings,
   };
@@ -1753,6 +1891,8 @@ function exportDungeonData(projectDir) {
     resourcePath: view.resourcePath,
     assetSets: view.assetSets,
     common: view.common,
+    priority: view.priority,
+    occlusion: view.occlusion,
     budget: view.budget,
     warnings: view.warnings,
     cached: view.cached,
@@ -1933,11 +2073,15 @@ module.exports = {
   hasEdge,
   /* テスト・内部利用向け */
   buildViewExport,
+  buildPriorityExport,
+  buildOcclusionExport: buildPriorityExport,
   buildBillboardExport,
   loadSetTextures,
   loadCommonTextures,
   exportViewAssets,
   computeBakeHash,
   computeCommonBakeHash,
+  computePriorityBakeHash,
+  computeOcclusionBakeHash: computePriorityBakeHash,
   renderCore: core,
 };

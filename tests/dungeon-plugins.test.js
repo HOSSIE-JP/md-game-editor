@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const zlib = require('node:zlib');
+const { performance } = require('node:perf_hooks');
 const { loadWithMockedElectron } = require('./helpers/mock-electron');
 
 function makeTempDir(prefix) {
@@ -103,7 +104,9 @@ test('dungeon plugins declare MD editor and builder capabilities', () => {
   assert.match(rendererSource, /isRequiredIndexedPng/);
   assert.match(rendererSource, /textureCacheEpoch/);
   assert.match(rendererSource, /guardUnsaved/);
-  assert.match(rendererSource, /core\.compositeView/);
+  assert.match(rendererSource, /core\.minimumDepthByTile\(wallDepth\)/);
+  assert.match(rendererSource, /core\.priorityTilesForBillboards\(/);
+  assert.match(rendererSource, /drawHighPriorityWalls\(/);
 });
 
 test('dungeon render core is UMD and keeps compose == direct render', () => {
@@ -213,7 +216,7 @@ test('dungeon render core is UMD and keeps compose == direct render', () => {
   assert.ok(underfoot.y > 0 && underfoot.y + core.BB_FRAME_SIZE < core.VIEW_H);
   assert.deepEqual(underfoot, core.billboardPose(frames.turnPoses[0], { dd: 0, dl: 0 }, true));
   const underfootFwd = core.billboardPose(frames.fwdPoses[0], { dd: 0, dl: 0 }, false);
-  assert.deepEqual(underfootFwd, { x: 0, y: 0, frame: -1 });
+  assert.deepEqual(underfootFwd, { x: 0, y: 0, frame: -1, depthCode: 0 });
   assert.notDeepEqual(underfootFwd, underfoot);
 
   /*
@@ -244,6 +247,9 @@ test('dungeon render core is UMD and keeps compose == direct render', () => {
       const foreground = core.assembleTiles(bake, core.composeFromFrame(bake, states), pool);
       const composed = core.compositeView(core.buildBackground(bands), foreground);
       const direct = core.renderView(pose, defs, states, textures, palette, bands);
+      const detailed = core.renderViewDetailed(pose, defs, states, textures, palette, bands);
+      assert.deepEqual(detailed.pixels, direct);
+      assert.equal(detailed.depthCodes.length, core.VIEW_W * core.VIEW_H);
       let diff = 0;
       for (let i = 0; i < composed.length; i++) {
         if (composed[i] !== direct[i]) diff++;
@@ -252,6 +258,179 @@ test('dungeon render core is UMD and keeps compose == direct render', () => {
       assert.ok(diff <= 64, `composed view diverged from direct render: ${diff}px`);
     }
   });
+  assert.equal(core.quantizeOcclusionDepth(Number.POSITIVE_INFINITY), 0);
+  assert.equal(core.quantizeOcclusionDepth(0.72), 13);
+  assert.equal(core.quantizeOcclusionDepth(1.22), 12);
+  assert.ok(core.quantizeOcclusionDepth(0.72) > core.quantizeOcclusionDepth(1.22));
+});
+
+test('dungeon tile Priority: near wall tiles hide billboards conservatively without false occlusion', () => {
+  const core = require('../plugins/dungeon-game-editor/render-core.js');
+  const settings = { animation_frames: 3, turn_frames: 3 };
+  const spaces = core.buildEdgeSpaces(settings);
+  const pose = spaces.frames.staticPose;
+  const textures = core.normalizeTextures({});
+  const palette = core.buildViewPalette(textures);
+  const bands = core.buildBandTables(palette, textures);
+
+  const renderSingleWall = (wanted, state = core.EDGE_STATE_WALL) => {
+    const index = spaces.move.findIndex((def) => (
+      def.dd === wanted.dd && def.dl === wanted.dl && def.face === wanted.face
+    ));
+    assert.ok(index >= 0);
+    const states = new Uint8Array(spaces.move.length);
+    states[index] = state;
+    return core.renderViewDetailed(pose, spaces.move, states, textures, palette, bands).depthCodes;
+  };
+  const classifyPriority = (depthCodes, billboard, additionalBoxes = []) => {
+    const tileDepths = core.minimumDepthByTile(depthCodes);
+    const bounds = core.tileBoundsForRect(billboard.x, billboard.y, core.BB_FRAME_SIZE, core.BB_FRAME_SIZE);
+    const priority = core.priorityTilesForBillboards(tileDepths, [
+      { ...bounds, depthCode: billboard.depthCode },
+      ...additionalBoxes,
+    ]);
+    let intended = 0;
+    let hidden = 0;
+    let missed = 0;
+    let falseOcclusion = 0;
+    let opening = 0;
+    for (let y = 0; y < core.BB_FRAME_SIZE; y++) {
+      for (let x = 0; x < core.BB_FRAME_SIZE; x++) {
+        const dx = billboard.x + x;
+        const dy = billboard.y + y;
+        if (dx < 0 || dy < 0 || dx >= core.VIEW_W || dy >= core.VIEW_H) continue;
+        const depth = depthCodes[(dy * core.VIEW_W) + dx];
+        const high = priority[((dy >> 3) * core.VIEW_TILE_W) + (dx >> 3)] !== 0;
+        if (!depth) {
+          opening++;
+          continue;
+        }
+        if (depth > billboard.depthCode) {
+          intended++;
+          if (high) hidden++;
+          else missed++;
+        } else if (high) {
+          falseOcclusion++;
+        }
+      }
+    }
+    return { intended, hidden, missed, falseOcclusion, opening };
+  };
+
+  const sideBillboard = core.billboardPose(pose, { dd: 1, dl: -1 }, true);
+  const nearWall = renderSingleWall({ dd: 0, dl: -1, face: 0 });
+  const nearPriority = classifyPriority(nearWall, sideBillboard);
+  assert.ok(nearPriority.hidden > 100, 'near wall must hide part of the billboard');
+  assert.ok(nearPriority.opening > 100, 'transparent opening must leave part of the billboard visible');
+  assert.equal(nearPriority.falseOcclusion, 0, 'conservative tile rule must never hide a same/near billboard');
+  assert.ok(nearPriority.missed <= 128, `tile-boundary leakage is unexpectedly large: ${nearPriority.missed}px`);
+  const mirroredBillboard = core.billboardPose(pose, { dd: 1, dl: 1 }, true);
+  const mirroredPriority = classifyPriority(renderSingleWall({ dd: 0, dl: 1, face: 0 }), mirroredBillboard);
+  assert.deepEqual(mirroredPriority, nearPriority, 'left/right Priority classification must remain mirror-symmetric');
+  assert.deepEqual(
+    renderSingleWall({ dd: 0, dl: -1, face: 0 }, core.EDGE_STATE_DOOR),
+    nearWall,
+    'wall and door use identical occlusion geometry',
+  );
+
+  const centerBillboard = core.billboardPose(pose, { dd: 1, dl: 0 }, true);
+  const farWall = renderSingleWall({ dd: 2, dl: -1, face: 0 });
+  const farPriority = classifyPriority(farWall, centerBillboard);
+  assert.equal(farPriority.hidden, 0, 'far wall must not hide a nearer billboard');
+  assert.equal(farPriority.falseOcclusion, 0);
+
+  /* 厳密な > 比較と、重なる全ビルボードに対する安全判定。 */
+  const syntheticDepth = new Uint8Array(core.VIEW_TILE_W * core.VIEW_TILE_H);
+  syntheticDepth[0] = 8;
+  const syntheticBox = { tx0: 0, ty0: 0, tx1: 0, ty1: 0 };
+  assert.equal(core.priorityTilesForBillboards(syntheticDepth, [{ ...syntheticBox, depthCode: 8 }])[0], 0);
+  assert.equal(core.priorityTilesForBillboards(syntheticDepth, [{ ...syntheticBox, depthCode: 7 }])[0], 1);
+  assert.equal(core.priorityTilesForBillboards(syntheticDepth, [
+    { ...syntheticBox, depthCode: 7 },
+    { ...syntheticBox, depthCode: 9 },
+  ])[0], 0);
+
+  const priorityFrame = core.bakePriorityFrame(pose, spaces.move);
+  assert.equal(Object.hasOwn(priorityFrame, 'tileMap'), false);
+  assert.ok(priorityFrame.values.length > 0 && priorityFrame.values.length <= 16);
+  priorityFrame.values.forEach((value) => assert.ok(value >= 0 && value <= 15));
+
+  const billboardTables = core.buildBillboardTables(settings);
+  [billboardTables.staticPoses, ...billboardTables.fwdPoses, ...billboardTables.turnPoses]
+    .flat()
+    .forEach((billboard) => {
+      if (billboard.frame < 0) assert.equal(billboard.depthCode, 0);
+      else assert.ok(billboard.depthCode >= 1 && billboard.depthCode <= 15);
+    });
+});
+
+test('dungeon tile Priority: 8 moving billboards over 600 frames is at least twice as fast as pixel masking', () => {
+  const core = require('../plugins/dungeon-game-editor/render-core.js');
+  const wallPixels = new Uint8Array(core.VIEW_W * core.VIEW_H);
+  const tileDepths = new Uint8Array(core.VIEW_TILE_W * core.VIEW_TILE_H);
+  for (let y = 0; y < core.VIEW_H; y++) {
+    for (let x = 0; x < core.VIEW_W; x++) {
+      wallPixels[(y * core.VIEW_W) + x] = ((x + (y * 3)) % 11) < 6 ? 6 + ((x >> 4) % 8) : 0;
+    }
+  }
+  core.minimumDepthByTile(wallPixels, tileDepths);
+
+  const boxesForFrame = (frame) => Array.from({ length: 8 }, (_, index) => {
+    const x = 8 + ((frame + (index * 19)) % 136);
+    const y = 16 + ((index * 11) % 56);
+    return { ...core.tileBoundsForRect(x, y, 48, 48), depthCode: 5 + ((frame >> 5) + index) % 9 };
+  });
+  const runPixelMask = () => {
+    let checksum = 0;
+    for (let frame = 0; frame < 600; frame++) {
+      const boxes = boxesForFrame(frame);
+      boxes.forEach((box) => {
+        const sx = box.tx0 * 8;
+        const sy = box.ty0 * 8;
+        for (let y = 0; y < 48; y++) {
+          const dy = sy + y;
+          if (dy >= core.VIEW_H) continue;
+          for (let x = 0; x < 48; x++) {
+            const dx = sx + x;
+            if (dx >= core.VIEW_W) continue;
+            checksum += wallPixels[(dy * core.VIEW_W) + dx] > box.depthCode ? 1 : 0;
+          }
+        }
+      });
+    }
+    return checksum;
+  };
+  const runPriority = () => {
+    let checksum = 0;
+    let previousSignature = '';
+    for (let frame = 0; frame < 600; frame++) {
+      const boxes = boxesForFrame(frame);
+      const signature = boxes.map((box) => `${box.tx0},${box.ty0},${box.tx1},${box.ty1},${box.depthCode}`).join(';');
+      if (signature === previousSignature) continue;
+      previousSignature = signature;
+      const priorities = core.priorityTilesForBillboards(tileDepths, boxes);
+      for (let tile = 0; tile < priorities.length; tile++) checksum += priorities[tile];
+    }
+    return checksum;
+  };
+  /* JITの初回コストを測定から外し、3回の中央値で一時的なOSスケジューリング差を緩和する。 */
+  runPixelMask();
+  runPriority();
+  const measure = (fn) => {
+    const samples = [];
+    let checksum = 0;
+    for (let run = 0; run < 3; run++) {
+      const start = performance.now();
+      checksum ^= fn();
+      samples.push(performance.now() - start);
+    }
+    samples.sort((a, b) => a - b);
+    assert.ok(checksum >= 0);
+    return samples[1];
+  };
+  const pixelMaskMs = measure(runPixelMask);
+  const priorityMs = measure(runPriority);
+  assert.ok(pixelMaskMs / priorityMs >= 2, `Priority ${priorityMs.toFixed(2)}ms vs pixel mask ${pixelMaskMs.toFixed(2)}ms`);
 });
 
 test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK data', () => {
@@ -300,6 +479,10 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.equal(fs.existsSync(path.join(projectDir, 'res', exported.common.paths.billboards.chest)), true);
   assert.equal(fs.existsSync(path.join(projectDir, 'res', exported.common.paths.billboards.stairs_up)), true);
   assert.equal(fs.existsSync(path.join(projectDir, 'res', exported.common.paths.billboards.stairs_down)), true);
+  assert.ok(exported.priority);
+  assert.equal(exported.priority.key, 'priority');
+  assert.equal(fs.existsSync(exported.priority.cachePath), true);
+  assert.equal(Object.hasOwn(exported.priority, 'tilesetPath'), false);
   /* 旧全画面パターン atlas は生成されない */
   assert.equal(fs.existsSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'dungeon_view_map.png')), false);
 
@@ -325,9 +508,13 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.match(patternHeader, /#define DUN_TILESET_TILE_COUNT \d+/);
   assert.match(patternHeader, /#define DUN_BB_CELL_COUNT \d+/);
   assert.match(patternHeader, /typedef struct \{ s8 dd; s8 dl; u8 face; \} DunEdgeDef;/);
+  assert.match(patternHeader, /typedef struct \{ s16 x; s16 y; s8 frame; u8 depth_code; \} DunBBPose;/);
   assert.match(patternHeader, /DunFrameTable/);
   assert.match(patternHeader, /typedef struct \{[\s\S]*const TileSet \*background_tileset;[\s\S]*\} DunViewSet;/);
   assert.match(patternHeader, /extern const DunViewSet dun_view_sets\[DUN_VIEW_SET_COUNT\];/);
+  assert.match(patternHeader, /typedef struct \{[\s\S]*const u8 \*values;[\s\S]*\} DunPriorityTable;/);
+  assert.match(patternHeader, /extern const DunPriorityTable dun_priority_frame_static;/);
+  assert.match(patternHeader, /extern const DunPriorityTable dun_priority_frames_fwd\[DUN_FWD_FRAMES\];/);
   /* 宝箱/階段/ビルボードpaletteはDunViewSetから外れ、グローバルsymbolとして生成される */
   assert.doesNotMatch(patternHeader, /const SpriteDefinition \*chest;/);
   assert.doesNotMatch(patternHeader, /const SpriteDefinition \*stairs_up;/);
@@ -345,6 +532,9 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.match(patternSource, /frames_turn\[DUN_TURN_FRAMES\]/);
   assert.match(patternSource, /const DunBBCell dun_bb_cells\[/);
   assert.match(patternSource, /const DunBBPose dun_bb_turn\[DUN_TURN_FRAMES\]/);
+  assert.match(patternSource, /const DunPriorityTable dun_priority_frame_static/);
+  assert.match(patternSource, /const DunPriorityTable dun_priority_frames_fwd\[DUN_FWD_FRAMES\]/);
+  assert.match(patternSource, /dun_priority_static_values\[\d+\] = \{/);
   assert.match(patternSource, /palette_dark\[16\]/);
   assert.match(patternSource, /const DunViewSet dun_view_sets\[DUN_VIEW_SET_COUNT\]/);
   assert.doesNotMatch(patternSource, /dungeon_view_pattern_count/);
@@ -353,6 +543,9 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.ok(tileCount > 100);
   assert.equal(exported.patternTileCount, tileCount);
   assert.ok(exported.budget && exported.budget.tileCount === tileCount);
+  assert.ok(exported.budget.priorityValueCount > 0);
+  assert.ok(exported.budget.priorityTableBytes > 0);
+  assert.equal(exported.budget.priorityTotalBytes, exported.budget.priorityTableBytes);
   assert.ok(Array.isArray(exported.warnings));
 
   /* ビュータイルセット: index0 = 黒 / ビルボード: index0 = マゼンタ */
@@ -369,6 +562,7 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
     if (chestSheet.pixels[i] !== 0) chestPixels++;
   }
   assert.ok(chestPixels > 500);
+  assert.equal(fs.existsSync(path.join(projectDir, 'res', 'dungeon', 'generated', 'occlusion')), false);
 
   const resources = fs.readFileSync(path.join(projectDir, 'res', 'resources.res'), 'utf-8');
   assert.match(resources, /PALETTE dun_[a-z0-9_]+_view_palette /);
@@ -379,6 +573,7 @@ test('dungeon-game-editor generates bounded thin-wall floors and exports SGDK da
   assert.match(resources, /SPRITE dun_common_bb_chest .* 6 6 NONE 0/);
   assert.match(resources, /SPRITE dun_common_bb_stairs_up /);
   assert.match(resources, /SPRITE dun_common_bb_stairs_down /);
+  assert.equal((resources.match(/TILESET dun_occlusion_depth_tiles /g) || []).length, 0);
   assert.equal((resources.match(/SPRITE dun_common_bb_chest /g) || []).length, 1);
   assert.doesNotMatch(resources, /TILEMAP /);
 
@@ -416,6 +611,7 @@ test('dungeon move_speed_vblanks and frame-count settings round-trip with bounds
   assert.equal(firstExport.ok, true);
   /* generateDungeonFloor が既にベイクしているので、無変更のこの再エクスポートはキャッシュが効く */
   assert.equal(firstExport.cached, true);
+  assert.equal(firstExport.priority.cached, true);
   let patternHeader = fs.readFileSync(path.join(projectDir, 'inc', 'dungeon_patterns.h'), 'utf-8');
   assert.match(patternHeader, /#define DUN_MOVE_SPEED_VBLANKS_DEFAULT 0/);
 
@@ -429,6 +625,7 @@ test('dungeon move_speed_vblanks and frame-count settings round-trip with bounds
   assert.equal(saved.settings.move_speed_vblanks, 5);
   assert.equal(saved.export.ok, true);
   assert.equal(saved.export.cached, true, 'move_speed_vblanks alone should not invalidate the wall/billboard bake cache');
+  assert.equal(saved.export.priority.cached, true, 'move speed must not invalidate geometry-only Priority cache');
   patternHeader = fs.readFileSync(path.join(projectDir, 'inc', 'dungeon_patterns.h'), 'utf-8');
   assert.match(patternHeader, /#define DUN_MOVE_SPEED_VBLANKS_DEFAULT 5/);
 
@@ -436,6 +633,7 @@ test('dungeon move_speed_vblanks and frame-count settings round-trip with bounds
   const savedFrames = plugin.saveDungeonSettings({ settings: { ...saved.settings, animation_frames: 4 } }, context);
   assert.equal(savedFrames.ok, true);
   assert.equal(savedFrames.export.cached, false);
+  assert.equal(savedFrames.export.priority.cached, false);
 
   /* ビルダー側: dungeon_view.c/.h にランタイム変数・セッタ・起動時初期化が生成される */
   const builder = require('../plugins/dungeon-game-builder');
@@ -538,6 +736,9 @@ test('dungeon asset sets migrate legacy floors and export per-set resources with
   /* 宝箱/階段は素材セットが2件あっても共通ビルボードとして1回だけ生成される (重複排除) */
   assert.equal((resources.match(/SPRITE dun_common_bb_chest /g) || []).length, 1);
   assert.equal((resources.match(/PALETTE dun_common_bb_palette /g) || []).length, 1);
+  /* PriorityテーブルはCデータとして共通1組だけ生成され、深度TILESETは不要。 */
+  assert.equal((resources.match(/TILESET dun_occlusion_depth_tiles /g) || []).length, 0);
+  assert.equal(saved.export.priority.key, 'priority');
   const dataSource = fs.readFileSync(path.join(projectDir, 'src', 'dungeon_data.c'), 'utf-8');
   /* 末尾から2番目の数値がフロア構造体の enemy_step_vblanks (両フロアともプロジェクト既定90を継承) */
   assert.match(dataSource, /\{ 8, 8, \d+, \d+, \d+, 0, 90, dungeon_floor_1_edges/);
@@ -552,6 +753,7 @@ test('dungeon asset sets migrate legacy floors and export per-set resources with
   assert.equal(changed.cached, false);
   assert.equal(changed.assetSets.find((set) => set.id === migratedFloor.asset_set_id).cached, true);
   assert.equal(changed.assetSets.find((set) => set.id === 'lava').cached, false);
+  assert.equal(changed.priority.cached, true, 'material changes must not invalidate geometry-only Priority data');
   /* 素材セット固有の壁テクスチャ変更は共通ビルボード焼き込みを無効化しない */
   assert.equal(changed.common.cached, true);
 
@@ -564,6 +766,7 @@ test('dungeon asset sets migrate legacy floors and export per-set resources with
   /* 共通素材の変更は各素材セットの壁/扉/床/天井の焼き込みキャッシュを無効化しない */
   assert.equal(changedCommon.assetSets.find((set) => set.id === migratedFloor.asset_set_id).cached, true);
   assert.equal(changedCommon.assetSets.find((set) => set.id === 'lava').cached, true);
+  assert.equal(changedCommon.priority.cached, true, 'common sprite changes must not invalidate Priority data');
 });
 
 test('dungeon common_assets migrates from legacy per-set chest/stairs values without throwing', () => {
@@ -1306,7 +1509,20 @@ test('dungeon-game-builder generates enemy AI C source matching render-core.js c
   assert.match(viewSource, /void DUN_setEnemies\(const DunEnemy \*list, u8 count\)/);
   assert.match(viewSource, /void DUN_refreshBillboards\(void\)/);
   assert.match(viewSource, /static const DunEnemy \*enemyAt\(/);
-  assert.match(viewSource, /SPR_setAnimAndFrame\(bb_sprites\[used\], anim_row, \(u8\)draw_frame\)/);
+  assert.match(viewSource, /typedef struct[\s\S]*u8 tx0;[\s\S]*u8 depth_code;[\s\S]*DunPriorityBox;/);
+  assert.match(viewSource, /static u8 wall_priority_depth\[DUN_VIEW_TILE_COUNT\];/);
+  assert.match(viewSource, /static void addBillboardPriorityBox\(const AnimationFrame \*frame/);
+  assert.match(viewSource, /if \(wall_depth <= box->depth_code\)/);
+  assert.match(viewSource, /next_attr \|= TILE_ATTR_PRIORITY_MASK;/);
+  assert.match(viewSource, /SPR_addSprite\(def, sx, sy, TILE_ATTR\(PAL1, FALSE, FALSE, FALSE\)\)/);
+  assert.match(viewSource, /stageFrame\(active_view_set->frame_static, &dun_priority_frame_static, FALSE\)/);
+  assert.match(viewSource, /if \(updateBillboards\([\s\S]*VDP_setTileMapDataRect\(BG_A, map_staging/);
+  const refreshBody = viewSource.match(/void DUN_refreshBillboards\(void\)\s*\{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.doesNotMatch(refreshBody, /SPR_update\(\)/, 'main loop must own the single Sprite Engine update per vblank');
+  /* ソフトウェア画素マスク、固定VRAM、9KB RAM、手動スプライトDMAは全廃。 */
+  assert.doesNotMatch(viewSource, /buildMaskedBillboardTiles|occlusionDepthAt|commitBillboard/);
+  assert.doesNotMatch(viewSource, /DUN_BB_SLOT_TILES|DUN_BB_VRAM|bb_tile_buffers/);
+  assert.doesNotMatch(viewSource, /SPR_setAutoTileUpload|SPR_setVRAMTileIndex|DMA_getQueueTransferSize/);
   assert.match(viewSource, /#define MM_COLOR_ENEMY 10/);
   assert.match(viewSource, /dun_common_bb_enemy/);
   /* エネミー優先ルール: フラグ参照 (billboardDefForFlags) より先に enemyAt() を検索する */
@@ -1355,7 +1571,7 @@ test('dungeon-game-builder generates enemy AI C source matching render-core.js c
   assert.match(viewSource, /\(\(s32\)\(cur_sx - prev_sx\) \* enemy_slide_num\) \/ enemy_slide_den/);
   /* 距離バケット (サイズ) も補間して移動中に拡大縮小する (最近傍丸め) */
   assert.match(viewSource, /draw_frame = \(s16\)\(prev_pose->frame \+ \(\(fn < 0\) \? -q : q\)\)/);
-  assert.match(viewSource, /SPR_setAnimAndFrame\(bb_sprites\[used\], anim_row, \(u8\)draw_frame\)/);
+  assert.match(viewSource, /SPR_setAnimAndFrame\(bb_sprites\[used\], draw_anim, draw_frame\)/);
   assert.match(mainSource, /enemy->prev_x = before_x;/);
   assert.match(mainSource, /static u32 enemy_last_step_vtime;/);
   assert.match(mainSource, /enemy_last_step_vtime = vtimer;/);
@@ -1393,6 +1609,13 @@ test('dungeon-game-editor renderer wires the enemy tool, sim state, and settings
   assert.match(rendererSource, /core\.billboardSlideLerp\(prevSx0, sx0, slide\.num, slide\.den\)/);
   assert.match(rendererSource, /core\.billboardSlideLerp\(posePrev\.y, pose\.y, slide\.num, slide\.den\)/);
   assert.match(rendererSource, /core\.billboardSlideFrame\(posePrev\.frame, pose\.frame, slide\.num, slide\.den\)/);
+  assert.match(rendererSource, /core\.renderViewDetailed\(/);
+  assert.match(rendererSource, /core\.minimumDepthByTile\(wallDepth\)/);
+  assert.match(rendererSource, /core\.priorityTilesForBillboards\(/);
+  assert.match(rendererSource, /function collectBillboards\(/);
+  assert.match(rendererSource, /function drawHighPriorityWalls\(/);
+  assert.doesNotMatch(rendererSource, /wallDepth\[\(dy \* VIEW_W\) \+ dx\] > drawDepthCode/);
+  assert.match(rendererSource, /posePrev\.depthCode \|\| 0/);
 });
 
 test('dungeon enemy movement: stepEnemies records the previous cell and billboardSlideLerp interpolates', () => {

@@ -34,10 +34,13 @@ plugins/dungeon-game-builder/template/
 
 - 素材は `settings.common_assets` (プロジェクト共通1組)。素材セット (壁/扉/床/天井) とは別管理。ビルボードは壁に焼き込まれないため素材セットに紐付ける理由がない。
 - シートは 8距離バケット (`BB_BUCKET_HEIGHTS`、frame 0 = 最至近48px) の横並び。宝箱/階段 = 384x48 (1行、`SPR_setFrame`)。エネミー = 384x384 (8行 = 4方向×歩行2フレーム、`SPR_setAnimAndFrame(row, bucket)`)。SGDK は「行=アニメーション、列=フレーム」。
-- 配置は (dd, dl) 相対セルごとの事前計算ポーズテーブル (`dun_bb_static/fwd/turn`、`DunBBPose {x,y,frame}`、frame=-1 はカリング)。
+- 配置は (dd, dl) 相対セルごとの事前計算ポーズテーブル (`dun_bb_static/fwd/turn`、`DunBBPose {x,y,frame,depth_code}`、frame=-1 はカリング)。`depth_code` は `0=壁なし、1～15=遠→近`、`clamp(16 - ceil(z * 3), 1, 15)` の4bit量子化値。
 - **足元 (dd=0, dl=0) のルール**: 静止・旋回ポーズでは最至近バケットへ固定表示 (`billboardUnderfootPose`)、**前進/後退ポーズではカリング** (`allowUnderfoot=false`)。移動アニメ中も表示し続けると「スプライトが追従してくる」と苦情が来る (実際に来た)。連続透視式は cam.z→0 の特異点があるため足元を通常式に通してはならない。
 - PAL1 は 16 色固定 (index 0 = マゼンタ透過キー + 15色を宝箱/階段/エネミーのテクスチャから median-cut 量子化)。ビルボード素材を追加したら `buildSpritePalette` のサンプル対象に加える。既存スプライトの色味が微シフトするのは仕様。
 - ハードウェアスプライトは `DUN_SPRITE_COUNT = 8` スロットを全ビルボードで共有。候補セル順 (近→遠) に割り当て、あふれた遠方は非表示。
+- **側壁の部分遮蔽**: 壁・扉のZバッファを4bitコードへ変換し、各8x8タイル内の**最小非ゼロ深度**だけを返すstatic/fwd/turn用 `DunPriorityTable` を焼く。壁タイルは、重なる全ビルボードについて `tile_min_wall_depth > billboard_depth` の場合だけBG_AのPriority bitを立てる。同一コード・遠い壁は低Priorityのままなので誤遮蔽しない。混在深度タイルでは最大8px程度の隠し損ねを許容する保守的判定。床/天井、ビルボード同士は対象外。左右鏡像・前後移動・エネミースライドでは座標/距離バケットと一緒にdepth_codeも整数補間する。
+- Sprite Engineの自動VRAM割当・自動タイル転送を使用し、全ビルボードを低Priorityで描く。BG_Aの低Priority壁はスプライトの後ろ、高Priority壁はスプライトの前になる。スプライト画素をRAMへ展開・比較・再DMAしてはならない。外接範囲は選択 `AnimationFrame.frameVDPSprites` の実メタスプライトからタイル単位で求める。
+- 通常の移動/旋回は既存400ワードBG_AマップDMAへPriority bitを含める。`DUN_refreshBillboards()` は壁世代、表示数、外接タイル範囲、depth_codeの完全一致をキャッシュし、Priority bitが実際に変わった場合だけ400ワードを再送する。ピクセル位置だけが同じタイル内で動く敵スライドではマップDMAを発生させない。
 - LOS ゲート: `losVisible` はセル中心間の supercover 線分判定 (整数誤差項、JS/C同一)。**格子の角を正確に通過する場合は両側の迂回路が開いている場合のみ可視** (AND)。OR にすると開いていない側の壁が実際には描画されるため、壁越しにスプライトが透ける (実際にバグとして踏んで修正した経緯がある。tests の partialCornerFloor が回帰ガード)。
 
 ## 4. エネミー (移動エンティティ)
@@ -58,6 +61,7 @@ plugins/dungeon-game-builder/template/
 
 - セット別 (`computeBakeHash`): core.version + animation_frames/turn_frames + 壁/扉/床/天井のref文字列 + 画像バイナリ
 - 共通ビルボード (`computeCommonBakeHash`): core.version + フレーム数 + 宝箱/階段/エネミーのref + 画像バイナリ
+- 共通Priority (`computePriorityBakeHash`): core.version + animation_frames/turn_frames のみ。`res/dungeon/generated/priority/bake.bin` に1組だけ保存し、素材セットや画像、速度設定では無効化しない。葉は0～15の値だけで、深度PNG/TILESETは生成しない
 
 **⚠ render-core.js の焼き込み結果に影響するロジック (デシジョンツリー、ポーズテーブル、シート生成、パレット) を変更したら必ず `core.version` を上げる。** 上げ忘れると既存プロジェクトの bake.bin がテクスチャ不変を理由に再利用され続け、修正が既存 ROM に反映されない。**このバグは実際に2回発生した** (階段ソリッド解除時、足元表示追加時)。`core.version` 直上に警告コメントあり。
 
@@ -130,6 +134,7 @@ plugins/dungeon-game-editor/
   `node -e "require('./app-config').loadAppConfig(require('./app.config')); require('./tests/dungeon-plugins.test.js')"`
   最終確認は `npm test`。
 - テストの型: ① render-core のロジック単体テスト (LOS/AI/ポーズ/パレット) ② エクスポート実物検証 (生成PNG寸法/palette、resources.res 行、生成Cの文字列) ③ **Cソースパターン断言** — JS と C の二重実装が乖離しないよう、C側に同じ定数・関数名・呼び出しパターンが存在することを正規表現で検査 ④ renderer.js ソース断言 (UI 配線)。
+- 遮蔽変更時は、近い側壁で「手前と確定できる8x8壁タイルだけが前面化し、透明な開口側は残る」、遠い壁・同一深度・混在深度・複数候補で誤遮蔽しないこと、壁/扉、左右鏡像、static/fwd/turn、足元、敵スライドを確認する。Priority値は0～15、`resources.res` に `dun_occlusion_depth_tiles` が無いこと、Cに画素マスク/固定VRAM/9216B RAM/手動スプライトDMAが無いこと、600フレーム×8体で旧画素マスク相当処理より2倍以上高速なことを検査する。
 - AI 変更時は不変条件ファジング (ランダムフロア×多ティックで占有違反/壁すり抜け/テレポートが無いこと) を書いて検証する。`stepEnemies` は決定的なので再現も容易。
 - C コンパイル検証: SGDK は `data/tools/sgdk`、JRE は `data/tools/jre` (make に PATH 追加要)。`m68k-elf-gcc -fsyntax-only` を rescomp 生成ヘッダー付きで回すと構造体変更の破壊を早期検知できる。
 - ヘッドレス実機検証: 同梱 WASM エミュ (initSync + EmulatorHandle) で ROM を実行し、`out/symbol.txt` の RAM アドレスを `get_memory` で読んで状態検証できる。ボタン bit: U1/D2/L4/R8/B16/C32/A64/START128。

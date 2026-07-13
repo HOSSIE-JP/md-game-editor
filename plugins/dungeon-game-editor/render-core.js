@@ -65,6 +65,11 @@
   const BB_ENEMY_WALK_FRAMES = 2;
   const BB_ENEMY_SOURCE_W = BB_FRAME_SIZE * BB_ENEMY_VIEWS;
   const BB_ENEMY_SOURCE_H = BB_FRAME_SIZE * BB_ENEMY_WALK_FRAMES;
+  /*
+   * 壁/ビルボード共通の4bit深度コード。0は壁なし、1..15は遠→近。
+   * 1セルを3段階で量子化し、同値は遮蔽しないことで誤った過剰マスクを避ける。
+   */
+  const OCCLUSION_DEPTH_STEPS_PER_CELL = 3;
   /* エネミーAI定数 (render-core.js に実装 → main.c へ line-for-line 移植する。
    * losVisible と同じ二重実装パターン。JS/C で shift定数・順序を必ず揃えること) */
   const DUN_MAX_ENEMIES = 8;
@@ -572,6 +577,11 @@
     };
   }
 
+  function quantizeOcclusionDepth(depth) {
+    if (!Number.isFinite(depth) || depth <= 0) return 0;
+    return clamp(16 - Math.ceil(depth * OCCLUSION_DEPTH_STEPS_PER_CELL), 1, 15);
+  }
+
   function edgeFunction(a, b, x, y) {
     return (x - a.x) * (b.y - a.y) - (y - a.y) * (b.x - a.x);
   }
@@ -838,7 +848,7 @@
    * 直接レンダリング (プレビュー用 / 焼き込み検証のリファレンス)
    * ------------------------------------------------------------------ */
 
-  function renderView(pose, defs, states, texturesInput, palette, bandRows, out) {
+  function renderViewDetailed(pose, defs, states, texturesInput, palette, bandRows, out) {
     const textures = normalizeTextures(texturesInput);
     const pixels = out || new Uint8Array(VIEW_W * VIEW_H);
     pixels.set(buildBackground(bandRows));
@@ -854,7 +864,13 @@
         zBuffer[p] = Math.min(zBuffer[p], depth);
       });
     }
-    return pixels;
+    const depthCodes = new Uint8Array(VIEW_W * VIEW_H);
+    for (let i = 0; i < zBuffer.length; i++) depthCodes[i] = quantizeOcclusionDepth(zBuffer[i]);
+    return { pixels, zBuffer, depthCodes };
+  }
+
+  function renderView(pose, defs, states, texturesInput, palette, bandRows, out) {
+    return renderViewDetailed(pose, defs, states, texturesInput, palette, bandRows, out).pixels;
   }
 
   /* ------------------------------------------------------------------
@@ -882,6 +898,20 @@
      * フラグが立たないためツリー分岐コストはゼロになる。
      */
     return { z, cover, layers: [null, wall, door, wall, wall] };
+  }
+
+  function renderDepthEdgeSolo(pose, def) {
+    const z = new Float32Array(VIEW_W * VIEW_H);
+    const depth = new Uint8Array(VIEW_W * VIEW_H);
+    const cover = new Uint8Array(VIEW_W * VIEW_H);
+    z.fill(Number.POSITIVE_INFINITY);
+    rasterizeEdge(pose, def, null, (p, value) => {
+      if (value > z[p] + VIEW_DEPTH_EPSILON) return;
+      depth[p] = quantizeOcclusionDepth(value);
+      cover[p] = 1;
+      z[p] = Math.min(z[p], value);
+    });
+    return { z, cover, layers: [null, depth, depth, depth, depth] };
   }
 
   /*
@@ -985,9 +1015,13 @@
   }
 
   function bakeFrame(pose, defs, texturesInput, palette, bandRows, tilePool, options) {
-    const textures = normalizeTextures(texturesInput);
+    const priorityOnly = Boolean(options && options.priorityOnly);
+    const depthOnly = priorityOnly || Boolean(options && options.depthOnly);
+    const textures = depthOnly ? null : normalizeTextures(texturesInput);
     const debug = Boolean(options && options.debug);
-    const solos = defs.map((def) => renderEdgeSolo(pose, def, textures, palette));
+    const solos = defs.map((def) => (
+      depthOnly ? renderDepthEdgeSolo(pose, def) : renderEdgeSolo(pose, def, textures, palette)
+    ));
     const stats = solos.map(soloTileStats);
     const tileCount = VIEW_TILE_W * VIEW_TILE_H;
     const offsets = new Uint16Array(tileCount);
@@ -1008,6 +1042,19 @@
         if (local > TILE_INDEX_LIMIT) throw new Error('dungeon frame tile map overflow');
         tileMap.push(globalRef);
         localLookup.set(key, local);
+      }
+      return local;
+    };
+    /* Priority専用テーブルは画素タイルを持たず、葉を0..15の深度値へ直接集約する。 */
+    const priorityValues = [];
+    const priorityLookup = new Map();
+    const localPriorityId = (value) => {
+      let local = priorityLookup.get(value);
+      if (local == null) {
+        local = priorityValues.length;
+        if (local > TILE_INDEX_LIMIT) throw new Error('dungeon priority value map overflow');
+        priorityValues.push(value);
+        priorityLookup.set(value, local);
       }
       return local;
     };
@@ -1055,6 +1102,15 @@
           }
         }
       });
+      if (priorityOnly) {
+        /* 0 (透明) を除く最小コード = タイル内の壁がすべて確実に手前となる下限。 */
+        let minimum = 16;
+        for (let pixel = 0; pixel < leafPixels.length; pixel++) {
+          const value = leafPixels[pixel];
+          if (value > 0 && value < minimum) minimum = value;
+        }
+        return LEAF_FLAG | localPriorityId(minimum === 16 ? 0 : minimum);
+      }
       const rows = [];
       for (let py = 0; py < 8; py++) {
         let row = 0;
@@ -1147,17 +1203,22 @@
     }
 
     frameStats.nodeWords = nodes.length;
-    frameStats.localTiles = tileMap.length;
+    frameStats.localTiles = priorityOnly ? priorityValues.length : tileMap.length;
     const result = {
       offsets,
       nodes: Uint16Array.from(nodes),
-      tileMap,
       stats: frameStats,
     };
+    if (priorityOnly) result.values = Uint8Array.from(priorityValues);
+    else result.tileMap = tileMap;
     if (debug) {
       result.debug = { solos, involved: debugInvolved };
     }
     return result;
+  }
+
+  function bakePriorityFrame(pose, defs) {
+    return bakeFrame(pose, defs, null, null, null, null, { priorityOnly: true });
   }
 
   /* MD エンジンと同じ手順でデシジョンテーブルからフレームローカルIDを解決する */
@@ -1209,6 +1270,72 @@
     return pixels;
   }
 
+  /* 画素深度を、各8x8タイル内の最小非ゼロ深度へ縮約する。 */
+  function minimumDepthByTile(depthCodes, out) {
+    const values = out || new Uint8Array(VIEW_TILE_W * VIEW_TILE_H);
+    for (let ty = 0; ty < VIEW_TILE_H; ty++) {
+      for (let tx = 0; tx < VIEW_TILE_W; tx++) {
+        let minimum = 16;
+        for (let py = 0; py < 8; py++) {
+          const row = (((ty * 8) + py) * VIEW_W) + (tx * 8);
+          for (let px = 0; px < 8; px++) {
+            const value = depthCodes[row + px];
+            if (value > 0 && value < minimum) minimum = value;
+          }
+        }
+        values[(ty * VIEW_TILE_W) + tx] = minimum === 16 ? 0 : minimum;
+      }
+    }
+    return values;
+  }
+
+  /* ビュー座標の外接矩形を、クリップ済み8x8タイル範囲へ変換する。 */
+  function tileBoundsForRect(x, y, width, height) {
+    let x0 = Math.trunc(x);
+    let y0 = Math.trunc(y);
+    let x1 = x0 + Math.max(0, Math.trunc(width)) - 1;
+    let y1 = y0 + Math.max(0, Math.trunc(height)) - 1;
+    if (x1 < 0 || y1 < 0 || x0 >= VIEW_W || y0 >= VIEW_H) return null;
+    x0 = clamp(x0, 0, VIEW_W - 1);
+    y0 = clamp(y0, 0, VIEW_H - 1);
+    x1 = clamp(x1, 0, VIEW_W - 1);
+    y1 = clamp(y1, 0, VIEW_H - 1);
+    return {
+      tx0: x0 >> 3,
+      ty0: y0 >> 3,
+      tx1: x1 >> 3,
+      ty1: y1 >> 3,
+    };
+  }
+
+  /*
+   * 壁タイルが重なる全ビルボードより確実に手前のときだけ高Priorityにする。
+   * 同一深度または遠い壁は低Priorityのままにし、誤遮蔽を避ける。
+   */
+  function priorityTilesForBillboards(tileDepths, billboards, out) {
+    const priority = out || new Uint8Array(VIEW_TILE_W * VIEW_TILE_H);
+    const boxes = Array.isArray(billboards) ? billboards : [];
+    for (let ty = 0; ty < VIEW_TILE_H; ty++) {
+      for (let tx = 0; tx < VIEW_TILE_W; tx++) {
+        const tile = (ty * VIEW_TILE_W) + tx;
+        const wallDepth = tileDepths[tile] || 0;
+        let high = wallDepth > 0;
+        if (high) {
+          for (let index = 0; index < boxes.length; index++) {
+            const box = boxes[index];
+            if (!box || tx < box.tx0 || tx > box.tx1 || ty < box.ty0 || ty > box.ty1) continue;
+            if (wallDepth <= (box.depthCode || 0)) {
+              high = false;
+              break;
+            }
+          }
+        }
+        priority[tile] = high ? 1 : 0;
+      }
+    }
+    return priority;
+  }
+
   /* ------------------------------------------------------------------
    * ビルボード (宝箱・階段) — スプライトシートと座標テーブル
    * ------------------------------------------------------------------ */
@@ -1232,7 +1359,7 @@
     const bottomY = VIEW_HORIZON + ((VIEW_EYE_Z * VIEW_PROJECT) / z);
     const x = Math.round(VIEW_W / 2) - (BB_FRAME_SIZE / 2);
     const y = Math.round(bottomY) - BB_FRAME_SIZE;
-    return { x, y, frame: 0 };
+    return { x, y, frame: 0, depthCode: quantizeOcclusionDepth(z) };
   }
 
   /*
@@ -1244,12 +1371,12 @@
    */
   function billboardPose(pose, cell, allowUnderfoot) {
     if (cell.dd === 0 && cell.dl === 0) {
-      return allowUnderfoot ? billboardUnderfootPose() : { x: 0, y: 0, frame: -1 };
+      return allowUnderfoot ? billboardUnderfootPose() : { x: 0, y: 0, frame: -1, depthCode: 0 };
     }
     const cam = toCameraPoint(pose, { l: cell.dl, d: cell.dd, z: 0, u: 0, v: 0 });
-    if (cam.z < BB_MIN_DEPTH) return { x: 0, y: 0, frame: -1 };
+    if (cam.z < BB_MIN_DEPTH) return { x: 0, y: 0, frame: -1, depthCode: 0 };
     const height = (BB_WORLD_HEIGHT * VIEW_PROJECT) / cam.z;
-    if (height < BB_MIN_HEIGHT || height > BB_MAX_HEIGHT) return { x: 0, y: 0, frame: -1 };
+    if (height < BB_MIN_HEIGHT || height > BB_MAX_HEIGHT) return { x: 0, y: 0, frame: -1, depthCode: 0 };
     let frame = 0;
     let bestDiff = Number.POSITIVE_INFINITY;
     BB_BUCKET_HEIGHTS.forEach((bucket, index) => {
@@ -1264,9 +1391,9 @@
     const x = Math.round(screenX) - (BB_FRAME_SIZE / 2);
     const y = Math.round(bottomY) - BB_FRAME_SIZE;
     if (x + BB_FRAME_SIZE <= 0 || x >= VIEW_W || y + BB_FRAME_SIZE <= 0 || y >= VIEW_H) {
-      return { x: 0, y: 0, frame: -1 };
+      return { x: 0, y: 0, frame: -1, depthCode: 0 };
     }
-    return { x, y, frame };
+    return { x, y, frame, depthCode: quantizeOcclusionDepth(cam.z) };
   }
 
   function buildBillboardTables(settings) {
@@ -1754,7 +1881,7 @@
    * 再利用され続け、ロジック修正が既存 ROM 出力へ反映されない (実際にこの不具合が発生した)。
    */
   const core = {
-    version: '2.6.0',
+    version: '2.8.0',
     VIEW_W,
     VIEW_H,
     VIEW_TILE_W,
@@ -1766,6 +1893,7 @@
     VIEW_CAMERA_BACKSTEP,
     VIEW_DEPTH_EPSILON,
     VIEW_DEPTH_CELLS,
+    OCCLUSION_DEPTH_STEPS_PER_CELL,
     EDGE_STATE_OPEN,
     EDGE_STATE_WALL,
     EDGE_STATE_DOOR,
@@ -1817,11 +1945,17 @@
     sampleEdgeStates,
     edgeStateBetween,
     renderView,
+    renderViewDetailed,
+    quantizeOcclusionDepth,
     bakeFrame,
+    bakePriorityFrame,
     makeTilePool,
     composeFromFrame,
     assembleTiles,
     compositeView,
+    minimumDepthByTile,
+    tileBoundsForRect,
+    priorityTilesForBillboards,
     tileRowsFromPixels,
     tileRowsKey,
     hflipTileRows,
