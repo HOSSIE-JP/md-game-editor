@@ -258,6 +258,9 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 - 参照中の素材セットごとにSGDK tileset/background/palette/billboard sprite/decision tableを生成し、フロアの素材セットindexと `DunViewSet` registryで初期表示・フロア遷移時に切り替える。未使用セットをROMへ含めず、cacheとbudgetはセット単位に管理する。
 - 壁・扉による宝箱/階段/エネミーの部分遮蔽は、共有render coreで `0=壁なし、1～15=遠→近` に量子化し、8x8タイル内の最小非ゼロ壁コードが重なる全ビルボードのコードより大きい場合だけBG_Aを高Priorityにする。previewとSGDKは同じ厳密比較・整数補間・タイル単位判定を使う。
 - Priority decision tableはテクスチャ非依存の共通1組とし、素材セット追加で複製しない。深度PNG/TILESETを生成せず、SGDK側は低Priorityスプライトの自動VRAM割当・自動タイル転送を使う。画素マスク、8スロット×36タイル固定VRAM、9216B RAM、手動スプライトDMAを再導入しない。
+- `DUN_refreshBillboards()` は静止視点の可視候補/LOS/ポーズ検索を敵リスト世代単位で最大8件のplanへキャッシュする。敵スライド進捗の除算はQ0.16生成の1回/フレームに集約し、各スロットは乗算/シフトで従来と同じ整数結果へ補間する。setter、Priority map DMA、`SPR_update()` は対応する差分がある場合だけ実行し、生成 `main.c` に無条件の `SPR_update()` を置かない。
+- 敵の壁跨ぎは現在/直前セルのLOSを対称に扱う。現在セルがLOS外でも直前セルがLOS内で両端ポーズが有効ならスライド終端直前まで候補を残し、BG_A Priorityに隠させる。終端で現在LOSへ確定する規則をpreviewとSGDKで一致させる。
+- 敵AIはプレイヤー用 `canTraverse()` と別の `enemyCanTraverse()` をJS/C双方で使い、境界両側の扉ビットを通行不可にする。徘徊・追跡とも同じ判定を通し、宝箱/上下階段/プレイヤー/他エネミーのセルは占有不可、競合する宝箱/階段フラグはスポーン時にも除外する。
 
 ---
 
@@ -314,7 +317,7 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 
 ---
 
-*Last Updated: 2026-07 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Dungeon reusable asset sets and common billboards / Indexed image import and validation / Fixed BG_B floor-ceiling + transparent BG_A walls / Per-set SGDK resources / Dynamic BG_A tile Priority billboard occlusion / Dungeon template / Editor UX guardrails / Bundled WASM split metadata*
+*Last Updated: 2026-07 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Dungeon reusable asset sets and common billboards / Indexed image import and validation / Fixed BG_B floor-ceiling + transparent BG_A walls / Per-set SGDK resources / Dynamic BG_A tile Priority, cached billboard refresh, symmetric wall crossing, and enemy door confinement / Dungeon template / Editor UX guardrails / Bundled WASM split metadata*
 
 
 ## MD/PCE split note

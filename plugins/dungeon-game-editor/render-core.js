@@ -1632,12 +1632,16 @@
     return true;
   }
 
-  /* フロアのエネミー・スポーンセル (cell.enemy===true) を上限 DUN_MAX_ENEMIES 件まで走査順で返す */
+  /*
+   * フロアのエネミー・スポーンセル (cell.enemy===true) を上限 DUN_MAX_ENEMIES 件まで走査順で返す。
+   * normalizeCell の排他規則に加え、未正規化・旧データでも宝箱/階段上にはスポーンさせない。
+   */
   function enemySpawns(floor) {
     const spawns = [];
     for (let y = 0; y < floor.height; y++) {
       for (let x = 0; x < floor.width; x++) {
-        if (!floor.cells[y][x].enemy) continue;
+        const cell = floor.cells[y][x];
+        if (!cell.enemy || cell.event === 'chest' || cell.stairs) continue;
         spawns.push({ x, y });
         if (spawns.length >= DUN_MAX_ENEMIES) return spawns;
       }
@@ -1669,9 +1673,18 @@
     return null;
   }
 
-  /* canTraverse + 占有ブロックの合成判定 (index の敵が dir 方向へ進めるか) */
+  /*
+   * 敵専用の境界判定。プレイヤー用 canTraverse は扉を通過できるまま維持し、
+   * 敵だけは壁と同様に扉を越えられない。rawEdgeState は境界の両側の扉ビットを見る。
+   */
+  function enemyCanTraverse(floor, x, y, dir) {
+    if (rawEdgeState(floor, x, y, dir) === EDGE_STATE_DOOR) return false;
+    return canTraverse(floor, x, y, dir);
+  }
+
+  /* enemyCanTraverse + 占有ブロックの合成判定 (index の敵が dir 方向へ進めるか) */
   function enemyCanMove(floor, enemies, excludeIndex, player, x, y, dir) {
-    if (!canTraverse(floor, x, y, dir)) return false;
+    if (!enemyCanTraverse(floor, x, y, dir)) return false;
     const nx = x + DIR_DX[dir];
     const ny = y + DIR_DY[dir];
     return !enemyBlockedCell(floor, enemies, excludeIndex, player, nx, ny);
@@ -1752,7 +1765,7 @@
     const count = chaseDirs(enemy, player, dirs);
     for (let i = 0; i < count; i++) {
       const dir = dirs[i];
-      if (!canTraverse(floor, enemy.x, enemy.y, dir)) continue;
+      if (!enemyCanTraverse(floor, enemy.x, enemy.y, dir)) continue;
       const nx = enemy.x + DIR_DX[dir];
       const ny = enemy.y + DIR_DY[dir];
       if (nx === player.x && ny === player.y) {
@@ -1811,10 +1824,9 @@
   /*
    * エネミー移動スライドの整数補間: prevValue (1tick前のセルの画面座標) から
    * curValue (現在セルの画面座標) へ num/den (0..den) の進行度で線形補間する。
-   * num===den で curValue、num===0 で prevValue を返す。C側 (dungeon_view.c
-   * updateBillboards) は同じ式を s32 の掛け算→整数除算で実装する。JS/C とも
-   * 0方向切り捨て (truncate toward zero) の除算になる (JS: Math.trunc、
-   * C: 符号付き整数の / 演算子) ため、負値の丸め方向まで一致する。
+   * num===den でcurValue、num===0でprevValueを返す。C側は比率を一度だけQ0.16へ
+   * 変換して各planを乗算+shiftするが、焼き込みポーズの差分範囲ではこのMath.truncと
+   * 負値の丸め方向まで一致する。
    */
   function billboardSlideLerp(prevValue, curValue, num, den) {
     if (!den) return curValue;
@@ -1826,7 +1838,7 @@
    * ないため、直前セルと現セルの焼き込み済み距離バケット (frame index) の間を進行度で
    * 段階補間し、移動に合わせて拡大縮小を切り替える。0方向ではなく最近傍丸め (対称・
    * 符号ごとに正の除算) にすることで進行度の中央でサイズが切り替わり、末尾でのポップを
-   * 避ける。C側 (dungeon_view.c) は同じ整数式で実装する。
+   * 避ける。C側はQ0.16積への半加算で同じ結果を得る。
    */
   function billboardSlideFrame(prevFrame, curFrame, num, den) {
     if (!den) return curFrame;
@@ -1834,6 +1846,16 @@
     const absn = fn < 0 ? -fn : fn;
     const q = Math.trunc((2 * absn + den) / (2 * den));
     return prevFrame + (fn < 0 ? -q : q);
+  }
+
+  /*
+   * 壁を跨ぐスライド中の可視性。現在セルがLOS外でも、直前セルがLOS内なら終端直前まで
+   * 描画を続け、BG_A Priorityに隠させる。これにより壁から出る/壁へ消える動きを対称にする。
+   * den<=0またはnum>=denはスライド完了なので、現在セルの可視性だけを採用する。
+   */
+  function billboardSlideVisible(currentVisible, previousVisible, moving, num, den) {
+    if (currentVisible) return true;
+    return Boolean(moving && previousVisible && den > 0 && num < den);
   }
 
   /* ------------------------------------------------------------------
@@ -1985,6 +2007,7 @@
     stepEnemies,
     billboardSlideLerp,
     billboardSlideFrame,
+    billboardSlideVisible,
   };
 
   if (typeof module !== 'undefined' && module.exports) {

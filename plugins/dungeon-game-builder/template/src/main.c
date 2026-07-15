@@ -2,7 +2,7 @@
  * Dungeon Game
  * デシジョンテーブル方式 25x16 BG タイル疑似3Dダンジョン
  *  - 前進/後退/左右回転を焼き込みフレームで滑らかにアニメーション
- *  - 扉 (通行可能)、宝箱/階段ビルボード、暗闇セル対応
+ *  - 扉 (プレイヤー通行可能・エネミー通行不可)、宝箱/階段ビルボード、暗闇セル対応
  * ============================================================= */
 
 #include <genesis.h>
@@ -69,14 +69,24 @@ static bool hasWallAt(const DungeonFloorData *floor, s16 x, s16 y, u8 dir)
     return (edgesAt(floor, nx, ny) & edge_bits[opposite]) != 0;
 }
 
+/* 扉ビットは境界のどちら側に保存されていても同じ1枚の扉として扱う。 */
+static bool hasDoorAt(const DungeonFloorData *floor, s16 x, s16 y, u8 dir)
+{
+    const u8 opposite = (u8)((dir + 2) & 3);
+    const s16 nx = x + dir_dx[dir];
+    const s16 ny = y + dir_dy[dir];
+    if (!inBounds(floor, x, y) || !inBounds(floor, nx, ny)) return FALSE;
+    if (edgesAt(floor, x, y) & door_bits[dir]) return TRUE;
+    return (edgesAt(floor, nx, ny) & door_bits[opposite]) != 0;
+}
+
 static u8 stairsFlagsAt(const DungeonFloorData *floor, s16 x, s16 y)
 {
     if (!inBounds(floor, x, y)) return 0;
     return (u8)(floor->flags[DUN_INDEX(floor, x, y)] & (DUN_FLAG_STAIRS_UP | DUN_FLAG_STAIRS_DOWN));
 }
 
-/* (x, y) に現在フロアのアクティブなエネミーがいるか。canMove からプレイヤー移動・
- * stepEnemyWander/stepEnemyChase (経由の canMove 呼び出し) からエネミー移動、両方で使う。 */
+/* (x, y) に現在フロアのアクティブなエネミーがいるか。プレイヤー移動の占有判定で使う。 */
 static bool cellHasEnemy(s16 x, s16 y)
 {
     u8 i;
@@ -87,7 +97,8 @@ static bool cellHasEnemy(s16 x, s16 y)
     return FALSE;
 }
 
-static bool canMove(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
+/* プレイヤーと敵で共有する幾何移動判定。扉は通行可能で、一方通行を尊重する。 */
+static bool canTraverse(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
 {
     const s16 nx = (s16)x + dir_dx[dir];
     const s16 ny = (s16)y + dir_dy[dir];
@@ -98,6 +109,15 @@ static bool canMove(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
     if (hasWallAt(floor, x, y, dir)) return FALSE;
     if ((current & (DUN_ONEWAY_N | DUN_ONEWAY_E | DUN_ONEWAY_S | DUN_ONEWAY_W)) && !(current & oneway_bits[dir])) return FALSE;
     if ((next & (DUN_ONEWAY_N | DUN_ONEWAY_E | DUN_ONEWAY_S | DUN_ONEWAY_W)) && !(next & oneway_bits[opposite])) return FALSE;
+    return TRUE;
+}
+
+/* プレイヤーは扉を通過できるが、エネミーが占有するセルへは進入できない。 */
+static bool canMove(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
+{
+    const s16 nx = (s16)x + dir_dx[dir];
+    const s16 ny = (s16)y + dir_dy[dir];
+    if (!canTraverse(floor, x, y, dir)) return FALSE;
     /* エネミーが占有するセルへは進入できない (プレイヤー・エネミー双方向でブロックされる) */
     if (cellHasEnemy(nx, ny)) return FALSE;
     return TRUE;
@@ -150,12 +170,19 @@ static bool enemyBlockedCell(s16 exclude_index, s16 x, s16 y)
     return FALSE;
 }
 
-/* canMove (壁/一方通行/エネミー占有ルール) + enemyBlockedCell (占有ブロック全般) の合成判定 */
+/* 敵だけは扉を越えられない。プレイヤー用 canTraverse の扉通過挙動は維持する。 */
+static bool enemyCanTraverse(const DungeonFloorData *floor, u8 x, u8 y, u8 dir)
+{
+    if (hasDoorAt(floor, x, y, dir)) return FALSE;
+    return canTraverse(floor, x, y, dir);
+}
+
+/* enemyCanTraverse + enemyBlockedCell (宝箱/階段を含む占有ブロック) の合成判定 */
 static bool enemyCanMove(const DungeonFloorData *floor, s16 exclude_index, u8 x, u8 y, u8 dir)
 {
     s16 nx;
     s16 ny;
-    if (!canMove(floor, x, y, dir)) return FALSE;
+    if (!enemyCanTraverse(floor, x, y, dir)) return FALSE;
     nx = (s16)x + dir_dx[dir];
     ny = (s16)y + dir_dy[dir];
     return !enemyBlockedCell(exclude_index, nx, ny);
@@ -164,13 +191,7 @@ static bool enemyCanMove(const DungeonFloorData *floor, s16 exclude_index, u8 x,
 /* 敵の視界判定用: 壁・扉のどちらも遮る (プレイヤー移動可否の hasWallAt とは異なり、扉も視線を遮る) */
 static bool enemySightBlocked(const DungeonFloorData *floor, s16 x, s16 y, u8 dir)
 {
-    const u8 opposite = (u8)((dir + 2) & 3);
-    const s16 nx = x + dir_dx[dir];
-    const s16 ny = y + dir_dy[dir];
-    if (!inBounds(floor, x, y) || !inBounds(floor, nx, ny)) return TRUE;
-    if (edgesAt(floor, x, y) & (edge_bits[dir] | door_bits[dir])) return TRUE;
-    if (edgesAt(floor, nx, ny) & (edge_bits[opposite] | door_bits[opposite])) return TRUE;
-    return FALSE;
+    return hasWallAt(floor, x, y, dir) || hasDoorAt(floor, x, y, dir);
 }
 
 /* 視界: 正面直線 DUN_ENEMY_SIGHT_RANGE マス以内。壁と扉の両方が遮る */
@@ -270,7 +291,7 @@ static bool stepEnemyChase(const DungeonFloorData *floor, u8 index)
         const u8 dir = (u8)dirs[i];
         s16 nx;
         s16 ny;
-        if (!canMove(floor, enemy->x, enemy->y, dir)) continue;
+        if (!enemyCanTraverse(floor, enemy->x, enemy->y, dir)) continue;
         nx = (s16)enemy->x + dir_dx[dir];
         ny = (s16)enemy->y + dir_dy[dir];
         if (nx == player_x && ny == player_y)
@@ -356,7 +377,10 @@ static void initEnemies(void)
         {
             for (x = 0; x < floor->width && count < DUN_MAX_ENEMIES; x++)
             {
-                if (!(floor->flags[DUN_INDEX(floor, x, y)] & DUN_FLAG_ENEMY)) continue;
+                const u8 flags = floor->flags[DUN_INDEX(floor, x, y)];
+                if (!(flags & DUN_FLAG_ENEMY)) continue;
+                /* 正規化済みデータでは排他だが、不正・旧データでもイベント上にスポーンさせない。 */
+                if (flags & (DUN_FLAG_CHEST | DUN_FLAG_STAIRS_UP | DUN_FLAG_STAIRS_DOWN)) continue;
                 dun_enemies[f][count].x = (u8)x;
                 dun_enemies[f][count].y = (u8)y;
                 dun_enemies[f][count].dir = DUN_DIR_N;
@@ -605,10 +629,11 @@ int main(bool hardReset)
                 enemy_next_step_vtime = vtimer + interval;
                 DUN_setEnemies(dun_enemies[floor_index], DUN_MAX_ENEMIES);
             }
-            /* 毎フレーム、直前 tick からの経過でスライド進行度を更新しビルボードを描き直す。
+            /* 毎フレーム、直前 tick からの経過でスライド進行度を更新する。
+             * DUN_refreshBillboardsは可視候補/LOSをAI tickごとにキャッシュし、画面座標・
+             * 距離バケット・Priority範囲のいずれかが変わったフレームだけ描画を反映する。
              * 壁パターンは再転送せず、外接タイル境界/depth/表示数の変化でPriority bitが
-             * 実際に変わった場合だけBG_AマップをDMA更新する。Sprite Engineの反映は
-             * ループ末尾のSPR_update()へ集約する。 */
+             * 実際に変わった場合だけBG_AマップをDMA更新する。 */
             slide = (s32)(vtimer - enemy_last_step_vtime);
             if (slide < 0) slide = 0;
             if (slide > (s32)interval) slide = (s32)interval;
@@ -616,7 +641,6 @@ int main(bool hardReset)
             DUN_refreshBillboards();
         }
 
-        SPR_update();
         SYS_doVBlankProcess();
     }
 

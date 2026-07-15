@@ -959,7 +959,7 @@ test('dungeon-game-builder syncs engine, writes generated main, and build variab
   /* 前進/後退は押しっぱなし (レベルトリガー) */
   assert.match(generated.sourceCode, /\(joy & BUTTON_UP\)/);
   assert.match(generated.sourceCode, /\(joy & BUTTON_DOWN\)/);
-  assert.match(generated.sourceCode, /SPR_update/);
+  assert.doesNotMatch(generated.sourceCode, /SPR_update/, 'idle Sprite Engine updates are owned conditionally by dungeon_view.c');
   assert.match(generated.sourceCode, /canMove\(floor, player_x, player_y, player_dir\)/);
   assert.doesNotMatch(generated.sourceCode, /KDebug_Alert/);
   assert.equal(fs.existsSync(path.join(projectDir, 'src', 'dungeon_view.c')), true);
@@ -1203,6 +1203,10 @@ test('dungeon enemy AI: canTraverse/enemySpawns/enemyBlockedCell/enemyAt/enemyCa
   spawnFloor.cells[0][2].enemy = true;
   spawnFloor.cells[2][0].enemy = true;
   spawnFloor.cells[1][1].enemy = true;
+  spawnFloor.cells[0][0].event = 'chest';
+  spawnFloor.cells[0][0].enemy = true;
+  spawnFloor.cells[2][2].stairs = 'down';
+  spawnFloor.cells[2][2].enemy = true;
   const spawns = core.enemySpawns(spawnFloor);
   assert.deepEqual(spawns, [{ x: 2, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 2 }]);
   const fullFloor = makeEnemyTestFloor(4, 4);
@@ -1213,6 +1217,7 @@ test('dungeon enemy AI: canTraverse/enemySpawns/enemyBlockedCell/enemyAt/enemyCa
   const occFloor = makeEnemyTestFloor(5, 5);
   occFloor.cells[2][3].event = 'chest';
   occFloor.cells[3][2].stairs = 'up';
+  occFloor.cells[3][1].stairs = 'down';
   const enemies = [
     { x: 4, y: 4, dir: 0, mode: 0, anim: 0, chaseTimer: 0, active: true },
     { x: 0, y: 0, dir: 0, mode: 0, anim: 0, chaseTimer: 0, active: false },
@@ -1220,7 +1225,8 @@ test('dungeon enemy AI: canTraverse/enemySpawns/enemyBlockedCell/enemyAt/enemyCa
   const player = { x: 1, y: 1 };
   assert.equal(core.enemyBlockedCell(occFloor, enemies, -1, player, 1, 1), true, 'プレイヤーのセルはブロック');
   assert.equal(core.enemyBlockedCell(occFloor, enemies, -1, player, 3, 2), true, '宝箱のセルはブロック');
-  assert.equal(core.enemyBlockedCell(occFloor, enemies, -1, player, 2, 3), true, '階段のセルはブロック');
+  assert.equal(core.enemyBlockedCell(occFloor, enemies, -1, player, 2, 3), true, '上り階段のセルはブロック');
+  assert.equal(core.enemyBlockedCell(occFloor, enemies, -1, player, 1, 3), true, '下り階段のセルはブロック');
   assert.equal(core.enemyBlockedCell(occFloor, enemies, -1, player, 4, 4), true, '他のアクティブなエネミーのセルはブロック');
   assert.equal(core.enemyBlockedCell(occFloor, enemies, 0, player, 4, 4), false, 'exclude指定した自分自身のセルはブロックしない');
   assert.equal(core.enemyBlockedCell(occFloor, enemies, -1, player, 0, 0), false, '非アクティブなエネミーのセルはブロックしない');
@@ -1231,7 +1237,7 @@ test('dungeon enemy AI: canTraverse/enemySpawns/enemyBlockedCell/enemyAt/enemyCa
   assert.equal(core.enemyAt(enemies, 0, 0), null, '非アクティブは対象外');
   assert.equal(core.enemyAt(enemies, 1, 1), null);
 
-  /* enemyCanMove: canTraverse + 占有ブロックの合成 */
+  /* enemyCanMove: 敵専用の扉ブロック + canTraverse + 占有ブロックの合成 */
   const moveFloor = makeEnemyTestFloor(5, 5);
   moveFloor.cells[2][2].walls |= 2; /* east wall */
   const moveEnemies = [{ x: 2, y: 2, dir: 1, mode: 0, anim: 0, chaseTimer: 0, active: true }];
@@ -1239,6 +1245,23 @@ test('dungeon enemy AI: canTraverse/enemySpawns/enemyBlockedCell/enemyAt/enemyCa
   assert.equal(core.enemyCanMove(moveFloor, moveEnemies, 0, null, 2, 2, 2), true, '南は開いている');
   const movePlayer = { x: 2, y: 3 };
   assert.equal(core.enemyCanMove(moveFloor, moveEnemies, 0, movePlayer, 2, 2, 2), false, 'プレイヤー占有セルへはブロック');
+
+  const doorMoveFloor = makeEnemyTestFloor(5, 5);
+  doorMoveFloor.cells[2][2].doors |= 2; /* current cell east door */
+  assert.equal(core.canTraverse(doorMoveFloor, 2, 2, 1), true, 'プレイヤー用判定は扉を通過できる');
+  assert.equal(core.enemyCanMove(doorMoveFloor, moveEnemies, 0, null, 2, 2, 1), false, '敵は現在セル側に記録された扉を通過できない');
+  doorMoveFloor.cells[2][2].doors = 0;
+  doorMoveFloor.cells[2][3].doors |= 8; /* destination cell west door */
+  assert.equal(core.canTraverse(doorMoveFloor, 2, 2, 1), true, '反対側に記録された扉もプレイヤーは通過できる');
+  assert.equal(core.enemyCanMove(doorMoveFloor, moveEnemies, 0, null, 2, 2, 1), false, '敵は移動先セル側に記録された扉も通過できない');
+
+  const fixtureMoveFloor = makeEnemyTestFloor(5, 5);
+  fixtureMoveFloor.cells[2][3].event = 'chest';
+  fixtureMoveFloor.cells[3][2].stairs = 'up';
+  fixtureMoveFloor.cells[2][1].stairs = 'down';
+  assert.equal(core.enemyCanMove(fixtureMoveFloor, moveEnemies, 0, null, 2, 2, 1), false, '宝箱セルへ侵入できない');
+  assert.equal(core.enemyCanMove(fixtureMoveFloor, moveEnemies, 0, null, 2, 2, 2), false, '上り階段セルへ侵入できない');
+  assert.equal(core.enemyCanMove(fixtureMoveFloor, moveEnemies, 0, null, 2, 2, 3), false, '下り階段セルへ侵入できない');
 
   /* enemySeesPlayer: 正面直線3マス以内、壁と扉どちらも遮る (LOSのlosVisibleとは異なるルール) */
   const sightFloor = makeEnemyTestFloor(6, 6);
@@ -1281,6 +1304,14 @@ test('dungeon enemy AI: stepEnemies chase converges to contact and reverts to wa
   const tick4 = core.stepEnemies(floor, enemies, player, rng);
   assert.deepEqual(tick4, [0], '隣接して視界がある限り毎tick接触する');
 
+  /* 追跡モードを維持していても、扉越しのプレイヤーへは進めず接触もしない。 */
+  const doorFloor = makeEnemyTestFloor(5, 3);
+  doorFloor.cells[1][1].doors |= 2;
+  const doorEnemies = [{ x: 1, y: 1, dir: 1, mode: core.ENEMY_MODE_CHASE, anim: 0, chaseTimer: 2, active: true }];
+  const doorContacts = core.stepEnemies(doorFloor, doorEnemies, { x: 3, y: 1 }, core.makeEnemyRng(0x2025));
+  assert.deepEqual([doorEnemies[0].x, doorEnemies[0].y], [1, 1], '追跡中も扉を越えない');
+  assert.deepEqual(doorContacts, [], '扉越しでは接触フックを発火しない');
+
   /* タイマー復帰: 見失った状態が続くと ENEMY_CHASE_TIMER tick で徘徊へ戻る */
   const timerFloor = makeEnemyTestFloor(6, 6);
   const timerEnemies = [{ x: 0, y: 0, dir: 1 /* E, プレイヤーへ向いていない */, mode: core.ENEMY_MODE_CHASE, anim: 0, chaseTimer: 2, active: true }];
@@ -1294,7 +1325,7 @@ test('dungeon enemy AI: stepEnemies chase converges to contact and reverts to wa
   assert.equal(timerEnemies[0].mode, core.ENEMY_MODE_WANDER, 'chaseTimerが尽きたら徘徊モードへ復帰');
 });
 
-test('dungeon enemy AI: wander/chase never occupy the player, another enemy, chest, or stairs cell across many ticks', () => {
+test('dungeon enemy AI: wander/chase never cross doors or occupy the player, another enemy, chest, or stairs cell across many ticks', () => {
   const core = require('../plugins/dungeon-game-editor/render-core.js');
   const service = require('../plugins/dungeon-game-editor/dungeon-service');
   const floor = service.makeGeneratedFloor({ width: 12, height: 12, name: 'Invariant Floor' });
@@ -1305,8 +1336,25 @@ test('dungeon enemy AI: wander/chase never occupy the player, another enemy, che
   const player = { x: floor.start.x, y: floor.start.y, dir: floor.start.dir };
   const rng = core.makeEnemyRng(0x2025);
   for (let tick = 0; tick < 80; tick++) {
+    const before = enemies.map((enemy) => ({ x: enemy.x, y: enemy.y }));
     core.stepEnemies(floor, enemies, player, rng);
     enemies.forEach((enemy, index) => {
+      const dx = enemy.x - before[index].x;
+      const dy = enemy.y - before[index].y;
+      assert.ok(Math.abs(dx) + Math.abs(dy) <= 1, `tick ${tick}: enemy ${index} moved more than one cell`);
+      if (dx || dy) {
+        const moveDir = dx > 0 ? 1 : (dx < 0 ? 3 : (dy > 0 ? 2 : 0));
+        assert.equal(
+          core.rawEdgeState(floor, before[index].x, before[index].y, moveDir),
+          core.EDGE_STATE_OPEN,
+          `tick ${tick}: enemy ${index} crossed a wall or door`,
+        );
+        assert.equal(
+          core.canTraverse(floor, before[index].x, before[index].y, moveDir),
+          true,
+          `tick ${tick}: enemy ${index} violated a one-way edge`,
+        );
+      }
       const cell = floor.cells[enemy.y][enemy.x];
       assert.notDeepEqual([enemy.x, enemy.y], [player.x, player.y], `tick ${tick}: enemy ${index} on player cell`);
       assert.notEqual(cell.event, 'chest', `tick ${tick}: enemy ${index} on chest cell`);
@@ -1514,11 +1562,12 @@ test('dungeon-game-builder generates enemy AI C source matching render-core.js c
   assert.match(viewSource, /static void addBillboardPriorityBox\(const AnimationFrame \*frame/);
   assert.match(viewSource, /if \(wall_depth <= box->depth_code\)/);
   assert.match(viewSource, /next_attr \|= TILE_ATTR_PRIORITY_MASK;/);
-  assert.match(viewSource, /SPR_addSprite\(def, sx, sy, TILE_ATTR\(PAL1, FALSE, FALSE, FALSE\)\)/);
+  assert.match(viewSource, /SPR_addSprite\(plan->definition, x, y, TILE_ATTR\(PAL1, FALSE, FALSE, FALSE\)\)/);
   assert.match(viewSource, /stageFrame\(active_view_set->frame_static, &dun_priority_frame_static, FALSE\)/);
-  assert.match(viewSource, /if \(updateBillboards\([\s\S]*VDP_setTileMapDataRect\(BG_A, map_staging/);
+  assert.match(viewSource, /if \(changes & DUN_BB_CHANGED_PRIORITY\)[\s\S]*VDP_setTileMapDataRect\(BG_A, map_staging/);
   const refreshBody = viewSource.match(/void DUN_refreshBillboards\(void\)\s*\{([\s\S]*?)\n\}/)?.[1] || '';
-  assert.doesNotMatch(refreshBody, /SPR_update\(\)/, 'main loop must own the single Sprite Engine update per vblank');
+  assert.match(refreshBody, /bb_plan_enemy_generation != active_enemy_generation/);
+  assert.match(refreshBody, /if \(changes & DUN_BB_CHANGED_SPRITES\) SPR_update\(\)/);
   /* ソフトウェア画素マスク、固定VRAM、9KB RAM、手動スプライトDMAは全廃。 */
   assert.doesNotMatch(viewSource, /buildMaskedBillboardTiles|occlusionDepthAt|commitBillboard/);
   assert.doesNotMatch(viewSource, /DUN_BB_SLOT_TILES|DUN_BB_VRAM|bb_tile_buffers/);
@@ -1537,6 +1586,18 @@ test('dungeon-game-builder generates enemy AI C source matching render-core.js c
   assert.match(mainSource, /x \^= \(u16\)\(x << 7\);/);
   assert.match(mainSource, /x \^= \(u16\)\(x >> 9\);/);
   assert.match(mainSource, /x \^= \(u16\)\(x << 8\);/);
+  /* プレイヤーは扉通過可のcanTraverse、敵は扉を拒否するenemyCanTraverseを使い分ける。 */
+  assert.match(mainSource, /static bool hasDoorAt\(/);
+  assert.match(mainSource, /edgesAt\(floor, x, y\) & door_bits\[dir\]/);
+  assert.match(mainSource, /edgesAt\(floor, nx, ny\) & door_bits\[opposite\]/);
+  assert.match(mainSource, /static bool canTraverse\(/);
+  assert.match(mainSource, /static bool enemyCanTraverse\(/);
+  assert.match(mainSource, /if \(hasDoorAt\(floor, x, y, dir\)\) return FALSE;/);
+  assert.match(mainSource, /if \(!enemyCanTraverse\(floor, x, y, dir\)\) return FALSE;/);
+  assert.match(mainSource, /if \(!enemyCanTraverse\(floor, enemy->x, enemy->y, dir\)\) continue;/);
+  /* 宝箱・上下階段は移動先と防御的スポーン初期化の両方で拒否する。 */
+  assert.match(mainSource, /flags & \(DUN_FLAG_CHEST \| DUN_FLAG_STAIRS_UP \| DUN_FLAG_STAIRS_DOWN\)/);
+  assert.match(mainSource, /if \(!\(flags & DUN_FLAG_ENEMY\)\) continue;[\s\S]*if \(flags & \(DUN_FLAG_CHEST \| DUN_FLAG_STAIRS_UP \| DUN_FLAG_STAIRS_DOWN\)\) continue;/);
   assert.match(mainSource, /static bool enemySeesPlayer\(/);
   assert.match(mainSource, /static void stepEnemyWander\(/);
   assert.match(mainSource, /static bool stepEnemyChase\(/);
@@ -1566,12 +1627,26 @@ test('dungeon-game-builder generates enemy AI C source matching render-core.js c
   assert.match(gameHeader, /typedef struct DunEnemy\s*\{[\s\S]*u8 prev_x;\s*u8 prev_y;[\s\S]*\} DunEnemy;/);
   assert.match(viewHeader, /void DUN_setEnemySlide\(u16 num, u16 den\);/);
   assert.match(viewSource, /void DUN_setEnemySlide\(u16 num, u16 den\)/);
-  assert.match(viewSource, /static u16 enemy_slide_num;/);
-  assert.match(viewSource, /enemy_slide_num < enemy_slide_den/);
-  assert.match(viewSource, /\(\(s32\)\(cur_sx - prev_sx\) \* enemy_slide_num\) \/ enemy_slide_den/);
-  /* 距離バケット (サイズ) も補間して移動中に拡大縮小する (最近傍丸め) */
-  assert.match(viewSource, /draw_frame = \(s16\)\(prev_pose->frame \+ \(\(fn < 0\) \? -q : q\)\)/);
-  assert.match(viewSource, /SPR_setAnimAndFrame\(bb_sprites\[used\], draw_anim, draw_frame\)/);
+  assert.match(viewSource, /static u16 enemy_slide_phase;/);
+  assert.match(viewSource, /\(\(\(u32\)num << 16\) \+ safe_den - 1\) \/ safe_den/);
+  assert.match(viewSource, /static s16 interpolateSlideValue\(/);
+  assert.match(viewSource, /\(\(u32\)magnitude \* enemy_slide_phase\) >> 16/);
+  /* 可視候補/LOSはAI tickでだけ再構築し、tick間は最大8スロットの補間端点を再利用する。 */
+  assert.match(viewSource, /static void buildBillboardPlans\(/);
+  assert.match(viewSource, /static DunBillboardPlan bb_plans\[DUN_SPRITE_COUNT\];/);
+  assert.match(viewSource, /bb_plan_enemy_generation = active_enemy_generation;/);
+  /* 壁へ入る敵も直前セルが見える間はplanへ残し、終端までPriorityで隠す。 */
+  assert.match(viewSource, /bool current_visible;/);
+  assert.match(viewSource, /bool previous_visible;/);
+  assert.match(viewSource, /plan->previous_visible = losVisible\(floor, x, y, dir, pdd, pdl_world\)/);
+  assert.match(viewSource, /static bool billboardSlideVisible\(const DunBillboardPlan \*plan\)/);
+  assert.match(viewSource, /if \(!billboardSlideVisible\(plan\)\)/);
+  /* 距離バケット (サイズ) も固定小数で最近傍丸めし、表示状態が変わる時だけsetterを呼ぶ。 */
+  assert.match(viewSource, /static s16 interpolateSlideFrame\(/);
+  assert.match(viewSource, /\+ 0x8000\) >> 16/);
+  assert.match(viewSource, /if \(state->animation != plan->animation \|\| state->frame != frame_index\)/);
+  assert.match(viewSource, /SPR_setAnimAndFrame\(sprite, plan->animation, frame_index\)/);
+  assert.doesNotMatch(mainSource, /SPR_update\(\)/);
   assert.match(mainSource, /enemy->prev_x = before_x;/);
   assert.match(mainSource, /static u32 enemy_last_step_vtime;/);
   assert.match(mainSource, /enemy_last_step_vtime = vtimer;/);
@@ -1609,6 +1684,9 @@ test('dungeon-game-editor renderer wires the enemy tool, sim state, and settings
   assert.match(rendererSource, /core\.billboardSlideLerp\(prevSx0, sx0, slide\.num, slide\.den\)/);
   assert.match(rendererSource, /core\.billboardSlideLerp\(posePrev\.y, pose\.y, slide\.num, slide\.den\)/);
   assert.match(rendererSource, /core\.billboardSlideFrame\(posePrev\.frame, pose\.frame, slide\.num, slide\.den\)/);
+  assert.match(rendererSource, /const currentVisible = core\.losVisible\(floor, frame\.base\.x, frame\.base\.y, dir, dd, dl\)/);
+  assert.match(rendererSource, /previousVisible = core\.losVisible\(floor, frame\.base\.x, frame\.base\.y, dir, pdd, pdlWorld\)/);
+  assert.match(rendererSource, /core\.billboardSlideVisible\(currentVisible, previousVisible, Boolean\(posePrev\), slide\.num, slide\.den\)/);
   assert.match(rendererSource, /core\.renderViewDetailed\(/);
   assert.match(rendererSource, /core\.minimumDepthByTile\(wallDepth\)/);
   assert.match(rendererSource, /core\.priorityTilesForBillboards\(/);
@@ -1616,6 +1694,40 @@ test('dungeon-game-editor renderer wires the enemy tool, sim state, and settings
   assert.match(rendererSource, /function drawHighPriorityWalls\(/);
   assert.doesNotMatch(rendererSource, /wallDepth\[\(dy \* VIEW_W\) \+ dx\] > drawDepthCode/);
   assert.match(rendererSource, /posePrev\.depthCode \|\| 0/);
+});
+
+test('dungeon fixed-point slide phase exactly matches integer interpolation bounds', () => {
+  /*
+   * C側はceil(num*65536/den)を1回だけ計算し、各スロットを16x16乗算+shiftで補間する。
+   * ビュー座標差の上限200、設定可能den=5..240を全探索し、従来の除算結果と一致させる。
+   */
+  let mismatch = null;
+  for (let den = 5; den <= 240 && !mismatch; den++) {
+    for (let num = 0; num <= den; num++) {
+      const phase = num >= den ? 65536 : Math.ceil((num * 65536) / den);
+      for (let delta = -200; delta <= 200; delta++) {
+        const sign = delta < 0 ? -1 : 1;
+        const fixed = sign * Math.floor((Math.abs(delta) * phase) / 65536);
+        const exact = Math.trunc((delta * num) / den);
+        if (fixed !== exact) {
+          mismatch = { kind: 'trunc', den, num, delta, fixed, exact };
+          break;
+        }
+      }
+      if (mismatch) break;
+      for (let delta = -7; delta <= 7; delta++) {
+        const sign = delta < 0 ? -1 : 1;
+        const fixed = sign * Math.floor(((Math.abs(delta) * phase) + 32768) / 65536);
+        const nearest = sign * Math.floor(((2 * Math.abs(delta) * num) + den) / (2 * den));
+        if (fixed !== nearest) {
+          mismatch = { kind: 'nearest', den, num, delta, fixed, exact: nearest };
+          break;
+        }
+      }
+      if (mismatch) break;
+    }
+  }
+  assert.equal(mismatch, null, JSON.stringify(mismatch));
 });
 
 test('dungeon enemy movement: stepEnemies records the previous cell and billboardSlideLerp interpolates', () => {
@@ -1637,9 +1749,36 @@ test('dungeon enemy movement: stepEnemies records the previous cell and billboar
   assert.equal(core.billboardSlideFrame(4, 4, 2, 4), 4); /* 横移動 (距離不変) はサイズ変化なし */
   assert.equal(core.billboardSlideFrame(6, 4, 3, 0), 4); /* den=0 は cur */
 
+  /*
+   * 壁を跨ぐ可視性は方向対称。現在セルが壁越しでも直前セルが見えていれば
+   * スライド終端直前まで残り、終端で現在セルのLOSへ確定して消える。
+   */
+  assert.equal(core.billboardSlideVisible(false, true, true, 0, 90), true);
+  assert.equal(core.billboardSlideVisible(false, true, true, 89, 90), true);
+  assert.equal(core.billboardSlideVisible(false, true, true, 90, 90), false);
+  assert.equal(core.billboardSlideVisible(true, false, true, 0, 90), true, '壁から出る方向は従来どおり描画する');
+  assert.equal(core.billboardSlideVisible(false, false, true, 45, 90), false);
+  assert.equal(core.billboardSlideVisible(false, true, false, 45, 90), false);
+  assert.equal(core.billboardSlideVisible(false, true, true, 0, 0), false);
+
   const blank = () => ({ walls: 0, doors: 0, one_way: 0, dark: false, event: '', stairs: '', enemy: false });
   const mk = (w, h) => ({ width: w, height: h, cells: Array.from({ length: h }, () => Array.from({ length: w }, blank)) });
   const floor = mk(6, 6);
+  /*
+   * カメラ(2,4)から北を見る。敵は可視セル(2,2)から隣の(3,2)へ合法移動できるが、
+   * (2,3)-(3,3)間の側壁によって移動後セルだけがLOS外になる実際の退場ケース。
+   */
+  const wallExitFloor = mk(6, 6);
+  wallExitFloor.cells[3][2].walls |= 2;
+  wallExitFloor.cells[3][3].walls |= 8;
+  const previousVisible = core.losVisible(wallExitFloor, 2, 4, 0, 2, 0);
+  const currentVisible = core.losVisible(wallExitFloor, 2, 4, 0, 2, 1);
+  assert.equal(core.edgeStateBetween(wallExitFloor, 2, 2, 1), core.EDGE_STATE_OPEN, '敵の横移動経路自体は開いている');
+  assert.equal(previousVisible, true);
+  assert.equal(currentVisible, false);
+  assert.equal(core.billboardSlideVisible(currentVisible, previousVisible, true, 45, 90), true);
+  assert.equal(core.billboardSlideVisible(currentVisible, previousVisible, true, 90, 90), false);
+
   const enemies = core.enemySpawns(floor);
   enemies.push({ x: 2, y: 2, dir: 1, mode: 0, chaseTimer: 0, anim: 0, active: true, prevX: 2, prevY: 2 });
   const e = enemies[enemies.length - 1];

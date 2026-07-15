@@ -366,9 +366,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   /*
    * エネミー移動スライドの現在の進行度。0 = 直前tickのセル (prevX/prevY)、
    * 1 (=den/den) = 現tickのセル (x/y) を描く。num/den の形で返すのは C 側
-   * (dungeon_view.c の enemy_slide_num/den, vblank単位の整数) と同じ式の形を
-   * JS 側 (経過ms/間隔ms) でも保つため — core.billboardSlideLerp はどちらの
-   * 単位でも同じ整数除算の形で呼べる。
+   * DUN_setEnemySlide (vblank単位の整数) と同じ端点を JS 側 (経過ms/間隔ms) でも
+   * 保つため。Cは受け取った比率をQ0.16へ1回だけ変換し、各planを同じ結果へ補間する。
    */
   function enemySlideProgress() {
     const den = enemyTickIntervalMs();
@@ -902,16 +901,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         else if (cell.stairs === 'down') sheet = model.sheets.stairs_down;
       }
       if (!sheet) continue;
-      if (!core.losVisible(floor, frame.base.x, frame.base.y, dir, dd, dl)) continue;
-      const sx0 = frame.mirrored ? (VIEW_W - pose.x - size) : pose.x;
-      /* エネミーは直前セル (prevX/prevY) の焼き込みポーズと現セルのポーズを num/den で
-       * 補間してスライドさせる (実機 dungeon_view.c updateBillboards と同一式)。移動して
-       * いない・直前セルが視界窓外/カリング時は補間せず現セルへ描く (境界でのポップは許容)。 */
-      let drawSx0 = sx0;
-      let drawTop = pose.y;
-      let drawFrame = pose.frame;
-      let drawDepthCode = pose.depthCode || 0;
-      if (enemy && (enemy.prevX !== enemy.x || enemy.prevY !== enemy.y) && slide.num < slide.den) {
+      const currentVisible = core.losVisible(floor, frame.base.x, frame.base.y, dir, dd, dl);
+      const moving = Boolean(enemy && (enemy.prevX !== enemy.x || enemy.prevY !== enemy.y));
+      let posePrev = null;
+      let previousVisible = false;
+      if (moving) {
         const podx = enemy.prevX - frame.base.x;
         const pody = enemy.prevY - frame.base.y;
         const pdd = (podx * DIRS[dir].dx) + (pody * DIRS[dir].dy);
@@ -921,20 +915,38 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         for (let k = 0; k < cells.length; k++) {
           if (cells[k].dd === pdd && cells[k].dl === wantDl) { pj = k; break; }
         }
-        const posePrev = pj >= 0 ? frame.bbPoses[pj] : null;
+        posePrev = pj >= 0 ? frame.bbPoses[pj] : null;
         if (posePrev && posePrev.frame >= 0) {
-          const prevSx0 = frame.mirrored ? (VIEW_W - posePrev.x - size) : posePrev.x;
-          drawSx0 = core.billboardSlideLerp(prevSx0, sx0, slide.num, slide.den);
-          drawTop = core.billboardSlideLerp(posePrev.y, pose.y, slide.num, slide.den);
-          /* 距離バケット (スプライトサイズ) も補間し、移動に合わせて拡大縮小を段階変化させる */
-          drawFrame = core.billboardSlideFrame(posePrev.frame, pose.frame, slide.num, slide.den);
-          drawDepthCode = core.billboardSlideLerp(
-            posePrev.depthCode || 0,
-            pose.depthCode || 0,
-            slide.num,
-            slide.den,
-          );
+          previousVisible = core.losVisible(floor, frame.base.x, frame.base.y, dir, pdd, pdlWorld);
+        } else {
+          posePrev = null;
         }
+      }
+      if (enemy) {
+        if (!core.billboardSlideVisible(currentVisible, previousVisible, Boolean(posePrev), slide.num, slide.den)) continue;
+      } else if (!currentVisible) {
+        continue;
+      }
+      const sx0 = frame.mirrored ? (VIEW_W - pose.x - size) : pose.x;
+      /* エネミーは直前セル (prevX/prevY) の焼き込みポーズと現セルのポーズを num/den で
+       * 補間してスライドさせる (実機 dungeon_view.c updateBillboards と同一式)。現在セルが
+       * LOS外でも直前セルが見えていれば終端直前まで残し、壁Priorityで滑らかに隠す。 */
+      let drawSx0 = sx0;
+      let drawTop = pose.y;
+      let drawFrame = pose.frame;
+      let drawDepthCode = pose.depthCode || 0;
+      if (enemy && posePrev && slide.num < slide.den) {
+        const prevSx0 = frame.mirrored ? (VIEW_W - posePrev.x - size) : posePrev.x;
+        drawSx0 = core.billboardSlideLerp(prevSx0, sx0, slide.num, slide.den);
+        drawTop = core.billboardSlideLerp(posePrev.y, pose.y, slide.num, slide.den);
+        /* 距離バケット (スプライトサイズ) も補間し、移動に合わせて拡大縮小を段階変化させる */
+        drawFrame = core.billboardSlideFrame(posePrev.frame, pose.frame, slide.num, slide.den);
+        drawDepthCode = core.billboardSlideLerp(
+          posePrev.depthCode || 0,
+          pose.depthCode || 0,
+          slide.num,
+          slide.den,
+        );
       }
       const frameOffset = drawFrame * size;
       const visibleBounds = billboardVisibleBounds(sheet, rowOffset, frameOffset, size);

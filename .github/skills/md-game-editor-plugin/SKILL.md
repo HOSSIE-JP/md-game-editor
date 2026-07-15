@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-07 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Dungeon reusable asset sets and common billboards / Indexed image import and validation / Fixed BG_B floor-ceiling + transparent BG_A walls / Per-set SGDK resources / Dynamic BG_A tile Priority billboard occlusion / Dungeon template / Editor UX guardrails / Bundled WASM split metadata
+> § Last Updated: 2026-07 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Dungeon reusable asset sets and common billboards / Indexed image import and validation / Fixed BG_B floor-ceiling + transparent BG_A walls / Per-set SGDK resources / Dynamic BG_A tile Priority, cached billboard refresh, symmetric wall crossing, and enemy door confinement / Dungeon template / Editor UX guardrails / Bundled WASM split metadata
 
 ---
 
@@ -363,6 +363,9 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 - ビルドは参照中セットごとに壁/扉tileset、床/天井background tileset、通常/暗闇palette、ビルボードpalette + sprite sheet、decision tableを生成し、`DunViewSet`レジストリとフロアのセットindexで切り替える。未参照セットはROMへ出力せず、cache/budget/warningはセット別と合計で返す。
 - 壁・扉によるビルボード遮蔽は共有render coreの4bit深度コード (`0=壁なし、1～15=遠→近`) を8x8タイル内の最小非ゼロ値へ縮約し、重なる全ビルボードについて `tile_min_wall_depth > billboard_depth` の場合だけBG_Aを高Priorityにする。同一コード・遠い壁は低Priorityのままとし、previewとSGDKでstatic/fwd/turnおよび敵スライドの深度補間を一致させる。
 - Priority decision table/cacheはテクスチャ非依存でプロジェクトに1組だけ生成し、cache keyはcore versionとanimation/turn frame数だけにする。深度PNG/TILESETは生成しない。SGDK側はSprite Engineの自動VRAM割当・自動タイル転送を使い、全ビルボードを低Priorityにする。画素マスク、固定VRAM、9216B RAM、手動スプライトDMAを再導入しない。
+- `DUN_refreshBillboards()` は静止視点の可視候補/LOS/ポーズ検索を敵リスト世代単位の最大8件planへキャッシュする。敵スライド進捗はフレームごとに一度だけQ0.16へ除算し、各planを乗算/シフトで従来と同じ整数結果へ補間する。スロット状態、Priority bit、Sprite Engine更新は差分がある場合だけ反映し、生成 `main.c` から無条件に `SPR_update()` を呼ばない。
+- 敵が壁を跨ぐときは現在/直前セルのLOSを対称に評価する。現在セルがLOS外でも直前セルがLOS内で両端ポーズが有効ならスライド終端直前まで候補を保持し、BG_A Priorityで徐々に隠す。終端で現在LOSへ確定する規則をpreviewとSGDKで一致させる。
+- 敵AIの移動はプレイヤー用 `canTraverse()` と分離した `enemyCanTraverse()` をJS/C双方に持ち、境界両側の扉ビットを通行不可にする。徘徊と追跡の両方で同じ判定を使い、宝箱/上下階段/プレイヤー/他エネミーの占有セルも拒否する。スポーン時も競合する宝箱/階段フラグを防御的に除外する。
 
 ### 分離後の標準エミュレーター同梱
 

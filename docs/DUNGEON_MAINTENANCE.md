@@ -40,7 +40,7 @@ plugins/dungeon-game-builder/template/
 - ハードウェアスプライトは `DUN_SPRITE_COUNT = 8` スロットを全ビルボードで共有。候補セル順 (近→遠) に割り当て、あふれた遠方は非表示。
 - **側壁の部分遮蔽**: 壁・扉のZバッファを4bitコードへ変換し、各8x8タイル内の**最小非ゼロ深度**だけを返すstatic/fwd/turn用 `DunPriorityTable` を焼く。壁タイルは、重なる全ビルボードについて `tile_min_wall_depth > billboard_depth` の場合だけBG_AのPriority bitを立てる。同一コード・遠い壁は低Priorityのままなので誤遮蔽しない。混在深度タイルでは最大8px程度の隠し損ねを許容する保守的判定。床/天井、ビルボード同士は対象外。左右鏡像・前後移動・エネミースライドでは座標/距離バケットと一緒にdepth_codeも整数補間する。
 - Sprite Engineの自動VRAM割当・自動タイル転送を使用し、全ビルボードを低Priorityで描く。BG_Aの低Priority壁はスプライトの後ろ、高Priority壁はスプライトの前になる。スプライト画素をRAMへ展開・比較・再DMAしてはならない。外接範囲は選択 `AnimationFrame.frameVDPSprites` の実メタスプライトからタイル単位で求める。
-- 通常の移動/旋回は既存400ワードBG_AマップDMAへPriority bitを含める。`DUN_refreshBillboards()` は壁世代、表示数、外接タイル範囲、depth_codeの完全一致をキャッシュし、Priority bitが実際に変わった場合だけ400ワードを再送する。ピクセル位置だけが同じタイル内で動く敵スライドではマップDMAを発生させない。
+- 通常の移動/旋回は既存400ワードBG_AマップDMAへPriority bitを含める。`DUN_refreshBillboards()` は壁世代、表示数、外接タイル範囲、depth_codeの完全一致をキャッシュし、Priority bitが実際に変わった場合だけ400ワードを再送する。ピクセル位置だけが同じタイル内で動く敵スライドではマップDMAを発生させない。静止視点では可視候補/LOS/焼き込みポーズ検索を最大8件の `DunBillboardPlan` として敵リスト世代ごとにキャッシュし、42候補セルの走査を毎フレーム繰り返さない。各スロットは最後に適用したdefinition/座標/animation/frame/visibilityを比較し、変わったsetterだけを呼ぶ。スプライト状態に変化がないフレームは `SPR_update()` も呼ばないこと。`main.c` のアイドルループから無条件に呼び戻してはならない。
 - LOS ゲート: `losVisible` はセル中心間の supercover 線分判定 (整数誤差項、JS/C同一)。**格子の角を正確に通過する場合は両側の迂回路が開いている場合のみ可視** (AND)。OR にすると開いていない側の壁が実際には描画されるため、壁越しにスプライトが透ける (実際にバグとして踏んで修正した経緯がある。tests の partialCornerFloor が回帰ガード)。
 
 ## 4. エネミー (移動エンティティ)
@@ -50,10 +50,13 @@ plugins/dungeon-game-builder/template/
   - 16bit xorshift RNG (シフト定数 7, 9, 8 / seed 0x2025)。テストが**先頭5出力 (0x8ebc, 0x04d4, 0x8de3, 0x215d, 0x159a)** を断言しており、C移植の照合アンカーになっている。
   - RNG の消費順序も一致必須 (徘徊は roll を無条件に1回消費 → 分岐によって2回目)。
   - 追跡の同点タイブレークは横 (x) 優先。
-- 占有ルール: エネミーはプレイヤー/宝箱/階段/他エネミーのセルへ侵入・通過不可。プレイヤー側も `canMove()` / `canPreviewMove()` (→ `core.canTraverse`) でエネミーセルをブロック。接触フックは**追跡ステップがプレイヤーセルへ侵入を試みたときのみ**発火 (徘徊は候補から除外されるため発火しない)。
+- 境界ルール: プレイヤー用 `canTraverse()` は扉を通過可能なまま維持し、敵AIは専用の `enemyCanTraverse()` で扉を壁と同様に拒否する。扉ビットは境界の現在セル側・移動先セル側のどちらに保存されていても検出すること。徘徊の候補列挙と追跡の接触前判定の両方がこの関数を通るため、片方だけを `canTraverse()` に戻してはならない。
+- 占有ルール: エネミーはプレイヤー/宝箱/上り階段/下り階段/他エネミーのセルへ侵入・通過不可。`normalizeCell` の配置排他に加え、JS `enemySpawns()` とC `initEnemies()` も競合フラグを防御的に拒否する。プレイヤー側も `canMove()` / `canPreviewMove()` (→ `core.canTraverse`) でエネミーセルをブロック。接触フックは**扉のない境界から追跡ステップがプレイヤーセルへ侵入を試みたときのみ**発火 (徘徊は候補から除外されるため発火しない)。
 - ティック間隔はフロア別 (`DungeonFloorData.enemy_step_vblanks`、0=プロジェクト既定を継承、エクスポート時に解決して焼き込み)。実機はティックごとに現在フロアの構造体から読むため、フロア遷移で自動的に切り替わる。
-- 位置だけ変わる再描画は `DUN_refreshBillboards()` (壁の再ステージなし)。壁タイルまで再送すると無駄に 2 vblank 消費する。
+- 位置だけ変わる再描画は `DUN_refreshBillboards()` (壁の再ステージなし)。壁タイルまで再送すると無駄に 2 vblank 消費する。`DUN_setEnemies()` は敵リスト世代を進め、次のrefreshだけが可視候補planを再構築する。以後のtick間フレームはそのplanを再利用する。
 - **移動スライド (瞬間移動に見せない)**: 敵は tick で論理セルを1マス進めるが、描画は tick 間を補間して滑らかにスライドさせる。仕組みは**実行時3D投影ではなく、直前セルと現セルの「焼き込み済みビルボードポーズ (画面座標)」の整数線形補間**なので、焼き込みテーブルは不変 (=`core.version` バンプ不要、既存キャッシュ有効) かつ 68k は整数演算のみ。要素: ① `DunEnemy.prev_x/prev_y` (= JS `enemy.prevX/prevY`) に tick 開始時のセルを記録 (AI分岐より前、JS/C同一位置)。② グローバルなスライド進捗 num/den (全敵共通、単一tick期限。C=`vtimer - enemy_last_step_vtime` / 間隔、JS=経過ms/間隔ms) を `DUN_setEnemySlide()` で毎フレーム view へ渡す。③ `updateBillboards`/`drawBillboardsInto` の敵分岐で、直前セルの相対 (dd,dl) を `dun_bb_cells`/`model.billboards.cells` から逆引きして両ポーズを取り、画面座標を `core.billboardSlideLerp` = `prev + trunc((cur-prev)*num/den)` (**0方向切り捨て**で JS `Math.trunc`=C 整数除算が一致) で補間。**距離バケット (スプライトサイズ) も `core.billboardSlideFrame` で補間**する — MD には連続スプライト拡縮が無いため8段階の焼き込み済みバケットを進行度で切り替え、移動中に距離変化で拡大縮小させる。バケットは**最近傍丸め** (対称・符号ごとに正の除算 `(2*|Δ*num|+den)/(2*den)`) で JS/C 一致させる (位置の切り捨てと違い、丸めないと末尾でサイズがポップする)。横移動 (距離不変) は prev/cur バケットが同じなのでサイズ変化しない。バケット数を増やすと段階が細かくなるが焼き込み変更 (シート幅・`core.version` バンプ) が要るため未対応。④ tick 間も動かすため毎フレーム再描画する (C=アイドル毎 `DUN_refreshBillboards`、JS=`requestAnimationFrame` の `stepEnemySlideLoop`)。視覚は論理セルへ**1tick遅れ**でスライドする (AI/当たり判定は論理セルを使う)。直前セルが視界窓外/カリング時は補間せず現セルへ描く (境界ポップは許容)。
+- **スライド性能の不変条件**: Cの `DUN_setEnemySlide()` は `ceil(num*65536/den)` のQ0.16進捗をフレームごとに一度だけ求め、最大8件のplanは乗算+シフトで座標/depth_codeを補間し、半加算で距離バケットを最近傍丸めする。切り上げQ0.16は焼き込みポーズの全差分と設定可能な全tick間隔で従来の位置0方向切り捨て/バケット最近傍丸めと完全一致する。したがってpreview、焼き込みテーブル、`core.version`、既存cacheを変更しない。毎フレーム適用するのはplanだけで、全候補走査、setter、Priority map DMA、`SPR_update()` は各キャッシュ/差分判定に従って必要時だけ実行する。
+- **壁跨ぎの対称可視性**: 現在セルのLOSだけで候補を落としてはならない。現在セルがLOS外でも、直前セルがLOS内で両端の `DunBBPose` が有効なら、`num < den` の間はplanを保持して座標/frame/depth_codeを補間し、BG_A Priorityに隠させる。`num >= den` で現在セルのLOSへ確定して非表示にする。これをJSの `billboardSlideVisible` / `collectBillboards` とCの `billboardSlideVisible` / `buildBillboardPlans` で一致させる。現在側または直前側のポーズ自体が視界窓外/カリングの場合は補間端点を作れないため、従来どおり境界ポップを許容する。この変更はランタイム候補選択だけで焼き込み結果を変えないため、`core.version` は上げない。
 
 ## 5. 焼き込みキャッシュ — 最大の罠
 
@@ -134,8 +137,8 @@ plugins/dungeon-game-editor/
   `node -e "require('./app-config').loadAppConfig(require('./app.config')); require('./tests/dungeon-plugins.test.js')"`
   最終確認は `npm test`。
 - テストの型: ① render-core のロジック単体テスト (LOS/AI/ポーズ/パレット) ② エクスポート実物検証 (生成PNG寸法/palette、resources.res 行、生成Cの文字列) ③ **Cソースパターン断言** — JS と C の二重実装が乖離しないよう、C側に同じ定数・関数名・呼び出しパターンが存在することを正規表現で検査 ④ renderer.js ソース断言 (UI 配線)。
-- 遮蔽変更時は、近い側壁で「手前と確定できる8x8壁タイルだけが前面化し、透明な開口側は残る」、遠い壁・同一深度・混在深度・複数候補で誤遮蔽しないこと、壁/扉、左右鏡像、static/fwd/turn、足元、敵スライドを確認する。Priority値は0～15、`resources.res` に `dun_occlusion_depth_tiles` が無いこと、Cに画素マスク/固定VRAM/9216B RAM/手動スプライトDMAが無いこと、600フレーム×8体で旧画素マスク相当処理より2倍以上高速なことを検査する。
-- AI 変更時は不変条件ファジング (ランダムフロア×多ティックで占有違反/壁すり抜け/テレポートが無いこと) を書いて検証する。`stepEnemies` は決定的なので再現も容易。
+- 遮蔽変更時は、近い側壁で「手前と確定できる8x8壁タイルだけが前面化し、透明な開口側は残る」、遠い壁・同一深度・混在深度・複数候補で誤遮蔽しないこと、壁/扉、左右鏡像、static/fwd/turn、足元、敵スライドを確認する。壁から出る方向と壁へ消える方向の両方で、スライド途中の候補保持と終端LOS確定を検査する。Priority値は0～15、`resources.res` に `dun_occlusion_depth_tiles` が無いこと、Cに画素マスク/固定VRAM/9216B RAM/手動スプライトDMAが無いこと、600フレーム×8体で旧画素マスク相当処理より2倍以上高速なことを検査する。性能回帰テストは固定小数点補間が全tick間隔/ポーズ差分で旧除算結果と一致すること、静止planが敵世代不変時に再構築されないこと、`SPR_update()` がスプライト差分時だけ呼ばれ、生成 `main.c` に無条件呼び出しがないことも固定する。
+- AI 変更時は不変条件ファジング (ランダムフロア×多ティックで占有違反/壁・扉すり抜け/一方通行違反/テレポートが無いこと) を書いて検証する。扉は両側どちらのビット表現でも敵だけを遮り、プレイヤーの `canTraverse()` は通すこと、徘徊と追跡の双方で越えないことを個別にも固定する。`stepEnemies` は決定的なので再現も容易。
 - C コンパイル検証: SGDK は `data/tools/sgdk`、JRE は `data/tools/jre` (make に PATH 追加要)。`m68k-elf-gcc -fsyntax-only` を rescomp 生成ヘッダー付きで回すと構造体変更の破壊を早期検知できる。
 - ヘッドレス実機検証: 同梱 WASM エミュ (initSync + EmulatorHandle) で ROM を実行し、`out/symbol.txt` の RAM アドレスを `get_memory` で読んで状態検証できる。ボタン bit: U1/D2/L4/R8/B16/C32/A64/START128。
 - 実プロジェクト (`projects/my_md_game`) はリポジトリ内にあるがgitignore対象。実データでの regen 検証・キャッシュ検証に使える。ただし settings.json に旧既定値が明示保存されていると新既定が効かない点に注意 (既定値変更時はここも確認)。
