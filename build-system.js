@@ -269,7 +269,7 @@ const ROMHeader rom_header = {
     0xE0FFFFFF,
     "RA",
     0xF820,
-    0x00200000,
+    0x00200001,
     0x0020FFFF,
     "            ",
     "${memo}",

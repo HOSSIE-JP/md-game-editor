@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "language": "ja",
+  "name_entry_length": 3,
+  "highscore_rows_per_difficulty": 10,
+  "screens": [
+    { "id": "title", "title": "GERONEKO: ABYSS STRIKE", "prompt": "スタートボタンをおしてください", "clear_pulse": true },
+    { "id": "main-menu", "items": ["ゲームスタート", "オプション", "ハイスコア", "サウンドテスト", "あそびかた"] },
+    { "id": "options", "items": ["なんいど", "ショット", "コア", "ボム", "サウンド"] },
+    { "id": "how-to", "lines": ["Aをおすとショット", "Aをおしつづけてチャージ", "Bでコアをはっしゃ・かいしゅう", "Cでボム"] },
+    { "id": "opening-1", "caption": "深海から、未知の信号が届いた。" },
+    { "id": "opening-2", "caption": "海洋都市は沈黙し、機械生命が増殖を始める。" },
+    { "id": "opening-3", "caption": "白銀の機体とABYSS COREが暗い海へ進む。" },
+    { "id": "stage-intro", "format": "STAGE {stage}  {name}" },
+    { "id": "pause", "title": "ポーズ", "items": ["つづける", "タイトルへ"] },
+    { "id": "stage-result", "items": ["クリアタイム", "ノーミス", "コアボーナス", "ボムボーナス"] },
+    { "id": "continue", "title": "コンティニュー?", "seconds": 10 },
+    { "id": "game-over", "title": "ゲームオーバー" },
+    { "id": "name-entry", "title": "なまえをいれてください" },
+    { "id": "ending-1", "caption": "生きた方舟は崩れ、海に静けさが戻った。" },
+    { "id": "ending-2", "caption": "だが、深海のさらに奥で小さな脈動が続く。" },
+    { "id": "epilogue", "caption": "ABYSS STRIKE COMPLETE" },
+    { "id": "staff-roll", "duration_seconds": 60 }
+  ]
+}

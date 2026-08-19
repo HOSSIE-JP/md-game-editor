@@ -1,0 +1,14 @@
+{
+  "id": "horizontal-stg-builder",
+  "name": "横スクロールSTGビルダー",
+  "description": "横スクロールSTGエンジンとデータを同期し、SGDK ROMをビルドします。",
+  "version": "1.3.0",
+  "icon": "build",
+  "types": ["build"],
+  "generator": true,
+  "supportedCores": ["mega-drive"],
+  "permissions": ["project.read", "project.write", "build.configure"],
+  "dependencies": ["horizontal-stg-editor"],
+  "roles": [{ "id": "builder", "label": "ビルド", "exclusive": true, "order": 10 }],
+  "hooks": ["onBuildStart", "onBuildLog", "onBuildEnd", "onBuildError"]
+}

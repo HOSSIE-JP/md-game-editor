@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "effects": [
+    { "id": "spark", "name": "ヒットスパーク", "frames": 3, "frame_time": 2 },
+    { "id": "small-explosion", "name": "小爆発", "frames": 4, "frame_time": 4 },
+    { "id": "large-explosion", "name": "大爆発", "frames": 6, "frame_time": 5 },
+    { "id": "boss-explosion", "name": "ボス爆発", "frames": 8, "frame_time": 6 },
+    { "id": "charge-aura", "name": "チャージオーラ", "frames": 4, "frame_time": 3 },
+    { "id": "bomb-ring", "name": "ボムリング", "frames": 6, "frame_time": 4 },
+    { "id": "core-trail", "name": "コア軌跡", "frames": 4, "frame_time": 3 },
+    { "id": "item-flash", "name": "アイテム光", "frames": 4, "frame_time": 4 },
+    { "id": "warning", "name": "警告", "frames": 2, "frame_time": 12 },
+    { "id": "water-splash", "name": "水しぶき", "frames": 4, "frame_time": 4 },
+    { "id": "metal-debris", "name": "金属破片", "frames": 4, "frame_time": 5 },
+    { "id": "bio-burst", "name": "生体破裂", "frames": 5, "frame_time": 5 }
+  ]
+}

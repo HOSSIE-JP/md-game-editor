@@ -1,0 +1,751 @@
+{
+  "id": "black-lantern",
+  "name": "BLACK LANTERN",
+  "length_px": 7168,
+  "scroll_speed_256": 80,
+  "parallax_shift_b": 2,
+  "hazardous_terrain": true,
+  "assets": {
+    "bg_a": "gfx/stage03_bg_a.png",
+    "bg_b": "gfx/stage03_bg_b.png"
+  },
+  "music_id": "stage-3",
+  "midboss_id": "angler-hunter",
+  "boss_id": "nautilus-fortress",
+  "events": [
+    {
+      "id": "s3-wisp-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 420
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "lantern-wisp",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "s3-wisp-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 540
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "lantern-wisp",
+        "x": 336,
+        "y": 168
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-01-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 720
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "lantern-wisp",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-02-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 880
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "nautilus-pod",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-02-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 880
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 352,
+        "y": 112
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-03-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1040
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "s3-squid",
+      "trigger": {
+        "type": "scroll",
+        "at": 1040
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "cave-squid",
+        "x": 328,
+        "y": 104
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-04-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1200
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "cave-squid",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-05-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1360
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "lantern-wisp",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "s3-green",
+      "trigger": {
+        "type": "scroll",
+        "at": 1480
+      },
+      "order": 0,
+      "command": "spawn_item",
+      "payload": {
+        "item_id": "green-capsule",
+        "x": 300,
+        "y": 88
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-06-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1520
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "nautilus-pod",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-06-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 1520
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 352,
+        "y": 176
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-07-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1680
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-08-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1840
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "cave-squid",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "s3-shark-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 1980
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 344,
+        "y": 72
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-09-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2000
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "lantern-wisp",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-10-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2160
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "nautilus-pod",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-10-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 2160
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 352,
+        "y": 80
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-11-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2320
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "s3-shark-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 2320
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 344,
+        "y": 152
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-12-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2480
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "cave-squid",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-13-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2640
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "lantern-wisp",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-14-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2800
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "nautilus-pod",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-14-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 2800
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 352,
+        "y": 144
+      }
+    },
+    {
+      "id": "s3-pod",
+      "trigger": {
+        "type": "scroll",
+        "at": 2920
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "nautilus-pod",
+        "x": 320,
+        "y": 112
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-15-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2960
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-16-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3120
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "cave-squid",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-17-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3280
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "lantern-wisp",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "s3-midboss",
+      "trigger": {
+        "type": "scroll",
+        "at": 3640
+      },
+      "order": 0,
+      "command": "start_boss",
+      "payload": {
+        "boss_id": "angler-hunter"
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-18-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3920
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "nautilus-pod",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-18-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 3920
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 352,
+        "y": 48
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-19-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4080
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-20-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4240
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "cave-squid",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-21-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4400
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "lantern-wisp",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "s3-power",
+      "trigger": {
+        "type": "scroll",
+        "at": 4480
+      },
+      "order": 0,
+      "command": "spawn_item",
+      "payload": {
+        "item_id": "power",
+        "x": 300,
+        "y": 128
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-22-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4560
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "nautilus-pod",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-22-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 4560
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 352,
+        "y": 112
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-23-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4720
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-24-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4880
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "cave-squid",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "s3-late-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 4980
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "cave-squid",
+        "x": 328,
+        "y": 56
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-25-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5040
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "lantern-wisp",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-26-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5200
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "nautilus-pod",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-26-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 5200
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 352,
+        "y": 176
+      }
+    },
+    {
+      "id": "s3-late-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 5220
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "nautilus-pod",
+        "x": 320,
+        "y": 160
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-27-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5360
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-28-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5520
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "cave-squid",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-29-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5680
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "lantern-wisp",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-30-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5840
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "nautilus-pod",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-30-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 5840
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 352,
+        "y": 80
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-31-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6000
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "fang-shark",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "black-lantern-reinforcement-32-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6160
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "cave-squid",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "s3-boss",
+      "trigger": {
+        "type": "scroll",
+        "at": 6560
+      },
+      "order": 0,
+      "command": "start_boss",
+      "payload": {
+        "boss_id": "nautilus-fortress"
+      }
+    },
+    {
+      "id": "s3-clear",
+      "trigger": {
+        "type": "frame",
+        "at": 8400
+      },
+      "order": 0,
+      "command": "stage_clear",
+      "payload": {}
+    }
+  ]
+}

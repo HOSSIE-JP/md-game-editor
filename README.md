@@ -165,6 +165,17 @@ node --check plugins\<plugin-id>\index.js
 npm test
 ```
 
+### 横スクロールSTG
+
+`horizontal-stg-editor` / `horizontal-stg-builder` と2種類の新規プロジェクトテンプレートを同梱しています。
+汎用の `template_horizontal_stg` は独自作品のスターター、
+`template_geroneko_abyss_strike` は5面完成版 `GERONEKO: ABYSS STRIKE` です。
+どちらもbuilder roleに横STGビルダー、testplay roleに標準WASMエミュレーターを選択済みで、
+プロジェクト作成後に「横STG」画面から、実画像320x224 preview、8x8背景stamp編集、システム／敵／ボスsprite取り込み、BGM preview、弾幕、敵／item／boss timeline配置、検証、生成を一体で操作できます。
+editor／builder v1.3.0では、12セグメントのチャージバーと機体／武器強化／速度／ボム／コアの18タイルHUDを備えます。GERONEKO背景はBG_B 364～602／BG_A 73～342の8x8 patternを最終解像度へ直接配置し、HUD込み455～958 tileに収めています。タイトルは924／1005 tileに収めたボス対峙の一枚絵と、可読性を保つ半振幅走査線変形の独立ロゴで表示します。
+データ形式、アセット制約、生成物、ランタイム、検証手順は
+[`docs/HORIZONTAL_STG.md`](docs/HORIZONTAL_STG.md) を参照してください。
+
 ---
 
 ## パッケージング (配布ビルド)
@@ -173,7 +184,7 @@ npm test
 
 ```powershell
 npm run build:win
-# → dist/MegaDriveGameEditor-0.1.0-x64.zip
+# → dist/MegaDriveGameEditor-0.3.0-x64.zip
 ```
 
 この ZIP は既に portable モード用に構成されており、展開後すぐに実行できます。

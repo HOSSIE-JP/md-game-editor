@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "weapons": [
+    { "id": "red", "name": "バーストレーザー", "color": "red", "pattern": "burst_laser", "levels": [{ "damage": 2, "speed256": 1280 }, { "damage": 3, "speed256": 1408 }, { "damage": 4, "speed256": 1536 }] },
+    { "id": "blue", "name": "アビスウェーブ", "color": "blue", "pattern": "abyss_wave", "pierces_terrain": true, "levels": [{ "damage": 1, "speed256": 1152 }, { "damage": 2, "speed256": 1280 }, { "damage": 3, "speed256": 1408 }] },
+    { "id": "green", "name": "プラズマスプレッド", "color": "green", "pattern": "plasma_spread", "levels": [{ "damage": 1, "speed256": 1024, "lanes": 3 }, { "damage": 1, "speed256": 1152, "lanes": 5 }, { "damage": 2, "speed256": 1280, "lanes": 5 }] }
+  ]
+}

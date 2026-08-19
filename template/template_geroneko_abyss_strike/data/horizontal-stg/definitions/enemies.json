@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "enemies": [
+    { "id": "needle-fry", "name": "ニードルフライ", "hp": 2, "score": 100, "vx256": -384, "vy256": 0, "behavior": "sine", "fire_pattern": "none", "fire_interval": 0, "sprite": "gfx/enemies/needle-fry.png" },
+    { "id": "coral-mine", "name": "コーラルマイン", "hp": 4, "score": 250, "vx256": -128, "vy256": 0, "behavior": "anchor", "fire_pattern": "cycle", "fire_interval": 150, "sprite": "gfx/enemies/coral-mine.png" },
+    { "id": "razor-ray", "name": "レイザーレイ", "hp": 5, "score": 300, "vx256": -320, "vy256": 0, "behavior": "dive", "fire_pattern": "aimed", "fire_interval": 120, "sprite": "gfx/enemies/razor-ray.png" },
+    { "id": "shell-drone", "name": "シェルドローン", "hp": 7, "score": 450, "vx256": -192, "vy256": 0, "behavior": "hover", "fire_pattern": "spread", "fire_interval": 90, "sprite": "gfx/enemies/shell-drone.png" },
+    { "id": "metro-eel", "name": "メトロイール", "hp": 4, "score": 280, "vx256": -352, "vy256": 32, "behavior": "sine", "fire_pattern": "aimed", "fire_interval": 135, "sprite": "gfx/enemies/metro-eel.png" },
+    { "id": "rust-jelly", "name": "ラストジェリー", "hp": 6, "score": 380, "vx256": -160, "vy256": -24, "behavior": "hover", "fire_pattern": "cycle", "fire_interval": 110, "sprite": "gfx/enemies/rust-jelly.png" },
+    { "id": "tunnel-lamprey", "name": "トンネルランプレイ", "hp": 8, "score": 600, "vx256": -288, "vy256": 0, "behavior": "zigzag", "fire_pattern": "aimed", "fire_interval": 80, "sprite": "gfx/enemies/tunnel-lamprey.png" },
+    { "id": "crab-tank", "name": "クラブタンク", "hp": 12, "score": 900, "vx256": -96, "vy256": 0, "behavior": "anchor", "fire_pattern": "spread", "fire_interval": 70, "sprite": "gfx/enemies/crab-tank.png" },
+    { "id": "lantern-wisp", "name": "ランタンウィスプ", "hp": 3, "score": 220, "vx256": -256, "vy256": 40, "behavior": "sine", "fire_pattern": "cycle", "fire_interval": 125, "sprite": "gfx/enemies/lantern-wisp.png" },
+    { "id": "cave-squid", "name": "ケイブスクイッド", "hp": 7, "score": 500, "vx256": -208, "vy256": -32, "behavior": "zigzag", "fire_pattern": "aimed", "fire_interval": 95, "sprite": "gfx/enemies/cave-squid.png" },
+    { "id": "fang-shark", "name": "ファングシャーク", "hp": 10, "score": 750, "vx256": -448, "vy256": 0, "behavior": "dive", "fire_pattern": "none", "fire_interval": 0, "sprite": "gfx/enemies/fang-shark.png" },
+    { "id": "nautilus-pod", "name": "ノーチラスポッド", "hp": 14, "score": 1100, "vx256": -112, "vy256": 0, "behavior": "anchor", "fire_pattern": "spread", "fire_interval": 65, "sprite": "gfx/enemies/nautilus-pod.png" },
+    { "id": "forge-manta", "name": "フォージマンタ", "hp": 8, "score": 620, "vx256": -336, "vy256": 24, "behavior": "sine", "fire_pattern": "aimed", "fire_interval": 90, "sprite": "gfx/enemies/forge-manta.png" },
+    { "id": "slag-lobster", "name": "スラグロブスター", "hp": 13, "score": 980, "vx256": -144, "vy256": 0, "behavior": "anchor", "fire_pattern": "cycle", "fire_interval": 72, "sprite": "gfx/enemies/slag-lobster.png" },
+    { "id": "mantis-guard", "name": "マンティスガード", "hp": 9, "score": 800, "vx256": -384, "vy256": -20, "behavior": "dive", "fire_pattern": "aimed", "fire_interval": 75, "sprite": "gfx/enemies/mantis-guard.png" },
+    { "id": "smelter-urchin", "name": "スメルターアーチン", "hp": 16, "score": 1300, "vx256": -80, "vy256": 0, "behavior": "hover", "fire_pattern": "spread", "fire_interval": 55, "sprite": "gfx/enemies/smelter-urchin.png" },
+    { "id": "ark-cell", "name": "アークセル", "hp": 5, "score": 420, "vx256": -272, "vy256": 36, "behavior": "sine", "fire_pattern": "cycle", "fire_interval": 100, "sprite": "gfx/enemies/ark-cell.png" },
+    { "id": "bone-ray", "name": "ボーンレイ", "hp": 11, "score": 900, "vx256": -360, "vy256": 0, "behavior": "zigzag", "fire_pattern": "aimed", "fire_interval": 70, "sprite": "gfx/enemies/bone-ray.png" },
+    { "id": "gene-eel", "name": "ジーンイール", "hp": 15, "score": 1250, "vx256": -304, "vy256": -28, "behavior": "dive", "fire_pattern": "cycle", "fire_interval": 58, "sprite": "gfx/enemies/gene-eel.png" },
+    { "id": "core-guardian", "name": "コアガーディアン", "hp": 22, "score": 2000, "vx256": -128, "vy256": 0, "behavior": "anchor", "fire_pattern": "spread", "fire_interval": 48, "sprite": "gfx/enemies/core-guardian.png" }
+  ]
+}

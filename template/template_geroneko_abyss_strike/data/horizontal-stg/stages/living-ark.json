@@ -1,0 +1,876 @@
+{
+  "id": "living-ark",
+  "name": "LIVING ARK",
+  "length_px": 8192,
+  "scroll_speed_256": 80,
+  "parallax_shift_b": 2,
+  "assets": {
+    "bg_a": "gfx/stage05_bg_a.png",
+    "bg_b": "gfx/stage05_bg_b.png"
+  },
+  "music_id": "stage-5",
+  "midboss_id": "coelacanth-guard",
+  "boss_id": "abyssal-core",
+  "events": [
+    {
+      "id": "s5-cell-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 320
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "ark-cell",
+        "x": 336,
+        "y": 52
+      }
+    },
+    {
+      "id": "s5-cell-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 440
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "ark-cell",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "s5-cell-03",
+      "trigger": {
+        "type": "scroll",
+        "at": 560
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "ark-cell",
+        "x": 336,
+        "y": 172
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-01-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 720
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "ark-cell",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-02-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 880
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "core-guardian",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-02-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 880
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 352,
+        "y": 144
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-03-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1040
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "s5-bone",
+      "trigger": {
+        "type": "scroll",
+        "at": 1180
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "bone-ray",
+        "x": 340,
+        "y": 88
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-04-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1200
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "bone-ray",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-05-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1360
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "ark-cell",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-06-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1520
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "core-guardian",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-06-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 1520
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 352,
+        "y": 48
+      }
+    },
+    {
+      "id": "s5-power",
+      "trigger": {
+        "type": "scroll",
+        "at": 1620
+      },
+      "order": 0,
+      "command": "spawn_item",
+      "payload": {
+        "item_id": "power",
+        "x": 300,
+        "y": 128
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-07-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1680
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-08-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1840
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "bone-ray",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-09-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2000
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "ark-cell",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-10-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2160
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "core-guardian",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-10-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 2160
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 352,
+        "y": 112
+      }
+    },
+    {
+      "id": "s5-eel-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 2180
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 342,
+        "y": 64
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-11-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2320
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "s5-eel-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 2420
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 342,
+        "y": 156
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-12-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2480
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "bone-ray",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-13-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2640
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "ark-cell",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-14-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2800
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "core-guardian",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-14-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 2800
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 352,
+        "y": 176
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-15-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2960
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-16-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3120
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "bone-ray",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "s5-guardian",
+      "trigger": {
+        "type": "scroll",
+        "at": 3240
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "core-guardian",
+        "x": 320,
+        "y": 112
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-17-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3280
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "ark-cell",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-18-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3440
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "core-guardian",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-18-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 3440
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 352,
+        "y": 80
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-19-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3600
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-20-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3760
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "bone-ray",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "s5-midboss",
+      "trigger": {
+        "type": "scroll",
+        "at": 4140
+      },
+      "order": 0,
+      "command": "start_boss",
+      "payload": {
+        "boss_id": "coelacanth-guard"
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-21-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4400
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "ark-cell",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-22-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4560
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "core-guardian",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-22-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 4560
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 352,
+        "y": 144
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-23-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4720
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-24-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4880
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "bone-ray",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "s5-core",
+      "trigger": {
+        "type": "scroll",
+        "at": 5020
+      },
+      "order": 0,
+      "command": "spawn_item",
+      "payload": {
+        "item_id": "abyss-core",
+        "x": 300,
+        "y": 112
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-25-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5040
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "ark-cell",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-26-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5200
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "core-guardian",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-26-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 5200
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 352,
+        "y": 48
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-27-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5360
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-28-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5520
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "bone-ray",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "s5-late-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 5560
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "bone-ray",
+        "x": 340,
+        "y": 56
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-29-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5680
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "ark-cell",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-30-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5840
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "core-guardian",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "s5-late-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 5840
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "core-guardian",
+        "x": 320,
+        "y": 168
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-30-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 5840
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 352,
+        "y": 112
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-31-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6000
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-32-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6160
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "bone-ray",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-33-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6320
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "ark-cell",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-34-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6480
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "core-guardian",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-34-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 6480
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 352,
+        "y": 176
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-35-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6640
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-36-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6800
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "bone-ray",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-37-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6960
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "ark-cell",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-38-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 7120
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "core-guardian",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "living-ark-reinforcement-38-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 7120
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "gene-eel",
+        "x": 352,
+        "y": 80
+      }
+    },
+    {
+      "id": "s5-boss",
+      "trigger": {
+        "type": "scroll",
+        "at": 7480
+      },
+      "order": 0,
+      "command": "start_boss",
+      "payload": {
+        "boss_id": "abyssal-core"
+      }
+    },
+    {
+      "id": "s5-clear",
+      "trigger": {
+        "type": "frame",
+        "at": 9600
+      },
+      "order": 0,
+      "command": "stage_clear",
+      "payload": {}
+    }
+  ]
+}

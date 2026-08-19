@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "namespaces": {
+    "enemies": {
+      "needle-fry": 1, "coral-mine": 2, "razor-ray": 3, "shell-drone": 4,
+      "metro-eel": 5, "rust-jelly": 6, "tunnel-lamprey": 7, "crab-tank": 8,
+      "lantern-wisp": 9, "cave-squid": 10, "fang-shark": 11, "nautilus-pod": 12,
+      "forge-manta": 13, "slag-lobster": 14, "mantis-guard": 15, "smelter-urchin": 16,
+      "ark-cell": 17, "bone-ray": 18, "gene-eel": 19, "core-guardian": 20
+    },
+    "bosses": {
+      "swordfish": 1, "leviathan": 2, "octo-constructor": 3, "crab-fortress": 4,
+      "angler-hunter": 5, "nautilus-fortress": 6, "mantis-striker": 7, "spider-crab-factory": 8,
+      "coelacanth-guard": 9, "abyssal-core": 10
+    },
+    "weapons": { "red": 1, "blue": 2, "green": 3 },
+    "items": { "red-capsule": 1, "blue-capsule": 2, "green-capsule": 3, "power": 4, "abyss-core": 5, "speed": 6, "bomb": 7 },
+    "effects": {
+      "spark": 1, "small-explosion": 2, "large-explosion": 3, "boss-explosion": 4,
+      "charge-aura": 5, "bomb-ring": 6, "core-trail": 7, "item-flash": 8,
+      "warning": 9, "water-splash": 10, "metal-debris": 11, "bio-burst": 12
+    },
+    "audio": {
+      "title": 1, "stage-1": 2, "stage-2": 3, "stage-3": 4, "stage-4": 5, "stage-5": 6,
+      "midboss": 7, "boss": 8, "final-boss": 9, "stage-clear": 10, "game-over-continue": 11,
+      "ending": 12, "name-entry": 13, "staff-roll": 14
+    },
+    "stages": { "blue-horizon": 1, "drowned-metro": 2, "black-lantern": 3, "iron-nest": 4, "living-ark": 5 }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "cues": [
+    { "id": "title", "name": "Title", "type": "XGM2", "path": "music/title.vgm", "loop": true },
+    { "id": "stage-1", "name": "Blue Horizon", "type": "XGM2", "path": "music/stage-1.vgm", "loop": true },
+    { "id": "stage-2", "name": "Drowned Metro", "type": "XGM2", "path": "music/stage-2.vgm", "loop": true },
+    { "id": "stage-3", "name": "Black Lantern", "type": "XGM2", "path": "music/stage-3.vgm", "loop": true },
+    { "id": "stage-4", "name": "Iron Nest", "type": "XGM2", "path": "music/stage-4.vgm", "loop": true },
+    { "id": "stage-5", "name": "Living Ark", "type": "XGM2", "path": "music/stage-5.vgm", "loop": true },
+    { "id": "midboss", "name": "Midboss", "type": "XGM2", "path": "music/midboss.vgm", "loop": true },
+    { "id": "boss", "name": "Boss", "type": "XGM2", "path": "music/boss.vgm", "loop": true },
+    { "id": "final-boss", "name": "Final Boss", "type": "XGM2", "path": "music/final-boss.vgm", "loop": true },
+    { "id": "stage-clear", "name": "Stage Clear", "type": "XGM2", "path": "music/stage-clear.vgm", "loop": false },
+    { "id": "game-over-continue", "name": "Game Over / Continue", "type": "XGM2", "path": "music/game-over-continue.vgm", "loop": true },
+    { "id": "ending", "name": "Ending", "type": "XGM2", "path": "music/ending.vgm", "loop": true },
+    { "id": "name-entry", "name": "Name Entry", "type": "XGM2", "path": "music/name-entry.vgm", "loop": true },
+    { "id": "staff-roll", "name": "Staff Roll", "type": "XGM2", "path": "music/staff-roll.vgm", "loop": true }
+  ]
+}

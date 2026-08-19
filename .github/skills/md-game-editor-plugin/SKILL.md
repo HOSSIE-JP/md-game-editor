@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-07 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Dungeon reusable asset sets and common billboards / Indexed image import and validation / Fixed BG_B floor-ceiling + transparent BG_A walls / Per-set SGDK resources / Dynamic BG_A tile Priority, cached billboard refresh, symmetric wall crossing, and enemy door confinement / Dungeon template / Editor UX guardrails / Bundled WASM split metadata
+> § Last Updated: 2026-08 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata
 
 ---
 
@@ -345,11 +345,27 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `rhythm-game-builder` | `build` | リズムゲームエンジン同期、譜面/RES/C データ生成、builder role による ROM ビルド連携 |
 | `dungeon-game-editor` | `editor` | Mega Drive向け3Dダンジョンの薄壁フロア編集、ランダム生成、フロア別4要素素材セットとプロジェクト共通ビルボード、標準SGDK画像pipelineによる取り込み/検証/個別preview、固定BG_B + 動的Priority付き透明BG_A壁を共有する実機一致3D preview、セット別リソース生成 |
 | `dungeon-game-builder` | `build` | 素材セット別 `DunViewSet` 切替、固定BG_Bの床/天井と透明BG_Aの壁/扉、共通Priorityデシジョンテーブル、低Priority自動VRAMビルボード、移動/旋回/階段/LOS/暗闇/ミニマップ、builder roleによるROMビルド連携 |
+| `horizontal-stg-editor` | `editor` | 実画像320x224 preview、8x8背景stamp、system/enemy/boss sprite、BGM preview、弾幕、timeline配置、安定ID、検証 |
+| `horizontal-stg-builder` | `build` | 横STGランタイム同期、C/RES/event stream生成、18 tile icon HUD、MD密度の等倍8x8背景、title IMAGEとline-scrollロゴ、背景VRAM診断、builder role連携 |
 | `standard-emulator` | `emulator` | WASM Mega Drive エミュレーター |
 | `standard-api-emulator` | `emulator`, `tool` | REST API Mega Drive エミュレーター |
 | `ai-control` | `editor`, `tool` | 外部 AI ツール向け localhost REST / MCP bridge |
 
 > 新しいプラグインが追加されたら、このテーブルに追記し § Last Updated を更新すること。
+
+### Horizontal STG plugin規約
+
+- 編集正本は `data/horizontal-stg/`。entityは安定ID、runtime IDは1～255、0はNONEに予約する
+- 保存はrevision照合とatomic replaceを使い、削除は `.deleted` へ退避する。安定IDは専用UIで読取専用、collectionは選択entityだけをupsertして他定義を保持する
+- 専用rendererに実BG_A/B・spriteの320x224 preview、敵／item／boss timeline、弾幕preview、8x8 stamp／eyedropper／undo、画像pipeline、VGM previewを置く。関連pluginへは汎用`api.pages.open()`で遷移する
+- 背景は8bit indexed／非interlace／16色以下／224px高。BG_A幅はstage length、BG_B幅は `320 + (length >> parallax_shift)`
+- 背景品質検査は反転を正規化した実効tile pattern、detail tile比率、4x4単色block比率を測る。160 pattern未満またはdetail 18%未満をwarning、固定HUD 18枚込み1500枚超をerrorにする。同梱v1.3はBG_B 364～602／BG_A 73～342の8x8語彙を最終解像度へ直接配置する
+- `ts_hud_icons` はenum順を保つため `NONE NONE` で18 tileを生成し、`TILE_USER_INDEX`へロードして背景開始indexをその枚数だけ後ろへずらす
+- titleは320x224 `img_title_background`をBG_B、透明`img_title_logo`をBG_Aへ`NONE ALL`で描画し、合計1005 user tile以内へ収める。ロゴ64走査線だけ`HSCROLL_LINE`で半振幅変形し、画面遷移時はplane scrollへ必ず戻す
+- builderは `src/boot/rom_head.c` を上書きせず、全Cソースを `makeVariables.SRC_C` へ重複なく列挙する
+- 生成対象はconfig、Shift-JIS text、audio/render、enemy/boss/weapon/stage、event stream、RES、reportを一体で更新する
+- 新規projectには `template_horizontal_stg`、完成例には `template_geroneko_abyss_strike` を使う
+- 詳細契約と検証は `docs/HORIZONTAL_STG.md` を実装と同時に更新する
 
 ### Dungeon game v1.1 素材セット規約
 

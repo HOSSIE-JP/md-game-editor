@@ -530,6 +530,7 @@ export function activatePlugin({ plugin, hostRoot, api, registerCapability }) {
 |---|---|
 | `api.mountElement(element, target?)` | plugin 専用 root へ DOM を mount する。`target: "page"` で pageRoot 優先 |
 | `api.unmountElement(element)` | mount 済み DOM を削除する |
+| `api.pages.open(pageOrPluginId)` | 有効なplugin IDまたはpage IDへ遷移し、`{ ok, pageId }` を返す |
 | `api.createModal(options)` | plugin 専用 root 配下に標準 modal を作成し、`open()` / `close()` / `destroy()` を返す |
 | `api.capabilities.get(name)` | 有効な provider の capability 実装を取得する |
 | `api.capabilities.require(name, timeoutMs?)` | capability 登録を待つ。見つからない場合は `null` |
@@ -1040,6 +1041,38 @@ Priority用のstatic/fwd/turnデシジョンテーブルはテクスチャ非依
 エネミーは `main.c` がフロア別RAM配列 `dun_enemies[DUNGEON_FLOOR_COUNT][DUN_MAX_ENEMIES(8)]` (`DunEnemy {x,y,dir,mode,anim,chase_timer,active}`) として所有し、起動時に flags の `DUN_FLAG_ENEMY(0x10)` からスポーンします。歩行間隔はフロアごとに `DungeonFloorData.enemy_step_vblanks` (u8) として焼き込まれ (エディターのフロア編集で0/未指定=プロジェクト既定を継承、それ以外は明示値をそのまま焼き込み)、メインループは `vtimer` 差分でこのフィールドを毎ティック直接参照してAIティックを駆動するため、階段やフロア切替で即座にそのフロアのペースへ切り替わります。`DUN_ENEMY_STEP_VBLANKS_DEFAULT` はプロジェクト既定値のドキュメント用defineとして生成されますが、実機コードはこれを直接読みません。徘徊/追跡 (render-core.js と同一の xorshift16・視界・貪欲移動ロジック) の後、新API `DUN_refreshBillboards()` (壁の再ステージなしのスプライトのみ更新) とミニマップ再描画で反映します。プレイヤーのブロッキング移動アニメ中はエネミーが静止し、バックログは1歩に集約されます。移動判定は、扉を通過できるプレイヤー用 `canTraverse()` と、境界両側の扉ビットを拒否するエネミー用 `enemyCanTraverse()` を分離しています。エネミーは扉を越えず、プレイヤー/宝箱/上り階段/下り階段/他エネミーのセルへも侵入できません。プレイヤー側も `canMove()` でエネミー占有セルをブロックされます。追跡中のエネミーが扉のない境界からプレイヤーセルへ侵入を試みると移動せず空のフック `onEnemyContact(u8 enemy_index)` が発火するため、戦闘などのゲームロジックはここへ実装します。描画は `DUN_setEnemies()` で渡されたリストをフラグ参照より優先して検索し、カメラ相対向き×歩行フレームの行を `SPR_setAnimAndFrame(row, 距離バケット)` で選択します (宝箱/階段は従来どおり `SPR_setFrame`)。`DUN_setEnemySlide()` はフレームごとに進捗を切り上げQ0.16へ一度だけ除算し、最大8スロットの座標・距離バケット・depth_codeは乗算とシフトで補間します。焼き込みポーズが取り得る差分では従来の `trunc(delta*num/den)` と最近傍丸めに完全一致するため、プレビューとのWYSIWYGと既存の `render-core.js` バージョン/焼き込みキャッシュを維持します。可視性も現在/直前セルのLOSを対称に扱い、現在セルが壁越しになった敵を補間完了前に候補から外しません。ミニマップには踏破済みセル上のエネミーのみ `MM_COLOR_ENEMY` で表示されます。
 
 新規プロジェクト用には `template_dungeon_game` を同梱します。`project.json` は `dungeon-game-builder` と `standard-emulator` の role、MD ROM ヘッダー検証を通る title/author/serial を持つため、テンプレートから作成した project は Settings の未設定エラーを避けてそのまま Test Play できます。
+
+---
+
+### `horizontal-stg-editor` — 横スクロールSTGエディター
+
+| 項目 | 値 |
+|---|---|
+| タイプ | `editor` |
+| バージョン | 1.3.0 |
+| 依存 | `horizontal-stg-builder`, `asset-manager`, `image-resize-converter`, `image-quantize-converter`, `sprite-editor`, `tilemap-editor`, `md-bgm-composer` |
+| main hook | `loadHorizontalStgProject`, `saveHorizontalStgDocument`, `deleteHorizontalStgEntity`, `reorderHorizontalStgStages`, `validateHorizontalStgProject`, `exportHorizontalStgData` |
+| renderer capability | `page`, `horizontal-stg-editor` |
+
+project-localの `data/horizontal-stg/` を正本として、ステージ、システムスプライト、敵、ボス、武器、アイテム、エフェクト、BGM、画面フロー、設定を専用フォームで編集します。実BG_A/Bと実スプライトを合成する320x224 preview、scroll timeline上の敵／item／boss配置、敵・ボス弾幕再生、8x8 patternのstamp／eyedropper／undo／indexed PNG保存、共有画像pipelineによる16色取り込み、VGM preview、Sprite／TileMap／BGM各エディターへの`api.pages.open()`を備えます。安定IDは読取専用で、collection保存は選択entityだけをupsertします。optimistic revision、atomic write、`.deleted`退避、未保存ガードも維持します。検証は参照整合性に加え、背景形式／寸法、低pattern・低detail warning、反転重複除去後の背景＋HUDが安全上限1500 tile以内かを確認します。
+
+### `horizontal-stg-builder` — 横スクロールSTGビルダー
+
+| 項目 | 値 |
+|---|---|
+| タイプ | `build` |
+| バージョン | 1.3.0 |
+| 依存 | `horizontal-stg-editor` |
+| フック | `onBuildStart`, `onBuildLog`, `onBuildEnd`, `onBuildError` |
+| ロール | `builder` |
+| ジェネレータ | `generateSource` ✅ |
+
+共通SGDKランタイムを同期し、保存済みJSONから `game_config`、Shift-JISテキスト、audio/render定義、
+敵／ボス／武器／ステージ定義と各面event stream、`res/common.res`、生成reportを出力します。
+`src/boot/rom_head.c` は上書きせず、Cソースは `makeVariables.SRC_C` で明示します。固定順18 tileの`ts_hud_icons`（`NONE NONE`）を背景より先に予約し、12 segment charge gaugeと機体／強化／速度／bomb／core iconをWINDOWへ描画します。v1.3.0のGERONEKO 5面背景は最終解像度へ直接置く多層8x8語彙へ更新し、BG_B 364～602、BG_A 73～342、HUD込み455～958 effective patternでMD向けの構造密度と1500 tile上限を両立します。タイトルはボス対峙の320x224一枚絵と透明ロゴを別`IMAGE`で表示します。背景804＋ロゴ120＝924 patternを実上限1005 tile以内へ収め、実行時展開を不要にする`NONE ALL`でロードし、ロゴ範囲だけをSGDKの`HSCROLL_LINE`で可読性を保つ半振幅の走査線変形にします。
+`template_horizontal_stg` と5面完成版 `template_geroneko_abyss_strike` を同梱します。
+詳細なデータ契約、アセット寸法、ランタイム仕様、検証手順は
+[HORIZONTAL_STG.md](HORIZONTAL_STG.md) を参照してください。
 
 ---
 

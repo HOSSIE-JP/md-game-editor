@@ -308,6 +308,22 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 
 ---
 
+## 横スクロールSTG plugin
+
+- `horizontal-stg-editor` は `data/horizontal-stg/` の安定ID付きJSONを専用フォームで編集し、安定IDを読取専用にする。collectionは選択entityだけをupsertし、revision競合、atomic write、`.deleted` 退避、未保存ガードを維持する
+- rendererに実BG_A/B・spriteの320x224 preview、敵／item／boss timeline、弾幕preview、8x8 stamp／eyedropper／undo、共有画像pipeline、VGM previewを置き、Sprite／TileMap／BGM editorへは汎用`api.pages.open()`で遷移する
+- `horizontal-stg-builder` は共通runtimeと生成C/RESを同期し、`makeVariables.SRC_C` に全Cソースを重複なく明示する
+- `src/boot/rom_head.c` は本体生成を尊重して上書きせず、`sega.s` を通常Cソースへ混入させない
+- 背景は8bit indexed／非interlace／16色以下／224px高。BG_A幅はstage length、BG_B幅は `320 + (length >> parallax_shift)`
+- 背景は反転重複除去後の実効pattern数、detail tile比率、4x4単色block比率を検査する。160 pattern未満またはdetail 18%未満をwarning、固定HUD 18 tile込み1500 tile超をerrorにする。同梱v1.3はBG_B 364～602／BG_A 73～342の8x8語彙を最終解像度へ直接配置する
+- HUD icon atlasは順序固定のため `TILESET ... NONE NONE` とし、`TILE_USER_INDEX`の18 tileを背景より先に予約する
+- titleは320x224 `img_title_background`と透明`img_title_logo`を別`IMAGE ... NONE ALL`にし、合計1005 user tile以内へ収める。BG_Aのロゴ64走査線だけ`HSCROLL_LINE`で半振幅変形し、別画面では`HSCROLL_PLANE`へ戻す
+- event triggerはframe/scroll/condition、commandはspawn enemy/item、start boss、stage clear、set flagを生成前に参照検証する
+- `template_horizontal_stg` は汎用スターター、`template_geroneko_abyss_strike` は5面完成例としてbuilderとstandard WASM roleを選択済みにする
+- 仕様変更時は `docs/HORIZONTAL_STG.md`、`docs/PLUGIN.md`、`tests/horizontal-stg-plugins.test.js` を同じ作業で更新する
+
+---
+
 ## OSS / ライセンス遵守
 
 - 生成するすべてのコードは **オリジナル実装** とする
@@ -316,8 +332,7 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 - GPL/AGPL コードを参考に実装した場合は制御フローを変えて書き直す
 
 ---
-
-*Last Updated: 2026-07 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Dungeon reusable asset sets and common billboards / Indexed image import and validation / Fixed BG_B floor-ceiling + transparent BG_A walls / Per-set SGDK resources / Dynamic BG_A tile Priority, cached billboard refresh, symmetric wall crossing, and enemy door confinement / Dungeon template / Editor UX guardrails / Bundled WASM split metadata*
+*Last Updated: 2026-08 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata*
 
 
 ## MD/PCE split note

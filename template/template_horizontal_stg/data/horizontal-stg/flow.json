@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "language": "ja",
+  "screens": [
+    { "id": "title", "title": "横スクロールSTG", "prompt": "スタートボタン" },
+    { "id": "how-to", "lines": ["A: ショット/チャージ", "B: コア", "C: ボム"] },
+    { "id": "ending", "lines": ["トレーニング完了"] }
+  ]
+}

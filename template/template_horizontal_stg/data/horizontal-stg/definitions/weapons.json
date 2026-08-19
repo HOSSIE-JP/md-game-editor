@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "weapons": [
+    { "id": "red", "name": "Burst Laser", "color": "red", "pattern": "burst_laser", "levels": [{ "damage": 2, "speed256": 1280 }, { "damage": 3, "speed256": 1280 }, { "damage": 4, "speed256": 1536 }] },
+    { "id": "blue", "name": "Abyss Wave", "color": "blue", "pattern": "abyss_wave", "levels": [{ "damage": 1, "speed256": 1152 }, { "damage": 2, "speed256": 1152 }, { "damage": 3, "speed256": 1280 }] },
+    { "id": "green", "name": "Plasma Spread", "color": "green", "pattern": "plasma_spread", "levels": [{ "damage": 1, "speed256": 1024 }, { "damage": 1, "speed256": 1152 }, { "damage": 2, "speed256": 1280 }] }
+  ]
+}

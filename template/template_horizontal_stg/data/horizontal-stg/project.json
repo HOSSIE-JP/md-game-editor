@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "game_id": "horizontal-stg-starter",
+  "title": "HORIZONTAL STG STARTER",
+  "orientation": "horizontal",
+  "screen": { "width": 320, "height": 224, "refresh_hz": 60 },
+  "rom": { "target_bytes": 3670016, "hard_limit_bytes": 4194304 },
+  "pools": {
+    "enemies": 16,
+    "player_bullets": 32,
+    "enemy_bullets": 64,
+    "charge_shots": 4,
+    "items": 16,
+    "effects": 16,
+    "physical_sprites_target": 64
+  },
+  "rules": {
+    "start_lives": 3,
+    "start_bombs": 2,
+    "max_bombs": 3,
+    "continues": 3,
+    "extend_scores": [200000, 700000],
+    "charge_mid_frames": 36,
+    "charge_max_frames": 84,
+    "respawn_invincible_frames": 90,
+    "bomb_invincible_frames": 120
+  },
+  "input": { "shot": "A", "core": "B", "bomb": "C", "pause": "START", "remappable": ["A", "B", "C"] },
+  "difficulty": {
+    "default": "normal",
+    "easy": { "bullet_count_percent": 80, "bullet_speed_percent": 90 },
+    "normal": { "bullet_count_percent": 100, "bullet_speed_percent": 100 },
+    "hard": { "bullet_count_percent": 120, "bullet_speed_percent": 120 }
+  },
+  "stage_order": ["training-reef"],
+  "first_stage_id": "training-reef"
+}

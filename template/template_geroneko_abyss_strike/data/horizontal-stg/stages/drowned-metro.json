@@ -1,0 +1,694 @@
+{
+  "id": "drowned-metro",
+  "name": "DROWNED METRO",
+  "length_px": 6656,
+  "scroll_speed_256": 80,
+  "parallax_shift_b": 1,
+  "assets": {
+    "bg_a": "gfx/stage02_bg_a.png",
+    "bg_b": "gfx/stage02_bg_b.png"
+  },
+  "music_id": "stage-2",
+  "midboss_id": "octo-constructor",
+  "boss_id": "crab-fortress",
+  "events": [
+    {
+      "id": "s2-wave-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 360
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "metro-eel",
+        "x": 336,
+        "y": 56
+      }
+    },
+    {
+      "id": "s2-wave-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 520
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "metro-eel",
+        "x": 336,
+        "y": 160
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-01-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 720
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-02-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 880
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "rust-jelly",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-02-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 880
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 352,
+        "y": 48
+      }
+    },
+    {
+      "id": "s2-jelly",
+      "trigger": {
+        "type": "scroll",
+        "at": 980
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "rust-jelly",
+        "x": 320,
+        "y": 88
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-03-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1040
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "metro-eel",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-04-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1200
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "crab-tank",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "s2-blue",
+      "trigger": {
+        "type": "scroll",
+        "at": 1280
+      },
+      "order": 0,
+      "command": "spawn_item",
+      "payload": {
+        "item_id": "blue-capsule",
+        "x": 300,
+        "y": 120
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-05-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1360
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-06-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1520
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "rust-jelly",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-06-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 1520
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 352,
+        "y": 112
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-07-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1680
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "metro-eel",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "s2-lamprey-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 1760
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 340,
+        "y": 72
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-08-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1840
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "crab-tank",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "s2-lamprey-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 1900
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 340,
+        "y": 152
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-09-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2000
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-10-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2160
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "rust-jelly",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-10-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 2160
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 352,
+        "y": 176
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-11-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2320
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "metro-eel",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-12-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2480
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "crab-tank",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "s2-crab",
+      "trigger": {
+        "type": "scroll",
+        "at": 2520
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "crab-tank",
+        "x": 320,
+        "y": 176
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-13-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2640
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-14-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2800
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "rust-jelly",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-14-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 2800
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 352,
+        "y": 80
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-15-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2960
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "metro-eel",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "s2-midboss",
+      "trigger": {
+        "type": "scroll",
+        "at": 3320
+      },
+      "order": 0,
+      "command": "start_boss",
+      "payload": {
+        "boss_id": "octo-constructor"
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-16-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3600
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "crab-tank",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-17-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3760
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-18-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3920
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "rust-jelly",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-18-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 3920
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 352,
+        "y": 144
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-19-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4080
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "metro-eel",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "s2-bomb",
+      "trigger": {
+        "type": "scroll",
+        "at": 4160
+      },
+      "order": 0,
+      "command": "spawn_item",
+      "payload": {
+        "item_id": "bomb",
+        "x": 300,
+        "y": 96
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-20-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4240
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "crab-tank",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-21-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4400
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-22-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4560
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "rust-jelly",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-22-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 4560
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 352,
+        "y": 48
+      }
+    },
+    {
+      "id": "s2-late-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 4580
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "rust-jelly",
+        "x": 320,
+        "y": 64
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-23-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4720
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "metro-eel",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "s2-late-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 4780
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "crab-tank",
+        "x": 320,
+        "y": 168
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-24-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4880
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "crab-tank",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-25-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5040
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-26-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5200
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "rust-jelly",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-26-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 5200
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 352,
+        "y": 112
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-27-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5360
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "metro-eel",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-28-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5520
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "crab-tank",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "drowned-metro-reinforcement-29-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5680
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "tunnel-lamprey",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "s2-boss",
+      "trigger": {
+        "type": "scroll",
+        "at": 6080
+      },
+      "order": 0,
+      "command": "start_boss",
+      "payload": {
+        "boss_id": "crab-fortress"
+      }
+    },
+    {
+      "id": "s2-clear",
+      "trigger": {
+        "type": "frame",
+        "at": 7800
+      },
+      "order": 0,
+      "command": "stage_clear",
+      "payload": {}
+    }
+  ]
+}

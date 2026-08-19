@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "items": [
+    { "id": "red-capsule", "name": "赤カプセル", "duplicate_score": 500 },
+    { "id": "blue-capsule", "name": "青カプセル", "duplicate_score": 500 },
+    { "id": "green-capsule", "name": "緑カプセル", "duplicate_score": 500 },
+    { "id": "power", "name": "パワー", "duplicate_score": 1000 },
+    { "id": "abyss-core", "name": "ABYSS CORE", "duplicate_score": 3000 },
+    { "id": "speed", "name": "スピード", "duplicate_score": 1000 },
+    { "id": "bomb", "name": "ボム", "duplicate_score": 2000 }
+  ]
+}

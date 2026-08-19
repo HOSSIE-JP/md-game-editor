@@ -11,23 +11,30 @@ Mega Drive / Genesis エミュレーターコア ([md-core](../md-core)) の Web
 
 ```bash
 # wasm-pack のインストール
-cargo install wasm-pack
+cargo install wasm-pack --locked
 ```
 
 ### dev ビルド（デバッグ情報あり）
 
 ```bash
 # リポジトリルートから実行
-wasm-pack build crates/md-wasm --target web --out-dir ../../frontend/pkg
+npm run wasm:build
+
+# wasm-pack を直接呼ぶ場合
+wasm-pack build crates/md-wasm --target web --dev --out-dir ../../frontend/pkg
 ```
 
 ### release ビルド（本番環境向け）
 
 ```bash
+npm run wasm:build:release
+
+# wasm-pack を直接呼ぶ場合
 wasm-pack build crates/md-wasm --target web --release --out-dir ../../frontend/pkg
 ```
 
 ビルド後のファイルは `frontend/pkg/` に出力されます。
+`npm run wasm:*` は同時に `frontend/sw.js` と `frontend/roms/index.json` も更新します。
 
 ---
 

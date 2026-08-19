@@ -1,0 +1,52 @@
+{
+  "id": "horizontal-stg-editor",
+  "name": "横スクロールSTGエディター",
+  "description": "横STGのスプライト、8x8背景タイル、BGM、弾幕、敵配置を実データプレビュー付きで編集します。",
+  "version": "1.3.0",
+  "icon": "sprite",
+  "types": ["editor"],
+  "supportedCores": ["mega-drive"],
+  "permissions": ["project.read", "project.write", "dialog.openFile", "res.read", "res.write", "main.invokeHook"],
+  "dependencies": [
+    "horizontal-stg-builder",
+    "asset-manager",
+    "image-resize-converter",
+    "image-quantize-converter",
+    "sprite-editor",
+    "tilemap-editor",
+    "md-bgm-composer"
+  ],
+  "hooks": [
+    "getTab",
+    "onActivate",
+    "onDeactivate",
+    "loadHorizontalStgProject",
+    "saveHorizontalStgDocument",
+    "deleteHorizontalStgEntity",
+    "reorderHorizontalStgStages",
+    "validateHorizontalStgProject",
+    "exportHorizontalStgData"
+  ],
+  "mainApi": {
+    "hooks": [
+      "loadHorizontalStgProject",
+      "saveHorizontalStgDocument",
+      "deleteHorizontalStgEntity",
+      "reorderHorizontalStgStages",
+      "validateHorizontalStgProject",
+      "exportHorizontalStgData"
+    ]
+  },
+  "tab": {
+    "label": "横STG",
+    "icon": "sprite",
+    "page": "horizontal-stg-editor",
+    "order": 6
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "horizontal-stg-editor",
+    "capabilities": ["page", "horizontal-stg-editor"]
+  }
+}

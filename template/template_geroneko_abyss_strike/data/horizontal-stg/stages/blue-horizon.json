@@ -1,0 +1,666 @@
+{
+  "id": "blue-horizon",
+  "name": "BLUE HORIZON",
+  "length_px": 6144,
+  "scroll_speed_256": 80,
+  "parallax_shift_b": 2,
+  "assets": {
+    "bg_a": "gfx/stage01_bg_a.png",
+    "bg_b": "gfx/stage01_bg_b.png"
+  },
+  "music_id": "stage-1",
+  "midboss_id": "swordfish",
+  "boss_id": "leviathan",
+  "events": [
+    {
+      "id": "s1-core",
+      "trigger": {
+        "type": "scroll",
+        "at": 240
+      },
+      "order": 0,
+      "command": "spawn_item",
+      "payload": {
+        "item_id": "abyss-core",
+        "x": 300,
+        "y": 112
+      }
+    },
+    {
+      "id": "s1-wave-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 480
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "needle-fry",
+        "x": 336,
+        "y": 64
+      }
+    },
+    {
+      "id": "s1-wave-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 560
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "needle-fry",
+        "x": 336,
+        "y": 96
+      }
+    },
+    {
+      "id": "s1-wave-03",
+      "trigger": {
+        "type": "scroll",
+        "at": 640
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "needle-fry",
+        "x": 336,
+        "y": 128
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-01-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 720
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "coral-mine",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-02-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 880
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "needle-fry",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-02-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 880
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 352,
+        "y": 80
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-03-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1040
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "shell-drone",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "s1-mine-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 1050
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "coral-mine",
+        "x": 304,
+        "y": 176
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-04-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1200
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-05-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1360
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "coral-mine",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "s1-ray-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 1480
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 340,
+        "y": 80
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-06-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1520
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "needle-fry",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-06-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 1520
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 352,
+        "y": 144
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-07-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1680
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "shell-drone",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-08-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1840
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "s1-power",
+      "trigger": {
+        "type": "scroll",
+        "at": 1880
+      },
+      "order": 0,
+      "command": "spawn_item",
+      "payload": {
+        "item_id": "power",
+        "x": 300,
+        "y": 72
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-09-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2000
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "coral-mine",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-10-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2160
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "needle-fry",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-10-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 2160
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 352,
+        "y": 48
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-11-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2320
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "shell-drone",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "s1-drone",
+      "trigger": {
+        "type": "scroll",
+        "at": 2400
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "shell-drone",
+        "x": 332,
+        "y": 120
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-12-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2480
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-13-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2640
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "coral-mine",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "s1-midboss",
+      "trigger": {
+        "type": "scroll",
+        "at": 3000
+      },
+      "order": 0,
+      "command": "start_boss",
+      "payload": {
+        "boss_id": "swordfish"
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-14-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3280
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "needle-fry",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-14-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 3280
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 352,
+        "y": 112
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-15-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3440
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "shell-drone",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-16-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3600
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-17-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3760
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "coral-mine",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "s1-recovery",
+      "trigger": {
+        "type": "scroll",
+        "at": 3820
+      },
+      "order": 0,
+      "command": "spawn_item",
+      "payload": {
+        "item_id": "red-capsule",
+        "x": 300,
+        "y": 96
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-18-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3920
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "needle-fry",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-18-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 3920
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 352,
+        "y": 176
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-19-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4080
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "shell-drone",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-20-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4240
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "s1-late-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 4250
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 340,
+        "y": 152
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-21-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4400
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "coral-mine",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "s1-late-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 4480
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "shell-drone",
+        "x": 332,
+        "y": 72
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-22-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4560
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "needle-fry",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-22-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 4560
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 352,
+        "y": 80
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-23-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4720
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "shell-drone",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-24-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4880
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-25-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5040
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "coral-mine",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-26-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5200
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "needle-fry",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "blue-horizon-reinforcement-26-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 5200
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "razor-ray",
+        "x": 352,
+        "y": 144
+      }
+    },
+    {
+      "id": "s1-boss",
+      "trigger": {
+        "type": "scroll",
+        "at": 5600
+      },
+      "order": 0,
+      "command": "start_boss",
+      "payload": {
+        "boss_id": "leviathan"
+      }
+    },
+    {
+      "id": "s1-clear",
+      "trigger": {
+        "type": "frame",
+        "at": 7200
+      },
+      "order": 0,
+      "command": "stage_clear",
+      "payload": {}
+    }
+  ]
+}

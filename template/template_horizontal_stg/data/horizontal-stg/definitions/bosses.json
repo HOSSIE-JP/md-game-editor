@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "bosses": [
+    {
+      "id": "starter-guardian",
+      "name": "Starter Guardian",
+      "entry_x": 344,
+      "active_x": 272,
+      "y": 112,
+      "entry_vx256": -256,
+      "part_hp": [12, 12, 36],
+      "fire_interval": 90,
+      "death_frames": 120,
+      "bomb_damage": 3
+    }
+  ]
+}

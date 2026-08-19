@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "bosses": [
+    { "id": "swordfish", "name": "ソードフィッシュ", "entry_x": 344, "active_x": 266, "y": 112, "entry_vx256": -384, "part_hp": [24, 24, 70], "fire_interval": 74, "death_frames": 120, "bomb_damage": 4, "movement": "dash", "fire_pattern": "lance", "sprite": "gfx/bosses/swordfish.png" },
+    { "id": "leviathan", "name": "リヴァイアサン", "entry_x": 352, "active_x": 256, "y": 112, "entry_vx256": -256, "part_hp": [45, 45, 140], "fire_interval": 64, "death_frames": 150, "bomb_damage": 5, "movement": "wave", "fire_pattern": "fan", "sprite": "gfx/bosses/leviathan.png" },
+    { "id": "octo-constructor", "name": "オクトコンストラクター", "entry_x": 344, "active_x": 264, "y": 112, "entry_vx256": -320, "part_hp": [32, 32, 88], "fire_interval": 66, "death_frames": 120, "bomb_damage": 4, "movement": "orbit", "fire_pattern": "aimed", "sprite": "gfx/bosses/octo-constructor.png" },
+    { "id": "crab-fortress", "name": "クラブフォートレス", "entry_x": 360, "active_x": 250, "y": 120, "entry_vx256": -224, "part_hp": [55, 55, 170], "fire_interval": 58, "death_frames": 160, "bomb_damage": 5, "movement": "anchor", "fire_pattern": "wall", "sprite": "gfx/bosses/crab-fortress.png" },
+    { "id": "angler-hunter", "name": "アングラーハンター", "entry_x": 344, "active_x": 270, "y": 96, "entry_vx256": -352, "part_hp": [36, 36, 100], "fire_interval": 60, "death_frames": 125, "bomb_damage": 4, "movement": "hunt", "fire_pattern": "lure", "sprite": "gfx/bosses/angler-hunter.png" },
+    { "id": "nautilus-fortress", "name": "ノーチラスフォートレス", "entry_x": 360, "active_x": 252, "y": 112, "entry_vx256": -224, "part_hp": [62, 62, 190], "fire_interval": 52, "death_frames": 165, "bomb_damage": 5, "movement": "spiral", "fire_pattern": "spiral", "sprite": "gfx/bosses/nautilus-fortress.png" },
+    { "id": "mantis-striker", "name": "マンティスストライカー", "entry_x": 344, "active_x": 268, "y": 112, "entry_vx256": -416, "part_hp": [42, 42, 115], "fire_interval": 54, "death_frames": 130, "bomb_damage": 4, "movement": "dash", "fire_pattern": "cross", "sprite": "gfx/bosses/mantis-striker.png" },
+    { "id": "spider-crab-factory", "name": "スパイダークラブファクトリー", "entry_x": 368, "active_x": 248, "y": 116, "entry_vx256": -192, "part_hp": [70, 70, 215], "fire_interval": 48, "death_frames": 170, "bomb_damage": 5, "movement": "anchor", "fire_pattern": "web", "sprite": "gfx/bosses/spider-crab-factory.png" },
+    { "id": "coelacanth-guard", "name": "シーラカンスガード", "entry_x": 344, "active_x": 264, "y": 112, "entry_vx256": -352, "part_hp": [48, 48, 135], "fire_interval": 50, "death_frames": 135, "bomb_damage": 4, "movement": "wave", "fire_pattern": "fan", "sprite": "gfx/bosses/coelacanth-guard.png" },
+    { "id": "abyssal-core", "name": "アビサルコア", "entry_x": 368, "active_x": 248, "y": 112, "entry_vx256": -192, "part_hp": [85, 85, 260], "fire_interval": 42, "death_frames": 210, "bomb_damage": 5, "movement": "orbit", "fire_pattern": "core", "forms": 2, "sprite": "gfx/bosses/abyssal-core.png" }
+  ]
+}

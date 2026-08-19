@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "items": [
+    { "id": "red-capsule", "name": "Red Capsule", "duplicate_score": 500 },
+    { "id": "blue-capsule", "name": "Blue Capsule", "duplicate_score": 500 },
+    { "id": "green-capsule", "name": "Green Capsule", "duplicate_score": 500 },
+    { "id": "power", "name": "Power", "duplicate_score": 1000 },
+    { "id": "abyss-core", "name": "ABYSS CORE", "duplicate_score": 3000 },
+    { "id": "speed", "name": "Speed", "duplicate_score": 1000 },
+    { "id": "bomb", "name": "Bomb", "duplicate_score": 2000 }
+  ]
+}

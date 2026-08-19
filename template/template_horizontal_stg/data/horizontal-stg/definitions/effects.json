@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "effects": [
+    { "id": "small-explosion", "name": "Small Explosion", "frames": 4, "frame_time": 4 }
+  ]
+}

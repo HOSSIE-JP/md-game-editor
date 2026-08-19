@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "enemies": [
+    {
+      "id": "starter-fighter",
+      "name": "Starter Fighter",
+      "hp": 3,
+      "score": 100,
+      "vx256": -256,
+      "vy256": 0,
+      "behavior": "straight",
+      "fire_pattern": "cycle",
+      "fire_interval": 120,
+      "flags": 0
+    }
+  ]
+}

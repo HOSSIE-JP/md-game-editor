@@ -48,6 +48,8 @@ test('createProject writes SGDK project files and persists the active project', 
   const header = fs.readFileSync(path.join(projectDir, 'src', 'boot', 'rom_head.c'), 'utf-8');
   assert.match(header, /"Long Title With Non ASCII/);
   assert.doesNotMatch(header, /かな/);
+  assert.match(header, /0x00200001,/);
+  assert.match(header, /0x0020FFFF,/);
 
   const config = JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf-8'));
   assert.equal(config.title, 'Long Title With Non ASCII かな and Extra Characters');

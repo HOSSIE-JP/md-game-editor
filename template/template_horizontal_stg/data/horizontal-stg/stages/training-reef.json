@@ -1,0 +1,18 @@
+{
+  "id": "training-reef",
+  "name": "TRAINING REEF",
+  "length_px": 3072,
+  "scroll_speed_256": 256,
+  "parallax_shift_b": 1,
+  "assets": { "bg_a": "gfx/stage01_bg_a.png", "bg_b": "gfx/stage01_bg_b.png" },
+  "music_id": "",
+  "midboss_id": "",
+  "boss_id": "starter-guardian",
+  "events": [
+    { "id": "wave-01", "trigger": { "type": "scroll", "at": 320 }, "order": 0, "command": "spawn_enemy", "payload": { "enemy_id": "starter-fighter", "x": 336, "y": 64 } },
+    { "id": "wave-02", "trigger": { "type": "scroll", "at": 480 }, "order": 0, "command": "spawn_enemy", "payload": { "enemy_id": "starter-fighter", "x": 336, "y": 160 } },
+    { "id": "power-item", "trigger": { "type": "scroll", "at": 900 }, "order": 0, "command": "spawn_item", "payload": { "item_id": "power", "x": 300, "y": 88 } },
+    { "id": "boss", "trigger": { "type": "scroll", "at": 2500 }, "order": 0, "command": "start_boss", "payload": { "boss_id": "starter-guardian" } },
+    { "id": "clear", "trigger": { "type": "frame", "at": 3600 }, "order": 0, "command": "stage_clear", "payload": {} }
+  ]
+}

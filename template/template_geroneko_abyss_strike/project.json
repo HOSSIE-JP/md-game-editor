@@ -1,0 +1,15 @@
+{
+  "coreId": "mega-drive",
+  "title": "GERONEKO ABYSS STRIKE",
+  "author": "HOSSIE",
+  "serial": "GM GNEKO001-00",
+  "region": "JUE",
+  "generatedAt": "2026-08-19T00:00:00.000Z",
+  "pluginRoles": {
+    "builder": "horizontal-stg-builder",
+    "testplay": "standard-emulator"
+  },
+  "pluginSettings": {
+    "sidebarOrder": ["horizontal-stg-editor", "asset-manager", "md-bgm-composer", "sprite-editor", "tilemap-editor", "code-editor"]
+  }
+}

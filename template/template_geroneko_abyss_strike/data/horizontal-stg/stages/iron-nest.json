@@ -1,0 +1,807 @@
+{
+  "id": "iron-nest",
+  "name": "IRON NEST",
+  "length_px": 7680,
+  "scroll_speed_256": 80,
+  "parallax_shift_b": 1,
+  "hazardous_terrain": true,
+  "assets": {
+    "bg_a": "gfx/stage04_bg_a.png",
+    "bg_b": "gfx/stage04_bg_b.png"
+  },
+  "music_id": "stage-4",
+  "midboss_id": "mantis-striker",
+  "boss_id": "spider-crab-factory",
+  "events": [
+    {
+      "id": "s4-manta-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 360
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "forge-manta",
+        "x": 340,
+        "y": 64
+      }
+    },
+    {
+      "id": "s4-manta-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 500
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "forge-manta",
+        "x": 340,
+        "y": 160
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-01-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 720
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "smelter-urchin",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-02-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 880
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-02-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 880
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 352,
+        "y": 176
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-03-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1040
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "slag-lobster",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "s4-lobster",
+      "trigger": {
+        "type": "scroll",
+        "at": 1120
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "slag-lobster",
+        "x": 320,
+        "y": 176
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-04-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1200
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "forge-manta",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-05-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1360
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "smelter-urchin",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-06-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1520
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-06-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 1520
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 352,
+        "y": 80
+      }
+    },
+    {
+      "id": "s4-speed",
+      "trigger": {
+        "type": "scroll",
+        "at": 1580
+      },
+      "order": 0,
+      "command": "spawn_item",
+      "payload": {
+        "item_id": "speed",
+        "x": 300,
+        "y": 80
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-07-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1680
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "slag-lobster",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-08-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 1840
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "forge-manta",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-09-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2000
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "smelter-urchin",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "s4-guard-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 2140
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 344,
+        "y": 72
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-10-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2160
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-10-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 2160
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 352,
+        "y": 144
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-11-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2320
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "slag-lobster",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "s4-guard-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 2360
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-12-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2480
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "forge-manta",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-13-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2640
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "smelter-urchin",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-14-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2800
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-14-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 2800
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 352,
+        "y": 48
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-15-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 2960
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "slag-lobster",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "s4-urchin",
+      "trigger": {
+        "type": "scroll",
+        "at": 3100
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "smelter-urchin",
+        "x": 320,
+        "y": 112
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-16-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3120
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "forge-manta",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-17-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3280
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "smelter-urchin",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-18-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3440
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-18-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 3440
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 352,
+        "y": 112
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-19-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 3600
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "slag-lobster",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "s4-midboss",
+      "trigger": {
+        "type": "scroll",
+        "at": 3900
+      },
+      "order": 0,
+      "command": "start_boss",
+      "payload": {
+        "boss_id": "mantis-striker"
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-20-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4240
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "forge-manta",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-21-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4400
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "smelter-urchin",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-22-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4560
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-22-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 4560
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 352,
+        "y": 176
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-23-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4720
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "slag-lobster",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "s4-bomb",
+      "trigger": {
+        "type": "scroll",
+        "at": 4720
+      },
+      "order": 0,
+      "command": "spawn_item",
+      "payload": {
+        "item_id": "bomb",
+        "x": 300,
+        "y": 96
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-24-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 4880
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "forge-manta",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-25-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5040
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "smelter-urchin",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-26-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5200
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 344,
+        "y": 144
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-26-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 5200
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 352,
+        "y": 80
+      }
+    },
+    {
+      "id": "s4-late-01",
+      "trigger": {
+        "type": "scroll",
+        "at": 5220
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "forge-manta",
+        "x": 340,
+        "y": 52
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-27-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5360
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "slag-lobster",
+        "x": 336,
+        "y": 48
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-28-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5520
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "forge-manta",
+        "x": 344,
+        "y": 112
+      }
+    },
+    {
+      "id": "s4-late-02",
+      "trigger": {
+        "type": "scroll",
+        "at": 5520
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "slag-lobster",
+        "x": 320,
+        "y": 176
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-29-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5680
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "smelter-urchin",
+        "x": 336,
+        "y": 176
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-30-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 5840
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 344,
+        "y": 80
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-30-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 5840
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 352,
+        "y": 144
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-31-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6000
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "slag-lobster",
+        "x": 336,
+        "y": 144
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-32-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6160
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "forge-manta",
+        "x": 344,
+        "y": 48
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-33-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6320
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "smelter-urchin",
+        "x": 336,
+        "y": 112
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-34-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6480
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 344,
+        "y": 176
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-34-b",
+      "trigger": {
+        "type": "scroll",
+        "at": 6480
+      },
+      "order": 1,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "mantis-guard",
+        "x": 352,
+        "y": 48
+      }
+    },
+    {
+      "id": "iron-nest-reinforcement-35-a",
+      "trigger": {
+        "type": "scroll",
+        "at": 6640
+      },
+      "order": 0,
+      "command": "spawn_enemy",
+      "payload": {
+        "enemy_id": "slag-lobster",
+        "x": 336,
+        "y": 80
+      }
+    },
+    {
+      "id": "s4-boss",
+      "trigger": {
+        "type": "scroll",
+        "at": 7040
+      },
+      "order": 0,
+      "command": "start_boss",
+      "payload": {
+        "boss_id": "spider-crab-factory"
+      }
+    },
+    {
+      "id": "s4-clear",
+      "trigger": {
+        "type": "frame",
+        "at": 9000
+      },
+      "order": 0,
+      "command": "stage_clear",
+      "payload": {}
+    }
+  ]
+}

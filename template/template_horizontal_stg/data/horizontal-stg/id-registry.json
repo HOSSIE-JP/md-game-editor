@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "namespaces": {
+    "enemies": { "starter-fighter": 1 },
+    "bosses": { "starter-guardian": 1 },
+    "weapons": { "red": 1, "blue": 2, "green": 3 },
+    "items": { "red-capsule": 1, "blue-capsule": 2, "green-capsule": 3, "power": 4, "abyss-core": 5, "speed": 6, "bomb": 7 },
+    "effects": { "small-explosion": 1 },
+    "audio": {},
+    "stages": { "training-reef": 1 }
+  }
+}

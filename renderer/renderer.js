@@ -1048,6 +1048,19 @@ function createPluginHostApi(plugin, roots = {}) {
     createModal: (options) => createPluginModal(plugin, options),
     mountElement: (element, target) => mountPluginElement(plugin, element, target),
     unmountElement: (element) => element?.remove?.(),
+    pages: {
+      open: (pageOrPluginId) => {
+        const requested = String(pageOrPluginId || '').trim();
+        const targetPlugin = requested ? getPluginById(requested) : null;
+        const pageId = targetPlugin ? resolvePluginPageId(targetPlugin) : requested;
+        const section = pageId ? document.getElementById(`page-${pageId}`) : null;
+        if (!pageId || !section || section.hidden) {
+          return { ok: false, error: `page is unavailable: ${requested || '(empty)'}` };
+        }
+        switchPage(pageId);
+        return { ok: true, pageId };
+      },
+    },
     capabilities: {
       get: getPluginCapability,
       all: getPluginCapabilities,
