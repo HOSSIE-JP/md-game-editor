@@ -76,6 +76,48 @@ export function waitForRuntimeCapability(runtime, name, timeoutMs, getCurrent) {
   });
 }
 
+/**
+ * Run an optional async lifecycle method on every active renderer plugin.
+ * A plugin can veto the operation by returning false or { ok: false }.
+ *
+ * @param {ReturnType<typeof createPluginRuntime>} runtime
+ * @param {string} lifecycleName
+ * @param {object} payload
+ * @param {(error: unknown, pluginId: string) => void} [onError]
+ * @returns {Promise<{ok: boolean, pluginId?: string, error?: string, canceled?: boolean}>}
+ */
+export async function runPluginRuntimeLifecycle(runtime, lifecycleName, payload = {}, onError) {
+  const name = String(lifecycleName || '').trim();
+  if (!name) return { ok: false, error: 'lifecycle name is empty' };
+
+  for (const [pluginId, activation] of runtime.activations.entries()) {
+    const fn = activation?.[name];
+    if (typeof fn !== 'function') continue;
+    try {
+      const result = await fn({ ...payload, lifecycle: name, pluginId });
+      const rejected = result === false
+        || Boolean(result && typeof result === 'object' && result.ok === false);
+      if (rejected) {
+        const error = String(result?.error || result?.message || `${pluginId}.${name} rejected`);
+        return {
+          ok: false,
+          pluginId,
+          error,
+          canceled: Boolean(result?.canceled || result?.cancelled),
+        };
+      }
+    } catch (error) {
+      onError?.(error, pluginId);
+      return {
+        ok: false,
+        pluginId,
+        error: String(error?.message || error),
+      };
+    }
+  }
+  return { ok: true };
+}
+
 export function clearPluginRuntime(runtime, onDeactivateError) {
   runtime.activations.forEach((activation) => {
     try {

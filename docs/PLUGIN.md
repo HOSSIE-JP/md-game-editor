@@ -170,8 +170,11 @@ core plugin は `types: ["core"]` と `core` metadata を持つ manifest で宣�
 { logger: Logger }
 
 // 戻り値
-{ ok: boolean, error?: string }
+{ ok: true, makeVariables?: Record<string, string>, env?: Record<string, string>, makeTargets?: string[], skipClean?: boolean }
+| { ok: false, error: string }
 ```
+
+`{ ok: false }`、throw、rejectは同じhard failureです。hostはSGDK/PCE toolchainを開始せず、`onBuildError`と失敗`build-end`を1回だけ通知してBuild/Test Playを中止します。missing hookはskipとして通常続行します。
 
 ### `onBuildLog`
 
@@ -244,6 +247,24 @@ core plugin は `types: ["core"]` と `core` metadata を持つ manifest で宣�
 // context: { logger: Logger }
 // 戻り値: { ok: boolean }
 ```
+
+### renderer lifecycle: `beforeBuild` / `beforeProjectSwitch`
+
+renderer pluginの`activatePlugin()`が返すactivation objectには、任意のasync lifecycle methodを実装できます。manifestのmain process `hooks`宣言は不要です。
+
+```js
+return {
+  async beforeBuild(payload) {
+    return saveCurrentDocument();
+  },
+  async beforeProjectSwitch(payload) {
+    return saveCurrentDocument();
+  },
+  deactivate() {},
+};
+```
+
+active pluginをactivation順にawaitします。`false`、`{ ok: false, error }`、throw/rejectはvetoとして後続pluginと操作を中止します。Build/Test Playの前には`beforeBuild`、project変更前には`beforeProjectSwitch`が呼ばれるため、plugin-owned editorは未保存stateをdiskへflushするか明示的に拒否してください。
 
 ### `onTestPlay`
 
@@ -1044,6 +1065,35 @@ Priority用のstatic/fwd/turnデシジョンテーブルはテクスチャ非依
 
 ---
 
+### `md-novel-editor` — MDノベルエディター
+
+| 項目 | 値 |
+|---|---|
+| タイプ | `editor`, `asset` |
+| 対応 core | `mega-drive` |
+| バージョン | 1.0.0 |
+| 依存 | `md-novel-builder`, `asset-manager`, `image-resize-converter`, `image-quantize-converter`, `audio-converter` |
+| main hook | `loadMdNovelProject`, `saveMdNovelProject`, `importPceNovelProject`, `validateMdNovelProject` |
+| renderer capability | `page`, `md-novel-editor` |
+
+PCE VN JSON v2を非破壊で読み書きし、PCE project import、Script/System/Font/Assets/診断、revision/transaction付きatomic saveを提供します。Script rendererはPCE型のScene階層 + 18種Commandパレット / 色分けカード + 320x224 preview / 型別GUIの3列構成です。GUI/JSON切替、Scene/Command drag & drop、Skip、同project clipboard、100段Undo/Redo、未知field round-trip、別windowの分岐対応Full Previewをplugin module内で実装します。MD固有の表示・palette・音声設定は`data/md-novel/` sidecarへ分離します。
+
+### `md-novel-builder` — MDノベルビルダー
+
+| 項目 | 値 |
+|---|---|
+| タイプ | `build` |
+| 対応 core | `mega-drive` |
+| バージョン | 1.0.0 |
+| 依存 | `md-novel-editor` |
+| フック | `onBuildStart`, `onBuildLog`, `onBuildEnd`, `onBuildError` |
+| ロール | `builder` |
+| ジェネレータ | hook-only (`generator: false`) |
+
+PCE command意味論をSGDK runtimeへ変換し、ResComp/C source、XGM2/PCM binding、scene別palette/VRAM/sprite/scanline budgetを生成します。CD-DA/ADPCM/voice/cacheはcommand順を維持したwarning付きNOPです。`template_md_novel`はbuilderとstandard WASM roleを選択済みです。詳細は[NOVEL.md](NOVEL.md)を参照してください。
+
+---
+
 ### `horizontal-stg-editor` — 横スクロールSTGエディター
 
 | 項目 | 値 |
@@ -1145,6 +1195,7 @@ Test Play 開始時に API サーバーを起動し、API 操作用サブウィ�
 11. `src/boot/rom_head.c` はプロジェクト設定からエディタ本体が生成するため、build plugin のテンプレート同期で上書きしない。
 12. アセット参照を持つ editor plugin は、画面を開いた時点または sidebar で再アクティブになった時点で `.res` / source data を再読込し、一覧・select・preview を最新化する。更新ボタンに依存した状態同期だけにしない。
 13. 選択中アセットに未保存変更がある状態で別アセット選択・新規追加・import を行う場合は、保存 / 破棄 / キャンセルを選べる plugin-owned modal を出し、暗黙に編集内容を捨てない。
+14. 未保存stateを持つrenderer pluginは`beforeBuild` / `beforeProjectSwitch`を返し、保存成功時だけ`{ ok: true }`を返す。Build用`onBuildStart`の`{ ok: false }`/throw/rejectはtoolchain開始前のhard failureとして扱う。
 
 ### 手順 1: フォルダを作成する
 
@@ -1381,6 +1432,7 @@ function onBuildStart(payload, context) {
 - 変更後は `node --check <変更した .js>` と `cd md-game-editor && node tests/run-tests.js` を実行する
 - Build plugin を変更した場合は、可能なら実プロジェクトで generator 実行と SGDK build を通し、`out/cmd_` に不要な object が入っていないか確認する
 - パッケージ済みアプリで確認する場合は、source tree の `md-game-editor/plugins` と packaged tree の `resources/plugins` が同期しているか確認する
+- 組み込みpluginはpackaged版で`resources/plugins`へ配置され、`app.asar`の外側にある。bare `require("package")`を使うruntime依存はroot `dependencies`へ宣言するだけでなく、推移依存とLICENSEを含めて`extraResources`の`resources/node_modules`へ公開し、実packaged appでplugin mountまで確認する
 
 ---
 

@@ -229,6 +229,27 @@ test('createProjectInParent copies template projects without out artifacts', () 
   assert.match(header, /"GM NEW-01\s+"/);
 });
 
+test('bundled MD novel template preserves roles and canonical data without import state', () => {
+  const userData = makeTempDir('md-editor-novel-template-state-test-');
+  const buildSystem = loadBuildSystem(userData);
+  const target = path.join(makeTempDir('md-editor-novel-template-target-test-'), 'novel_copy');
+  const created = buildSystem.createProjectFromTemplate(target, 'template_md_novel', {
+    title: 'Novel Copy',
+    author: 'TEST',
+    serial: 'GM NOVTEST-00',
+  });
+
+  assert.equal(created.projectDir, target);
+  const project = JSON.parse(fs.readFileSync(path.join(target, 'project.json'), 'utf-8'));
+  const profile = JSON.parse(fs.readFileSync(path.join(target, 'data', 'md-novel', 'target-profile.json'), 'utf-8'));
+  assert.equal(project.title, 'Novel Copy');
+  assert.deepEqual(project.pluginRoles, { builder: 'md-novel-builder', testplay: 'standard-emulator' });
+  assert.equal(Object.prototype.hasOwnProperty.call(profile, 'import'), false);
+  assert.equal(fs.existsSync(path.join(target, 'assets', 'pce-vn-scenes.json')), true);
+  assert.equal(fs.existsSync(path.join(target, 'data', 'md-novel', 'asset-bindings.json')), true);
+  assert.equal(fs.existsSync(path.join(target, 'out', 'rom.bin')), false);
+});
+
 test('recent projects are deduplicated and capped', () => {
   const userData = makeTempDir('md-editor-recent-state-test-');
   const buildSystem = loadBuildSystem(userData);

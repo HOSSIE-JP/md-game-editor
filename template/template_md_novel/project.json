@@ -1,0 +1,22 @@
+{
+  "coreId": "mega-drive",
+  "title": "MD NOVEL STARTER",
+  "author": "MD GAME EDITOR",
+  "serial": "GM MDNOVEL-00",
+  "region": "JUE",
+  "generatedAt": "2026-08-20T00:00:00.000Z",
+  "pluginRoles": {
+    "builder": "md-novel-builder",
+    "testplay": "standard-emulator"
+  },
+  "pluginSettings": {
+    "sidebarOrder": [
+      "md-novel-editor",
+      "asset-manager",
+      "md-bgm-composer",
+      "sprite-editor",
+      "tilemap-editor",
+      "code-editor"
+    ]
+  }
+}

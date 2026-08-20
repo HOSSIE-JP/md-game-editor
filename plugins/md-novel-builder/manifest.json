@@ -1,0 +1,14 @@
+{
+  "id": "md-novel-builder",
+  "name": "MDノベルビルダー",
+  "description": "PCE VN JSON v2互換スクリプトをSGDK 2.11用runtimeとデータへ変換します。",
+  "version": "1.0.0",
+  "icon": "build",
+  "types": ["build"],
+  "generator": false,
+  "supportedCores": ["mega-drive"],
+  "permissions": ["project.read", "project.write", "build.configure"],
+  "dependencies": ["md-novel-editor"],
+  "roles": [{ "id": "builder", "label": "ビルド", "exclusive": true, "order": 10 }],
+  "hooks": ["onBuildStart", "onBuildLog", "onBuildEnd", "onBuildError"]
+}

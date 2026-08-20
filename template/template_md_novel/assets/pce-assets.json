@@ -1,0 +1,119 @@
+{
+  "version": 2,
+  "assets": [
+    {
+      "id": "bg_sample",
+      "name": "Sample background",
+      "type": "image",
+      "source": "assets/images/bg_sample.png",
+      "options": {}
+    },
+    {
+      "id": "sp_hero",
+      "name": "Sample hero",
+      "type": "sprite",
+      "source": "assets/sprites/sp_hero.png",
+      "options": {
+        "transparentIndex": 0,
+        "animations": [
+          {
+            "id": "default",
+            "name": "Default",
+            "frameWidth": 32,
+            "frameHeight": 64,
+            "firstCell": 0,
+            "frameCount": 1,
+            "frameDelay": 12,
+            "frameDelays": [
+              12
+            ],
+            "frameStrideCells": 1,
+            "loop": true
+          }
+        ],
+        "spriteEditor": {
+          "frameWidth": 32,
+          "frameHeight": 64,
+          "time": "1",
+          "collision": "NONE"
+        }
+      }
+    },
+    {
+      "id": "sample_bgm",
+      "name": "Sample BGM",
+      "type": "psg-song",
+      "source": "",
+      "options": {
+        "kind": "song",
+        "bpm": 120,
+        "speed": 6,
+        "steps": 8,
+        "volume": 24,
+        "pattern": [
+          {
+            "step": 0,
+            "channel": 0,
+            "note": "C4",
+            "period": 428,
+            "volume": 24
+          },
+          {
+            "step": 2,
+            "channel": 0,
+            "note": "E4",
+            "period": 339,
+            "volume": 24
+          },
+          {
+            "step": 4,
+            "channel": 0,
+            "note": "G4",
+            "period": 285,
+            "volume": 24
+          },
+          {
+            "step": 6,
+            "channel": 0,
+            "note": "E4",
+            "period": 339,
+            "volume": 24
+          }
+        ]
+      }
+    },
+    {
+      "id": "sample_sfx",
+      "name": "Sample SFX",
+      "type": "psg-sfx",
+      "source": "",
+      "options": {
+        "kind": "sfx",
+        "bpm": 120,
+        "speed": 6,
+        "steps": 3,
+        "volume": 31,
+        "pattern": [
+          {
+            "step": 0,
+            "channel": 0,
+            "period": 140,
+            "volume": 31
+          },
+          {
+            "step": 1,
+            "channel": 0,
+            "period": 90,
+            "volume": 20
+          },
+          {
+            "step": 2,
+            "channel": 0,
+            "period": 70,
+            "volume": 0
+          }
+        ]
+      }
+    }
+  ]
+}

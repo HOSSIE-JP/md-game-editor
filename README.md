@@ -165,6 +165,12 @@ node --check plugins\<plugin-id>\index.js
 npm test
 ```
 
+### MDノベル
+
+`md-novel-editor` / `md-novel-builder` と `template_md_novel` を同梱しています。エディターはPCE版のScene階層、18種Commandパレット、色分けカード、型別GUI/JSON編集、320x224 Command Preview、分岐を実行できるFull Preview、System/Font/Assets/診断を3列UIへ移植しています。PCE Game Editorの`assets/pce-vn-scenes.json` v2を正本のまま取り込み、未知fieldとscript意味論を保持しながら、320x224 H40、PAL0～PAL3、SGDK SPRITE、XGM2 BGM/PCM SFX、16x16日本語fontへ変換します。CD-DA/ADPCM/message voiceはJSONに保持してwarningを出し、MD runtimeでは無音NOPとして扱います。
+
+テンプレートはbuilder roleに`md-novel-builder`、testplay roleに`standard-emulator`を選択済みです。`ノベル`ページの`PCEプロジェクト取込`で元projectの`project.json`を選ぶと、参照中画像とPSG `(assetId, channel)` variantをproject-local resourceへ変換します。互換境界、全command、palette/VRAM/audio制約、保存・Build契約、WASM検証は[`docs/NOVEL.md`](docs/NOVEL.md)を参照してください。
+
 ### 横スクロールSTG
 
 `horizontal-stg-editor` / `horizontal-stg-builder` と2種類の新規プロジェクトテンプレートを同梱しています。
@@ -451,5 +457,8 @@ VSCode の `Terminal: Run Task` から次のタスクを選択します。
 - `tests/preload.test.js`: renderer に公開する preload API と IPC チャンネル
 - `tests/plugin-manager.test.js`: プラグイン manifest 正規化、有効化と依存関係処理
 - `tests/rescomp-manager.test.js`: `.res` 解析、生成、更新、削除、パストラバーサル拒否
+- `tests/novel-plugins.test.js`: PCE VN JSON互換、import、画像/PSG変換、preview、budget、builder staging/codegen
+- `tests/novel-editor-ui.test.js`: PCE型18 Command UI、Scene参照更新、inline/Full Preview interpreter、共有budget
+- `tests/plugin-runtime-lifecycle.test.js` / `tests/build-lifecycle.test.js`: 未保存plugin lifecycle、Build前hook失敗時のtoolchain中断
 
 新しい Electron 側機能を追加した場合は、対象モジュールに近い `tests/*.test.js` にケースを追加してください。Electron の実ウィンドウを必要としないロジックは、既存の `tests/helpers/mock-electron.js` を使って `app` / `ipcRenderer` / `contextBridge` をモックします。

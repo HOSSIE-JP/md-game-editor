@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-08 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata
+> § Last Updated: 2026-08 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / MD Novel editor and builder / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata
 
 ---
 
@@ -142,6 +142,7 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 4. UI、modal、preview、converter 連携は plugin の `renderer.js` で実装し、本体 HTML / renderer / main / preload へ個別追記しない
 5. main process の処理が必要な場合は `hooks` と `mainApi.hooks` に同じ hook 名を宣言し、renderer から `api.plugins.invokeHook()` で呼ぶ
 6. asset 登録拡張は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として提供する。標準コピー前に独自 wizard を挟む場合は `asset-import-handler.handleImport(payload)` を使う
+7. 未保存のplugin編集をBuild/Test Play/project切替へ反映する場合は、renderer activationが返すasync `beforeBuild` / `beforeProjectSwitch`で永続化し、失敗時は明示的にvetoする
 
 ---
 
@@ -152,8 +153,17 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 ```ts
 payload: { projectDir: string }
 context: { logger: Logger, projectDir: string }
-return:  { ok: boolean, error?: string }
+return:  {
+  ok: boolean,
+  error?: string,
+  makeVariables?: Record<string, string>,
+  env?: Record<string, string>,
+  makeTargets?: string[],
+  skipClean?: boolean
+}
 ```
+
+`onBuildStart`が`{ ok: false, error }`を返す、throwする、またはPromise rejectした場合、MD/PCEともtoolchainを開始しない。hostは`onBuildError`を1回呼び、失敗した`build-end`を通知する。hook専用builderは`generator: false`にし、重いpreflight/codegenを`onBuildStart`へ一本化する。
 
 ### `onBuildLog(payload)`
 
@@ -206,6 +216,12 @@ return:  { ok: boolean, handled: boolean }
 ### `getTab()`, `onActivate(payload, context)`, `onDeactivate(payload, context)`
 
 `editor` タイプのプラグイン用フック。`manifest.json` の `tab` オブジェクトと連動する。
+
+---
+
+### renderer activation lifecycle
+
+`activatePlugin()`の返却objectは、任意で`async beforeBuild(payload)`と`async beforeProjectSwitch(payload)`を実装できる。payloadには`projectDir`、`coreId`、`pluginId`、`lifecycle`と操作固有fieldが入る。active pluginをactivation順にawaitし、`false`、`{ ok: false, error, canceled? }`、throw/rejectは最初のvetoとして操作を中止する。未保存データを持つeditorは、正本へのatomic saveが完了してから`{ ok: true }`を返す。
 
 ---
 
@@ -345,6 +361,8 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `rhythm-game-builder` | `build` | リズムゲームエンジン同期、譜面/RES/C データ生成、builder role による ROM ビルド連携 |
 | `dungeon-game-editor` | `editor` | Mega Drive向け3Dダンジョンの薄壁フロア編集、ランダム生成、フロア別4要素素材セットとプロジェクト共通ビルボード、標準SGDK画像pipelineによる取り込み/検証/個別preview、固定BG_B + 動的Priority付き透明BG_A壁を共有する実機一致3D preview、セット別リソース生成 |
 | `dungeon-game-builder` | `build` | 素材セット別 `DunViewSet` 切替、固定BG_Bの床/天井と透明BG_Aの壁/扉、共通Priorityデシジョンテーブル、低Priority自動VRAMビルボード、移動/旋回/階段/LOS/暗闇/ミニマップ、builder roleによるROMビルド連携 |
+| `md-novel-editor` | `editor`, `asset` | PCE VN JSON v2の非破壊編集/import、MD target sidecar、320x224 preview、診断、async保存guard |
+| `md-novel-builder` | `build` | hook-only preflight/codegen、SGDK Novel runtime、XGM2/PCM変換、VRAM/scanline/ROM gate、builder role連携 |
 | `horizontal-stg-editor` | `editor` | 実画像320x224 preview、8x8背景stamp、system/enemy/boss sprite、BGM preview、弾幕、timeline配置、安定ID、検証 |
 | `horizontal-stg-builder` | `build` | 横STGランタイム同期、C/RES/event stream生成、18 tile icon HUD、MD密度の等倍8x8背景、title IMAGEとline-scrollロゴ、背景VRAM診断、builder role連携 |
 | `standard-emulator` | `emulator` | WASM Mega Drive エミュレーター |
@@ -352,6 +370,16 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `ai-control` | `editor`, `tool` | 外部 AI ツール向け localhost REST / MCP bridge |
 
 > 新しいプラグインが追加されたら、このテーブルに追記し § Last Updated を更新すること。
+
+### MD Novel plugin規約
+
+- script正本は`assets/pce-vn-scenes.json`。未知fieldを保持し、MD物理設定を`data/md-novel/target-profile.json`、asset対応を`asset-bindings.json`へ分離する
+- `md-novel-editor`のUI/import/previewはplugin renderer内に置き、main処理はmanifestの`hooks`と`mainApi.hooks`を一致させてserviceへ委譲する
+- 保存はrevision照合、project root/realpath検査、atomic replace、transaction hashを使う。`beforeBuild` / `beforeProjectSwitch`は保存完了までawaitし、失敗時にvetoする
+- `md-novel-builder`は`generator: false`のhook-only builder。canonical dataを読取専用にし、staging一式をhash検証後にcommitしてから明示`SRC_C`を返す
+- H40 320x224、PAL0 system、PAL1 background、PAL2/PAL3 portraitを既定とし、背景・立ち絵のscene持続を含むVRAM/80 sprite/scanline/4MiB予算をbuild errorで検査する
+- PCE CDDA/ADPCM/voiceはJSONを保持してwarning+NOP、PSG song/SFXは参照された`(assetId, channel)`だけXGM2/VGMまたはWAVへ変換する
+- 詳細契約、入力対応、検証手順は`docs/NOVEL.md`を実装と同時に更新する
 
 ### Horizontal STG plugin規約
 
@@ -424,6 +452,7 @@ Mega Drive WASM エミュレーターを同梱します。`plugins/standard-emul
 | 保存 / 削除をプロパティフォーム末尾にだけ置く | 選択中リスト項目の右端に保存・削除 action を置き、未保存状態をリスト上にも出す |
 | 繰り返し行の入力に同じ説明ラベルを重ねる | ヘッダー行 + テーブル型 UI にして、各 ROW は input と状態表示だけにする |
 | SPRITE preview でシート全体だけを表示する | frame size / animation ROW / time / collision を反映した再生 preview を表示する |
+| `resources/plugins`の組み込みpluginから`app.asar/node_modules`を参照できると仮定する | bare `require()`のruntime依存と推移依存を`extraResources`の`resources/node_modules`へLICENSE付きで公開し、packaged appでmount確認する |
 
 ---
 

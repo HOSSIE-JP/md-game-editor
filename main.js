@@ -567,6 +567,22 @@ async function invokePluginHookSafe(pluginId, hookName, payload, context = {}) {
   return result;
 }
 
+async function abortBuildAfterStartFailure(builderPluginId, startResult, pluginContext = {}) {
+  const error = String(startResult?.error || 'Build plugin onBuildStart failed');
+  const result = { success: false, error };
+  try {
+    await invokePluginHookSafe(builderPluginId, 'onBuildError', {
+      error,
+      phase: 'onBuildStart',
+      result,
+    }, pluginContext);
+  } catch (_) {
+    // The original onBuildStart failure remains authoritative.
+  }
+  sendToRenderer('build-end', result);
+  return result;
+}
+
 async function invokeRendererPluginHook(pluginId, hookName, payload) {
   const projectDir = buildSystem.getProjectDir();
   return pluginManager.invokeRendererHook(pluginId, hookName, payload || {}, {
@@ -744,16 +760,18 @@ async function openWasmTestPlayWindow(options = {}) {
     if (!contextResult.ok) return { opened: false, ...contextResult };
     currentTestPlayContext = contextResult.context;
   }
-  if (focusExistingTestPlayWindow()) {
-    if (pluginId === 'pce-standard-emulator') {
-      const htmlPath = resolvePluginAssetPath(pluginId, 'testplay.html');
-      testPlayWindow.loadFile(htmlPath);
-    }
-    return { opened: true, reused: true };
-  }
 
   const htmlPath = resolvePluginAssetPath(pluginId, 'testplay.html');
   const preloadPath = resolvePluginAssetPath(pluginId, 'testplay-preload.js');
+  const romQuery = options.romPath ? `?romPath=${encodeURIComponent(options.romPath)}` : '';
+  if (focusExistingTestPlayWindow()) {
+    if (pluginId === 'pce-standard-emulator') {
+      await testPlayWindow.loadFile(htmlPath);
+    } else {
+      await testPlayWindow.loadFile(htmlPath, { search: romQuery });
+    }
+    return { opened: true, reused: true, reloaded: true };
+  }
 
   testPlayWindow = registerWindowCloseDevTools(new BrowserWindow({
     width: 800,
@@ -768,11 +786,10 @@ async function openWasmTestPlayWindow(options = {}) {
       sandbox: false,
     },
   }));
-  const romQuery = options.romPath ? `?romPath=${encodeURIComponent(options.romPath)}` : '';
   if (pluginId === 'pce-standard-emulator') {
-    testPlayWindow.loadFile(htmlPath);
+    await testPlayWindow.loadFile(htmlPath);
   } else {
-    testPlayWindow.loadFile(htmlPath, { search: romQuery });
+    await testPlayWindow.loadFile(htmlPath, { search: romQuery });
   }
   testPlayWindow.on('closed', () => { testPlayWindow = null; currentTestPlayContext = null; });
   return { opened: true, reused: false };
@@ -1082,8 +1099,14 @@ async function openTestPlayWithPlugin(romPath) {
     }
   );
 
-  if (hookResult.ok && hookResult.result && hookResult.result.handled) {
-    return { opened: true, reused: false, handledByPlugin: emulatorPluginId };
+  const handled = hookResult?.handled === true || hookResult?.result?.handled === true;
+  if (hookResult.ok && handled) {
+    return {
+      opened: hookResult.result?.opened !== false,
+      reused: Boolean(hookResult.result?.reused),
+      reloaded: Boolean(hookResult.result?.reloaded),
+      handledByPlugin: emulatorPluginId,
+    };
   }
   if (!hookResult.ok) {
     return { opened: false, error: hookResult.error || 'Emulator フック実行に失敗しました' };
@@ -2289,6 +2312,13 @@ async function runBuildFull(options = {}) {
         coreId: buildSystem.getActiveCoreId(),
         logger: createPluginLogger(builderPluginId),
       });
+      if (buildStartResult?.ok === false) {
+        return abortBuildAfterStartFailure(builderPluginId, buildStartResult, {
+          ...pluginContext,
+          coreId: buildSystem.getActiveCoreId(),
+          logger: createPluginLogger(builderPluginId),
+        });
+      }
       if (buildStartResult?.ok && buildStartResult.makeVariables && typeof buildStartResult.makeVariables === 'object') {
         buildOptions.makeVariables = buildStartResult.makeVariables;
       }
@@ -2368,11 +2398,14 @@ async function runPceBuildFull(options = {}) {
       assets,
       logger: createPluginLogger(builderPluginId),
     };
-    await invokePluginHookSafe(builderPluginId, 'onBuildStart', {
+    const buildStartResult = await invokePluginHookSafe(builderPluginId, 'onBuildStart', {
       projectDir,
       toolchain: config.toolchain,
       toolchainPath: buildSystem.getPceSetupManager().getToolchainPath(config.toolchain),
     }, pluginContext);
+    if (buildStartResult?.ok === false) {
+      return abortBuildAfterStartFailure(builderPluginId, buildStartResult, pluginContext);
+    }
 
     const result = await buildSystem.buildProject((line, level) => {
       sendToRenderer('build-log', { text: line, level: level || 'info' });
@@ -3293,6 +3326,13 @@ module.exports.__test = {
   normalizeLogEntry,
   normalizeLogSnapshot,
   buildSystem,
+  runBuildFull,
+  runPceBuildFull,
+  openWasmTestPlayWindow,
+  openTestPlayWithPlugin,
+  abortBuildAfterStartFailure,
+  setMainWindowForTest(windowValue) { mainWindow = windowValue; },
+  setTestPlayWindowForTest(windowValue) { testPlayWindow = windowValue; },
   syncProjectPluginRoleState,
   getEditorControlService,
   closeDevToolsForWindow,

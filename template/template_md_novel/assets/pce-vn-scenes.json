@@ -1,0 +1,176 @@
+{
+  "version": 2,
+  "settings": {
+    "messageSpeedFrames": 10,
+    "messageAdvanceMode": "button",
+    "messageAutoWaitFrames": 60
+  },
+  "startScene": "start",
+  "scenes": [
+    {
+      "id": "start",
+      "name": "Start",
+      "commands": [
+        {
+          "type": "background",
+          "assetId": "bg_sample",
+          "transition": "fade",
+          "fadeOutFrames": 20,
+          "fadeInFrames": 20,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "type": "audio",
+          "kind": "psg",
+          "action": "play",
+          "assetId": "sample_bgm",
+          "channel": 0,
+          "target": "bgm"
+        },
+        {
+          "type": "sprite",
+          "slot": 0,
+          "assetId": "sp_hero",
+          "x": 96,
+          "y": 80,
+          "animationId": "default",
+          "flipX": false,
+          "flipY": false,
+          "visible": true
+        },
+        {
+          "type": "message",
+          "speaker": "MD",
+          "text": "WELCOME TO THE MD NOVEL TEMPLATE.",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        },
+        {
+          "type": "variable",
+          "variableName": "route",
+          "operation": "define",
+          "value": 0,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "type": "choice",
+          "variableName": "route",
+          "defaultIndex": 0,
+          "choices": [
+            {
+              "label": "START",
+              "value": 1,
+              "targetSceneId": "yes"
+            },
+            {
+              "label": "INFO",
+              "value": 0,
+              "targetSceneId": "info"
+            }
+          ]
+        }
+      ],
+      "nextSceneId": ""
+    },
+    {
+      "id": "yes",
+      "name": "Start route",
+      "commands": [
+        {
+          "type": "background",
+          "assetId": "bg_sample",
+          "transition": "fade",
+          "fadeOutFrames": 20,
+          "fadeInFrames": 20,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "type": "sprite",
+          "slot": 0,
+          "assetId": "sp_hero",
+          "x": 120,
+          "y": 80,
+          "animationId": "default",
+          "flipX": false,
+          "flipY": false,
+          "visible": true
+        },
+        {
+          "type": "audio",
+          "kind": "psg",
+          "action": "play",
+          "assetId": "sample_sfx",
+          "channel": 0,
+          "target": "sfx"
+        },
+        {
+          "type": "message",
+          "speaker": "MD",
+          "text": "EDIT ASSETS PCE-VN-SCENES.JSON TO BEGIN.",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        },
+        {
+          "type": "jump",
+          "sceneId": "end"
+        }
+      ],
+      "nextSceneId": ""
+    },
+    {
+      "id": "info",
+      "name": "Info route",
+      "commands": [
+        {
+          "type": "message",
+          "speaker": "MD",
+          "text": "PCE SCRIPT COMMANDS ARE KEPT. MD ASSETS USE SIDECAR BINDINGS.",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        },
+        {
+          "type": "jump",
+          "sceneId": "end"
+        }
+      ],
+      "nextSceneId": ""
+    },
+    {
+      "id": "end",
+      "name": "End",
+      "commands": [
+        {
+          "type": "audio",
+          "kind": "psg",
+          "action": "stop",
+          "assetId": "",
+          "channel": 0,
+          "target": "all"
+        },
+        {
+          "type": "message",
+          "speaker": "MD",
+          "text": "PRESS A TO TOGGLE AUTO. B C OR START ADVANCES.",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        },
+        {
+          "type": "wait",
+          "frames": 60
+        },
+        {
+          "type": "jump",
+          "sceneId": "start"
+        }
+      ],
+      "nextSceneId": ""
+    }
+  ]
+}

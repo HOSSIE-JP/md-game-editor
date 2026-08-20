@@ -345,7 +345,7 @@ test('test play rebuilds before opening so ROM header matches project settings',
   assert.match(renderer, /Test Play 前に差分ビルドします/);
   assert.match(renderer, /const buildResult = await runBuild\(\{\s*skipClean:\s*true\s*\}\)/);
   assert.match(renderer, /window\.electronAPI\.runBuild\(\{\s*skipClean:\s*Boolean\(opts\.skipClean\),\s*\}\)/);
-  assert.match(renderer, /return runBuild\(\{\s*\.\.\.opts,\s*_generatedByPlugin:\s*builderPluginId\s*\}\)/);
+  assert.match(renderer, /return runBuild\(\{\s*\.\.\.opts,\s*_generatedByPlugin:\s*builderPluginId,\s*_lifecyclePrepared:\s*true\s*\}\)/);
   assert.match(renderer, /if \(!buildResult\?\.success\)/);
   assert.match(renderer, /const romPath = buildResult\.romPath \|\| state\.lastRomPath/);
 });

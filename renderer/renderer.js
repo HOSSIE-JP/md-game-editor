@@ -18,6 +18,7 @@ import {
   getRuntimeCapability,
   listRuntimeCapabilities,
   registerRuntimeCapability,
+  runPluginRuntimeLifecycle,
   waitForRuntimeCapability,
 } from './plugin-runtime.mjs';
 import {
@@ -36,6 +37,7 @@ const state = {
   logDetached: false,
   logOpenHeight: 220,
   building: false,
+  preparing: false,
   lastRomPath: null,
   projectConfig: {
     coreId: 'mega-drive',
@@ -1105,6 +1107,25 @@ function clearPluginRuntime() {
   document.querySelectorAll('.editor-page[data-plugin-page-owner]').forEach((page) => page.remove());
 }
 
+async function runPluginLifecycle(lifecycleName, payload = {}) {
+  const result = await runPluginRuntimeLifecycle(
+    pluginRuntime,
+    lifecycleName,
+    {
+      projectDir: state.project.dir || '',
+      coreId: getActiveCoreId(),
+      ...payload,
+    },
+    (err, pluginId) => {
+      appendLog('app', 'Plugin lifecycle failed: ' + pluginId + '.' + lifecycleName + ': ' + String(err?.message || err), 'warn');
+    },
+  );
+  if (!result.ok) {
+    appendLog('app', 'Operation canceled by ' + (result.pluginId || 'plugin') + ': ' + (result.error || lifecycleName), 'warn');
+  }
+  return result;
+}
+
 function showPluginRendererError(plugin, root, err) {
   if (!root) return;
   const message = String(err?.message || err || 'unknown error');
@@ -1153,7 +1174,7 @@ async function activatePluginRenderers() {
         logger,
         registerCapability: (name, implementation) => registerPluginCapability(plugin, name, implementation),
       });
-      if (activation && typeof activation.deactivate === 'function') {
+      if (activation && typeof activation === 'object') {
         pluginRuntime.activations.set(plugin.id, activation);
       }
     } catch (err) {
@@ -1582,7 +1603,9 @@ function applyBuildAvailability() {
     builderPlugin
     && pluginSupportsActiveCore(builderPlugin)
     && builderPlugin.enabled
-    && pluginSupportsRole(builderPlugin, 'builder'),
+    && pluginSupportsRole(builderPlugin, 'builder')
+    && !state.preparing
+    && !state.building,
   );
 
   if (el.btnBuild) {
@@ -1602,7 +1625,9 @@ function applyTestPlayAvailability() {
     emulatorPlugin
     && pluginSupportsActiveCore(emulatorPlugin)
     && emulatorPlugin.enabled
-    && pluginSupportsRole(emulatorPlugin, 'testplay'),
+    && pluginSupportsRole(emulatorPlugin, 'testplay')
+    && !state.preparing
+    && !state.building,
   );
 
   if (el.btnTestPlay) {
@@ -3119,20 +3144,32 @@ function renderProjectPicker() {
       if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `プロジェクトが見つかりません: ${project.projectDir}`;
       return;
     }
-    const result = await window.electronAPI.openExistingProject({
-      projectDir: project.projectDir || '',
-      projectName: project.projectName || '',
+    const preparation = await prepareForProjectSwitch('project-picker', {
+      targetProjectDir: project?.projectDir || '',
     });
-    if (!result?.ok) {
-      if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `プロジェクトを開けませんでした: ${result?.error || 'unknown'}`;
+    if (!preparation.ok) {
+      if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `プロジェクト切替を中止しました: ${preparation.error || '保存失敗'}`;
       return;
     }
-    state.startup.projectSelected = true;
-    state.startup.projectSelectionRequired = false;
-    appendLog('app', `プロジェクトを開きました: ${result.projectDir || project.projectDir || project.projectName}`);
-    closeModal(el.projectPickerModal);
-    await reloadProjectAfterSwitch();
-    if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `✓ プロジェクトを切り替えました: ${result.projectDir}`;
+
+    try {
+      const result = await window.electronAPI.openExistingProject({
+        projectDir: project.projectDir || '',
+        projectName: project.projectName || '',
+      });
+      if (!result?.ok) {
+        if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `プロジェクトを開けませんでした: ${result?.error || 'unknown'}`;
+        return;
+      }
+      state.startup.projectSelected = true;
+      state.startup.projectSelectionRequired = false;
+      appendLog('app', `プロジェクトを開きました: ${result.projectDir || project.projectDir || project.projectName}`);
+      closeModal(el.projectPickerModal);
+      await reloadProjectAfterSwitch();
+      if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `✓ プロジェクトを切り替えました: ${result.projectDir}`;
+    } finally {
+      finishOperationPreparation();
+    }
   };
 
   const appendSection = (title, hint, projects, emptyText) => {
@@ -3214,20 +3251,32 @@ async function openProjectFolderFromDialog() {
   const projectDir = picked?.sourcePath || picked?.filePaths?.[0] || '';
   if (!projectDir) return;
 
-  const result = await window.electronAPI.openExistingProject({ projectDir });
-  if (!result?.ok) {
-    const message = `プロジェクトを開けませんでした: ${result?.error || 'project.json が見つかりません'}`;
+  const preparation = await prepareForProjectSwitch('folder-dialog', { targetProjectDir: projectDir });
+  if (!preparation.ok) {
+    const message = `プロジェクト切替を中止しました: ${preparation.error || '保存失敗'}`;
     appendLog('app', message, 'warn');
     if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = message;
     return;
   }
 
-  state.startup.projectSelected = true;
-  state.startup.projectSelectionRequired = false;
-  appendLog('app', `プロジェクトを開きました: ${result.projectDir || projectDir}`);
-  closeModal(el.projectPickerModal);
-  await reloadProjectAfterSwitch();
-  if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `✓ プロジェクトを切り替えました: ${result.projectDir}`;
+  try {
+    const result = await window.electronAPI.openExistingProject({ projectDir });
+    if (!result?.ok) {
+      const message = `プロジェクトを開けませんでした: ${result?.error || 'project.json が見つかりません'}`;
+      appendLog('app', message, 'warn');
+      if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = message;
+      return;
+    }
+
+    state.startup.projectSelected = true;
+    state.startup.projectSelectionRequired = false;
+    appendLog('app', `プロジェクトを開きました: ${result.projectDir || projectDir}`);
+    closeModal(el.projectPickerModal);
+    await reloadProjectAfterSwitch();
+    if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `✓ プロジェクトを切り替えました: ${result.projectDir}`;
+  } finally {
+    finishOperationPreparation();
+  }
 }
 
 async function ensureStartupProjectSelection() {
@@ -3338,9 +3387,46 @@ async function persistProjectSettings(config, { showMessage = false } = {}) {
  * @param {string} [opts._generatedByPlugin] - このプラグイン ID が既に main.c を書き込み済み
  * @param {boolean} [opts.skipClean] - clean ターゲットを省略して差分ビルドする
  */
+function finishOperationPreparation() {
+  state.preparing = false;
+  el.btnBuild?.classList.remove('building');
+  applyBuildAvailability();
+  applyTestPlayAvailability();
+}
+
+async function prepareForProjectSwitch(reason, payload = {}) {
+  if (state.building || state.preparing) {
+    return { ok: false, error: '別の保存またはビルド処理を実行中です' };
+  }
+
+  state.preparing = true;
+  if (el.btnBuild) el.btnBuild.disabled = true;
+  if (el.btnTestPlay) el.btnTestPlay.disabled = true;
+
+  const lifecycleResult = await runPluginLifecycle('beforeProjectSwitch', {
+    reason: String(reason || 'project-switch'),
+    ...payload,
+  });
+  if (!lifecycleResult.ok) {
+    finishOperationPreparation();
+    return lifecycleResult;
+  }
+
+  if (state.code.dirty && !state.code.selectedIsDirectory && !state.code.selectedIsMedia) {
+    const saved = await saveCurrentCodeFile();
+    if (!saved) {
+      finishOperationPreparation();
+      return { ok: false, error: '未保存のコードファイルを保存できませんでした' };
+    }
+  }
+
+  return { ok: true };
+}
+
 async function runBuild(opts = {}) {
-  if (state.building) return { success: false, error: 'building' };
-  if (el.btnBuild?.disabled) {
+  const lifecyclePrepared = Boolean(opts._lifecyclePrepared);
+  if (state.building || (state.preparing && !lifecyclePrepared)) return { success: false, error: 'building' };
+  if (!lifecyclePrepared && el.btnBuild?.disabled) {
     setLogOpen(true);
     appendBuildLog('[WARN] 有効な Build プラグインがありません。Plugins 画面で有効化してください。', 'warn');
     setBuildStatus('error', 'Build プラグイン未設定');
@@ -3350,6 +3436,24 @@ async function runBuild(opts = {}) {
   // ---- アクティブビルダープラグインが設定されており、かつ呼び出し元がプラグイン生成後でない場合 ----
   const builderPluginId = getActiveRolePlugin('builder') || pluginState.activeBuilderPlugin;
   const builderPlugin = builderPluginId ? getPluginById(builderPluginId) : null;
+  if (!lifecyclePrepared) {
+    state.preparing = true;
+    el.btnBuild?.classList.add('building');
+    if (el.btnBuild) el.btnBuild.disabled = true;
+    if (el.btnTestPlay) el.btnTestPlay.disabled = true;
+    setBuildStatus('building', 'ビルド準備中...');
+    const lifecycleResult = await runPluginLifecycle('beforeBuild', {
+      reason: 'build',
+      builderPluginId,
+      skipClean: Boolean(opts.skipClean),
+    });
+    if (!lifecycleResult.ok) {
+      const error = lifecycleResult.error || 'プラグインのBuild前処理に失敗しました';
+      finishOperationPreparation();
+      setBuildStatus('error', 'Build前処理失敗');
+      return { success: false, error };
+    }
+  }
   if (builderPluginId && builderPlugin?.hasGenerator && !opts._generatedByPlugin) {
     // プラグインで main.c を生成してから再度 runBuild を呼ぶ
     appendBuildLog(`[Plugin] ${builderPluginId}: コード生成中...`);
@@ -3358,10 +3462,11 @@ async function runBuild(opts = {}) {
       setLogOpen(true);
       setBuildStatus('error', 'プラグイン生成失敗');
       appendBuildLog(`[ERROR] プラグイン生成失敗: ${genResult.error}`, 'error');
+      finishOperationPreparation();
       return { success: false, error: genResult.error || 'プラグイン生成失敗' };
     }
     appendBuildLog(`[Plugin] ${builderPluginId}: main.c を生成しました`);
-    return runBuild({ ...opts, _generatedByPlugin: builderPluginId });
+    return runBuild({ ...opts, _generatedByPlugin: builderPluginId, _lifecyclePrepared: true });
   }
 
   // ---- プラグイン生成済みでない通常ビルド: 現在のコードファイルを保存 ----
@@ -3371,6 +3476,7 @@ async function runBuild(opts = {}) {
       updateCodeStatus('⚠ フォルダではなくファイルを選択してください。');
       setLogOpen(true);
       setBuildStatus('error', 'コードファイル未選択');
+      finishOperationPreparation();
       return { success: false, error: 'コードファイル未選択' };
     }
     if (state.code.dirty) {
@@ -3378,11 +3484,13 @@ async function runBuild(opts = {}) {
       if (!saved) {
         setLogOpen(true);
         setBuildStatus('error', '保存失敗');
+        finishOperationPreparation();
         return { success: false, error: '保存失敗' };
       }
     }
   }
 
+  state.preparing = false;
   state.building = true;
   el.btnBuild?.classList.add('building');
   if (el.btnBuild) el.btnBuild.disabled = true;
@@ -3444,9 +3552,11 @@ async function runBuild(opts = {}) {
     setBuildStatus('error', '✕ エラー');
     return { success: false, error: msg };
   } finally {
+    state.preparing = false;
     state.building = false;
     el.btnBuild?.classList.remove('building');
     applyBuildAvailability();
+    applyTestPlayAvailability();
   }
 }
 
@@ -7765,18 +7875,32 @@ async function submitProjectModal() {
       } : {}),
     },
   };
-  const result = await window.electronAPI.createNewProject(payload);
-  if (!result?.ok) {
-    if (!result?.canceled && el.settingsSavedMsg) {
-      el.settingsSavedMsg.textContent = `プロジェクト作成失敗: ${result?.error || 'unknown'}`;
-    }
+
+  const preparation = await prepareForProjectSwitch('project-create', {
+    targetProjectDir: payload.parentDir,
+    targetProjectName: projectName,
+  });
+  if (!preparation.ok) {
+    if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `プロジェクト作成を中止しました: ${preparation.error || '保存失敗'}`;
     return;
   }
-  state.startup.projectSelected = true;
-  state.startup.projectSelectionRequired = false;
-  closeModal(el.projectModal);
-  await reloadProjectAfterSwitch();
-  if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `✓ プロジェクトを作成しました: ${result.projectDir}`;
+
+  try {
+    const result = await window.electronAPI.createNewProject(payload);
+    if (!result?.ok) {
+      if (!result?.canceled && el.settingsSavedMsg) {
+        el.settingsSavedMsg.textContent = `プロジェクト作成失敗: ${result?.error || 'unknown'}`;
+      }
+      return;
+    }
+    state.startup.projectSelected = true;
+    state.startup.projectSelectionRequired = false;
+    closeModal(el.projectModal);
+    await reloadProjectAfterSwitch();
+    if (el.settingsSavedMsg) el.settingsSavedMsg.textContent = `✓ プロジェクトを作成しました: ${result.projectDir}`;
+  } finally {
+    finishOperationPreparation();
+  }
 }
 
 // ====================================================== ABOUT DIALOG ===

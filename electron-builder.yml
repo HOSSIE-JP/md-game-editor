@@ -15,6 +15,19 @@ extraResources:
     filter:
       - "**/*"
       - "!**/out/**"
+  - from: node_modules/iconv-lite
+    to: node_modules/iconv-lite
+    filter:
+      - "lib/**/*"
+      - "encodings/**/*"
+      - package.json
+      - LICENSE
+  - from: node_modules/safer-buffer
+    to: node_modules/safer-buffer
+    filter:
+      - "*.js"
+      - package.json
+      - LICENSE
 extraFiles:
   - from: build/portable
     to: portable

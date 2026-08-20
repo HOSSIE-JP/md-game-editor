@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "sourceSceneRevision": "29f0c97b6e49d6d7f02b7b175d7a38390bed18eb63d09880806cd226d3fed442",
+  "assets": {
+    "bg_sample": {
+      "assetId": "bg_sample",
+      "sourceType": "image",
+      "runtimeType": "IMAGE",
+      "symbol": "nov_bg_bg_sample_7d16a41f",
+      "palette": "PAL1",
+      "sourcePath": "novel/backgrounds/nov_bg_bg_sample_7d16a41f.png",
+      "originalSource": "assets/images/bg_sample.png",
+      "conversion": {
+        "converterVersion": 1,
+        "coordinateMode": "pce-legacy-256"
+      },
+      "metadata": {
+        "width": 256,
+        "height": 224,
+        "uniqueTiles": 5,
+        "paletteEntries": 3,
+        "transparent": false,
+        "frameWidth": 256,
+        "frameHeight": 224,
+        "maxNumTile": 0,
+        "maxNumSprite": 0,
+        "timing": "",
+        "collision": ""
+      },
+      "contentHash": "61bec7f07ce849cb0a8e21f5467a179e4c7923a86d35233748eb8e7798fef3c4"
+    },
+    "sp_hero": {
+      "assetId": "sp_hero",
+      "sourceType": "sprite",
+      "runtimeType": "SPRITE",
+      "symbol": "nov_spr_sp_hero_b74c1708",
+      "palette": "PAL2",
+      "sourcePath": "novel/sprites/nov_spr_sp_hero_b74c1708.png",
+      "originalSource": "assets/sprites/sp_hero.png",
+      "conversion": {
+        "converterVersion": 1,
+        "coordinateMode": "pce-legacy-256"
+      },
+      "metadata": {
+        "width": 32,
+        "height": 64,
+        "uniqueTiles": 10,
+        "paletteEntries": 3,
+        "transparent": true,
+        "frameWidth": 32,
+        "frameHeight": 64,
+        "maxNumTile": 32,
+        "maxNumSprite": 2,
+        "timing": "[[12]]",
+        "collision": "NONE"
+      },
+      "contentHash": "a6b7645cdbd6b086ecaa20cfc96faf3a2526e5e54b479c66aa0d29d50acccafe",
+      "paletteFingerprint": "775f0a0204bb01353d87f6b7f7f380260f19b435e31de857fa360a3e654e7dad"
+    },
+    "sample_bgm": {
+      "assetId": "sample_bgm",
+      "sourceType": "psg-song",
+      "runtimeType": "XGM2",
+      "symbol": "nov_audio_sample_bgm_73ea24a9",
+      "palette": null,
+      "sourcePath": "novel/music/nov_audio_sample_bgm_73ea24a9.vgm",
+      "originalSource": "",
+      "conversion": {
+        "converterVersion": 1,
+        "coordinateMode": "pce-legacy-256"
+      }
+    },
+    "sample_sfx": {
+      "assetId": "sample_sfx",
+      "sourceType": "psg-sfx",
+      "runtimeType": "WAV",
+      "symbol": "nov_audio_sample_sfx_006aa44b",
+      "palette": null,
+      "sourcePath": "novel/sfx/nov_audio_sample_sfx_006aa44b.wav",
+      "originalSource": "",
+      "conversion": {
+        "converterVersion": 1,
+        "coordinateMode": "pce-legacy-256"
+      }
+    }
+  },
+  "audioVariants": {
+    "sample_bgm@0": {
+      "key": "sample_bgm@0",
+      "assetId": "sample_bgm",
+      "channel": 0,
+      "sourceType": "psg-song",
+      "references": [
+        {
+          "sceneId": "start",
+          "commandIndex": 1
+        }
+      ],
+      "runtimeType": "XGM2",
+      "symbol": "nov_bgm_sample_bgm_ch0_2f696355",
+      "sourcePath": "novel/music/nov_bgm_sample_bgm_ch0_2f696355.vgm",
+      "status": "ready",
+      "contentHash": "95f0374dd2983392c24a43e914d4800796500d0e2c07357285f513e3f7714f8b",
+      "metadata": {
+        "byteLength": 728,
+        "lossyConversion": true,
+        "baseChannel": 0
+      }
+    },
+    "sample_sfx@0": {
+      "key": "sample_sfx@0",
+      "assetId": "sample_sfx",
+      "channel": 0,
+      "sourceType": "psg-sfx",
+      "references": [
+        {
+          "sceneId": "yes",
+          "commandIndex": 2
+        }
+      ],
+      "runtimeType": "WAV",
+      "symbol": "nov_sfx_sample_sfx_ch0_aa319e7c",
+      "sourcePath": "novel/sfx/nov_sfx_sample_sfx_ch0_aa319e7c.wav",
+      "status": "ready",
+      "contentHash": "37de81bb985b99b444f5f844c69a8596a0b0d7a2dffe8e3d45b80373b9527b08",
+      "metadata": {
+        "byteLength": 5030,
+        "lossyConversion": true,
+        "baseChannel": 0
+      }
+    }
+  },
+  "paletteGroups": {
+    "PAL2": [
+      "hero"
+    ],
+    "PAL3": []
+  }
+}

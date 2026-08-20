@@ -126,6 +126,7 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 editor plugin の `pageRoot` / `root` は `<section class="editor-page">` 自体なので、root に付ける plugin 固有 class へ `display` を指定しない。ページ表示はホストの `.editor-page.active` が管理する。ページ全体の `display: flex` / `grid` は root 直下に wrapper 要素を作って指定する。
 プラグイン同士の連携は `api.capabilities.get()` / `api.capabilities.require()` / `api.events.on()` / `api.events.emit()` を使い、本体側に個別 plugin ID の分岐を追加しない。
 renderer から main process hook を呼ぶ場合は `hooks` と `mainApi.hooks` の両方に宣言し、`api.plugins.invokeHook()` または `window.electronAPI.invokePluginHook()` を使う。
+未保存のpluginデータをBuild/Test Play/project切替へ反映する場合、`activatePlugin()`の返却objectへasync `beforeBuild(payload)` / `beforeProjectSwitch(payload)`を実装する。active順にawaitされ、`false`、`{ ok: false, error, canceled? }`、throw/rejectは操作を中止する。正本へのatomic save完了前に成功を返さない。
 asset type / import / image 変換は `asset-type-provider` / `asset-import-handler` / `image-import-pipeline` capability として登録する。
 PC Engine core の asset schema は `assets/pce-assets.json` v2 を標準にし、`image` / `sprite` / `palette` / `psg-song` / `psg-sfx` / `adpcm` / `cdda-track` を扱う。旧 `psg-sequence` は `psg-sfx` として正規化する。
 PCE 専用の標準 editor/converter は `pce-asset-manager` / `pce-sprite-editor` / `pce-palette-editor` / `pce-music-editor` / `pce-image-converter` / `pce-audio-converter` とし、`supportedCores: ["pc-engine"]` を宣言する。
@@ -157,6 +158,8 @@ setup / project / build / asset schema / template のようなシステム固有
 - **開発時** → MD Game Editor リポジトリの `md-game-editor/plugins/<plugin-id>/`
 - **パッケージ済みアプリ** → `<userData>/plugins/<plugin-id>/`  
   （Settings > Plugins 画面の「📂 フォルダを開く」から開ける）
+
+組み込みpluginは配布時に`resources/plugins`へ置かれ、`app.asar`の外側から読み込まれる。bare `require("package")`を使う場合、root `dependencies`だけでは解決できないため、推移依存とLICENSEを含めて`electron-builder.yml`の`extraResources`から`resources/node_modules`へ公開し、実packaged appでplugin mountを確認する。userData pluginは依存をplugin-localに同梱する。
 
 ---
 
@@ -279,6 +282,12 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 
 ---
 
+`onBuildStart`が`{ ok: false }`を返す、throwする、またはPromise rejectした場合、MD/PCEともtoolchainは開始されず、`onBuildError`が1回だけ呼ばれる。hook専用builderは`generator: false`にし、preflight/codegenは`onBuildStart`へ一本化する。
+
+renderer activationの`beforeBuild` / `beforeProjectSwitch`はmain process hookではなく、未保存renderer stateを永続化またはvetoする非同期lifecycleである。
+
+---
+
 ## generateSource の実装ルール
 
 1. **バリデーション優先**: 必要なアセットが存在しない場合は `{ ok: false, error: "説明" }` を返す
@@ -308,6 +317,18 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 
 ---
 
+## MDノベル plugin
+
+- `md-novel-editor`は`assets/pce-vn-scenes.json` v2を正本として未知fieldを保持し、MD設定を`data/md-novel/target-profile.json`、asset対応を`asset-bindings.json`へ分離する。
+- renderer UI、import、preview、診断はplugin内に置き、main serviceはproject root/realpath検査、revision、atomic replace、transaction hashを必須とする。
+- `beforeBuild` / `beforeProjectSwitch`は未保存編集をatomic saveし、失敗した場合はvetoする。古いdisk状態でBuild/Test Playを成功させない。
+- `md-novel-builder`は`generator: false`のhook-only builder。canonical dataを変更せず、staging生成物をhash検証してからcommitし、`makeVariables.SRC_C`へ全C sourceを明示する。
+- H40 320x224、PAL0=system、PAL1=background、PAL2/PAL3=portrait。背景・立ち絵のscene持続を含むVRAM、sprite、scanline、DMA、4MiB ROM gateをbuild時に再検査する。
+- CDDA/ADPCM/voiceはwarning+NOP、PSG song/SFXは参照された`(assetId, channel)` variantだけをXGM2/VGMまたはWAVへ変換する。
+- 実装、`docs/PLUGIN.md`、`docs/NOVEL.md`、`tests/novel-plugins.test.js`を同じ作業で更新する。
+
+---
+
 ## 横スクロールSTG plugin
 
 - `horizontal-stg-editor` は `data/horizontal-stg/` の安定ID付きJSONを専用フォームで編集し、安定IDを読取専用にする。collectionは選択entityだけをupsertし、revision競合、atomic write、`.deleted` 退避、未保存ガードを維持する
@@ -332,7 +353,7 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 - GPL/AGPL コードを参考に実装した場合は制御フローを変えて書き直す
 
 ---
-*Last Updated: 2026-08 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata*
+*Last Updated: 2026-08 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / MD Novel editor and builder / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata*
 
 
 ## MD/PCE split note

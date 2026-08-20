@@ -20,6 +20,15 @@ test('packaging declares main-process runtime dependencies', () => {
   assert.equal(pkg.devDependencies?.['iconv-lite'], undefined);
 });
 
+test('packaging exposes iconv-lite to external built-in plugins', () => {
+  const config = readPackageConfig();
+  const root = path.join(__dirname, '..');
+
+  assert.match(config, /from:\s*node_modules\/iconv-lite[\s\S]*to:\s*node_modules\/iconv-lite/);
+  assert.match(config, /from:\s*node_modules\/safer-buffer[\s\S]*to:\s*node_modules\/safer-buffer/);
+  assert.equal(fs.existsSync(path.join(root, 'node_modules/iconv-lite/lib/index.js')), true);
+  assert.equal(fs.existsSync(path.join(root, 'node_modules/safer-buffer/safer.js')), true);
+});
 test('development start script forwards stop signals to Electron', () => {
   const pkg = readPackageJson();
   const scriptPath = path.join(__dirname, '..', 'scripts', 'start-electron.js');
@@ -41,6 +50,28 @@ test('packaging includes the bundled game editor template projects', () => {
   assert.doesNotMatch(config, /from:\s*projects\/sample_slideshow/);
   assert.doesNotMatch(config, /from:\s*projects\/sample\s/);
   assert.doesNotMatch(config, /to:\s*projects\/sample\s/);
+});
+
+test('packaging source contains the MD novel plugins and clean starter template', () => {
+  const root = path.join(__dirname, '..');
+  const requiredFiles = [
+    'plugins/md-novel-editor/manifest.json',
+    'plugins/md-novel-editor/renderer-app.mjs',
+    'plugins/md-novel-builder/manifest.json',
+    'plugins/md-novel-builder/template/src/novel_runtime/novel_runtime.c',
+    'template/template_md_novel/project.json',
+    'template/template_md_novel/assets/pce-vn-scenes.json',
+    'template/template_md_novel/data/md-novel/asset-bindings.json',
+    'template/template_md_novel/data/md-novel/target-profile.json',
+  ];
+  for (const relativePath of requiredFiles) {
+    assert.equal(fs.existsSync(path.join(root, relativePath)), true, relativePath);
+  }
+
+  const project = JSON.parse(fs.readFileSync(path.join(root, 'template/template_md_novel/project.json'), 'utf-8'));
+  const profile = JSON.parse(fs.readFileSync(path.join(root, 'template/template_md_novel/data/md-novel/target-profile.json'), 'utf-8'));
+  assert.deepEqual(project.pluginRoles, { builder: 'md-novel-builder', testplay: 'standard-emulator' });
+  assert.equal(Object.prototype.hasOwnProperty.call(profile, 'import'), false);
 });
 
 test('packaging keeps WASM runtime assets inside the standard emulator plugin', () => {

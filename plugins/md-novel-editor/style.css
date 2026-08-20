@@ -1,0 +1,45 @@
+.md-novel-editor-page { color: var(--text-color, #e7edf5); }
+.mn-shell { height: 100%; min-height: 620px; display: grid; grid-template-rows: auto auto 1fr; background: #10151d; }
+.mn-toolbar, .mn-tabs, .mn-script-toolbar, .mn-preview-controls, .mn-heading { display: flex; align-items: center; gap: 8px; }
+.mn-toolbar { padding: 8px 10px; border-bottom: 1px solid #2d3747; background: #171e29; }
+.mn-toolbar button, .mn-tabs button, .mn-script-toolbar button, .mn-preview-controls button, .mn-command-form button { border: 1px solid #3b485d; border-radius: 4px; background: #202b39; color: #e7edf5; padding: 6px 9px; cursor: pointer; }
+.mn-toolbar button.primary, .mn-command-form button.primary { background: #1969a8; border-color: #2b8ed8; }
+.mn-toolbar button:disabled, .mn-script-toolbar button:disabled { opacity: .45; cursor: default; }
+.mn-dirty { color: #ffbd5a; font-weight: 700; }
+.mn-status { margin-left: auto; color: #9db0c8; max-width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mn-status[data-tone="error"] { color: #ff7b86; } .mn-status[data-tone="ok"] { color: #6be2a0; }
+.mn-tabs { padding: 0 10px; border-bottom: 1px solid #2d3747; background: #131a24; }
+.mn-tabs button { border: 0; border-radius: 0; background: transparent; padding: 9px 12px; color: #91a0b5; }
+.mn-tabs button.active { color: #fff; box-shadow: inset 0 -2px #48b7ff; }
+.mn-workspace { min-height: 0; display: grid; grid-template-columns: 210px minmax(420px, 1fr) 360px; }
+.mn-scenes, .mn-preview-panel { min-width: 0; padding: 10px; background: #131a24; }
+.mn-scenes { border-right: 1px solid #2d3747; } .mn-preview-panel { border-left: 1px solid #2d3747; }
+.mn-heading { justify-content: space-between; min-height: 28px; color: #c9d6e6; }
+.mn-list, .mn-command-list, .mn-assets, .mn-diagnostics { overflow: auto; }
+.mn-list { height: calc(100% - 34px); }
+.mn-list button, .mn-command-list button { display: block; width: 100%; border: 0; border-bottom: 1px solid #283344; background: transparent; color: #d7e1ef; text-align: left; padding: 7px 8px; cursor: pointer; }
+.mn-list button.active, .mn-command-list button.active { background: #24435d; }
+.mn-list small, .mn-command-list small { display: block; color: #8291a7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mn-main { min-width: 0; min-height: 0; padding: 10px; overflow: hidden; }
+.mn-section { display: none; height: 100%; min-height: 0; } .mn-section.active { display: block; }
+.mn-script-grid { height: calc(100% - 40px); display: grid; grid-template-columns: minmax(220px, 40%) 1fr; gap: 10px; }
+.mn-command-list { border: 1px solid #2d3747; border-radius: 5px; }
+.mn-command-form { display: grid; grid-template-rows: auto 1fr auto; gap: 8px; min-width: 0; }
+.mn-command-form textarea, .mn-form textarea, .mn-form input, .mn-form select { box-sizing: border-box; width: 100%; border: 1px solid #3a485b; border-radius: 4px; background: #0d1219; color: #dce7f5; padding: 8px; }
+.mn-command-form textarea { resize: none; font: 12px/1.45 Consolas, monospace; tab-size: 2; }
+.mn-form { max-width: 800px; overflow: auto; height: 100%; padding-right: 10px; }
+.mn-form fieldset { border: 1px solid #334156; border-radius: 6px; margin: 0 0 12px; padding: 12px; }
+.mn-form legend { color: #7fcaff; padding: 0 6px; }
+.mn-form label { display: grid; grid-template-columns: 220px 1fr; gap: 12px; align-items: center; margin: 8px 0; }
+.mn-form p { color: #93a3b8; }
+.mn-preview-panel canvas { display: block; width: 320px; height: 224px; max-width: 100%; image-rendering: pixelated; background: #000; border: 1px solid #415069; }
+.mn-preview-controls { padding: 8px 0; } .mn-preview-controls input { flex: 1; }
+.mn-preview-panel small { color: #7f91a9; }
+.mn-diagnostic { border-left: 4px solid #60738a; background: #151e29; margin: 0 0 7px; padding: 8px 10px; }
+.mn-diagnostic.error { border-color: #e45f6a; } .mn-diagnostic.warning { border-color: #d6a348; }
+.mn-diagnostic strong, .mn-diagnostic code { display: block; } .mn-diagnostic code { color: #8ba0b9; font-size: 11px; }
+.mn-diagnostic p { margin: 4px 0 0; }
+.mn-assets table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.mn-assets th, .mn-assets td { border-bottom: 1px solid #2b3748; padding: 6px; text-align: left; word-break: break-all; }
+.mn-empty { padding: 18px; color: #8291a7; text-align: center; }
+@media (max-width: 1100px) { .mn-workspace { grid-template-columns: 180px 1fr; } .mn-preview-panel { display: none; } }

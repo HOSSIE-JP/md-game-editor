@@ -1,0 +1,46 @@
+{
+  "id": "md-novel-editor",
+  "name": "MDノベルエディター",
+  "description": "PCE VN JSON v2の互換スクリプトをMega Drive向けに編集、変換、プレビューします。",
+  "version": "1.0.0",
+  "icon": "code",
+  "types": ["editor", "asset"],
+  "supportedCores": ["mega-drive"],
+  "permissions": ["project.read", "project.write", "dialog.openFile", "res.read", "res.write", "main.invokeHook"],
+  "dependencies": [
+    "md-novel-builder",
+    "asset-manager",
+    "image-resize-converter",
+    "image-quantize-converter",
+    "audio-converter"
+  ],
+  "hooks": [
+    "getTab",
+    "onActivate",
+    "onDeactivate",
+    "loadMdNovelProject",
+    "saveMdNovelProject",
+    "importPceNovelProject",
+    "validateMdNovelProject"
+  ],
+  "mainApi": {
+    "hooks": [
+      "loadMdNovelProject",
+      "saveMdNovelProject",
+      "importPceNovelProject",
+      "validateMdNovelProject"
+    ]
+  },
+  "tab": {
+    "label": "ノベル",
+    "icon": "code",
+    "page": "md-novel-editor",
+    "order": 6
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "md-novel-editor",
+    "capabilities": ["page", "md-novel-editor"]
+  }
+}

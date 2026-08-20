@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "target": "mega-drive",
+  "coordinateMode": "pce-legacy-256",
+  "video": {
+    "width": 320,
+    "height": 224,
+    "refreshHz": 60,
+    "legacyViewportX": 32,
+    "backgroundPlane": "BG_B",
+    "overlayPlane": "BG_A",
+    "messagePlane": "WINDOW"
+  },
+  "window": {
+    "heightPixels": 96,
+    "columns": 19,
+    "bodyRows": 4,
+    "bodyPageCells": 75,
+    "speakerRows": 1,
+    "choiceVisibleCharacters": 17,
+    "opaque": true
+  },
+  "palettes": {
+    "system": 0,
+    "background": 1,
+    "portraitA": 2,
+    "portraitB": 3
+  },
+  "font": {
+    "renderer": "misaki-gothic-scaled-16x16",
+    "glyphWidth": 16,
+    "glyphHeight": 16,
+    "source": "font/misaki_gothic.png"
+  },
+  "audio": {
+    "driver": "XGM2",
+    "cdda": "ignore",
+    "adpcm": "ignore",
+    "voice": "ignore",
+    "psgSong": "require-xgm2-binding",
+    "psgSfx": "require-wav-binding",
+    "sfxRate": 6650,
+    "sfxChannel": 2
+  },
+  "input": {
+    "up": "UP",
+    "down": "DOWN",
+    "left": "LEFT",
+    "right": "RIGHT",
+    "i": "B",
+    "ii": "C",
+    "run": "START",
+    "select": "A"
+  },
+  "runtime": {
+    "spriteSlots": 4,
+    "spriteTextSlots": 4,
+    "spriteTextCharacters": 32,
+    "dmaBytesPerFrame": 6144
+  },
+  "rom": {
+    "targetBytes": 3670016,
+    "hardLimitBytes": 4194304,
+    "mapper": false
+  }
+}

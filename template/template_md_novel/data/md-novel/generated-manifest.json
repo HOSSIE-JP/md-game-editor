@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "buildId": "1787220498440-7fd48ed6-9d29-4e44-b706-141de811bdb9",
+  "generatedAt": "2026-08-20T10:08:18.504Z",
+  "files": {
+    "src/main.c": "ba2c0c6f9ec4cbb14569f1d5fce1a18f7cb67d07fe9ba73471d5357e878f44e5",
+    "src/novel_runtime/novel_runtime.c": "4d6b7389ffeed78855f2109c9ea4ad391d11545bc30d1afc0549da83e9fe362a",
+    "inc/novel_runtime/novel_runtime.h": "495963d6f60f2ddce78a291f7e4e7511472e1ecf81d4fb3da3c56055c6dfa86e",
+    "src/boot/sega.s": "42af2a9913bbbc032db09a17e3a46a312d9491b4d1f51b7dfc49925deffa85f4",
+    "res/novel/font/misaki_gothic.png": "a273dd232907e1c98aa008fa63b050c693a06336cfdfcfe575021a95aaf2769c",
+    "res/novel.res": "f2aedb88fb5720060c6ef89cdef4d569216b49fb9621d4868536d4d52035a4a6",
+    "inc/generated/novel_data.h": "6b5d79b6a489db5298cfdfa938b763463f4247142ef274e6a3533c6213d6a95f",
+    "src/generated/novel_data.c": "89e0d7057518292459b087b7a019de19d0dcc90cdd194be02db2163a6fb8cb08"
+  },
+  "report": {
+    "scenes": 4,
+    "commands": 17,
+    "messages": 4,
+    "backgrounds": 1,
+    "sprites": 1,
+    "bgm": 1,
+    "sfx": 1,
+    "strings": 7,
+    "variables": 3,
+    "switches": 0,
+    "budget": {
+      "maxSpriteTiles": 32,
+      "maxSpritePieces": 2,
+      "maxScanlinePieces": 1,
+      "maxScanlinePixels": 32,
+      "maxOverlayTiles": 0,
+      "maxBudget": 418,
+      "states": 27,
+      "diagnostics": []
+    }
+  }
+}
