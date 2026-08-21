@@ -52,17 +52,20 @@ export function openNovelPreview(options = {}) {
   const requestedAssets = new Set();
 
   async function refreshAssets(snapshot) {
-    if (typeof options.ensureAssetImages !== 'function') return;
-    const missing = collectVisualAssetIds(snapshot).filter((assetId) => {
-      if (options.imageForAsset?.(assetId) || requestedAssets.has(assetId)) return false;
+    const visible = collectVisualAssetIds(snapshot);
+    const missing = visible.filter((assetId) => {
+      const ready = Boolean(options.imageForAsset?.(assetId)) && Boolean(options.indexedForAsset?.(assetId));
+      if (ready || requestedAssets.has(assetId)) return false;
       requestedAssets.add(assetId);
       return true;
     });
     if (!missing.length) return;
-    await options.ensureAssetImages(missing);
+    await Promise.all([
+      options.ensureAssetImages?.(missing),
+      options.ensureIndexedAssets?.(missing),
+    ]);
     if (!closed && !popup.closed) render();
   }
-
   function renderChoices(snapshot) {
     if (!snapshot.choice) { choices.innerHTML = ''; return; }
     choices.innerHTML = (snapshot.choice.choices || []).slice(0, 4).map((entry, index) => `<button type="button" data-choice="${index}" class="${index === snapshot.choiceIndex ? 'active' : ''}">${index === snapshot.choiceIndex ? '▶ ' : '  '}${escapeHtml(entry.label || '')}</button>`).join('');
@@ -94,6 +97,8 @@ export function openNovelPreview(options = {}) {
       coordinateMode: options.coordinateMode,
       bindings: options.bindings,
       imageForAsset: options.imageForAsset,
+      indexedForAsset: options.indexedForAsset,
+      paletteCanvasCache: options.paletteCanvasCache,
       time: performance.now(),
     });
     renderChoices(snapshot);

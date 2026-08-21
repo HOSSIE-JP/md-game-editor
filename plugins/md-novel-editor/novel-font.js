@@ -9,7 +9,12 @@ const FONT_RENDERER = 'subset-16x16-v1';
 const FONT_CELL_SIZE = 16;
 const FONT_GRID_COLUMNS = 16;
 const FONT_OUTPUT_PATH = 'res/novel/font/generated.png';
-const BUNDLED_FONT_SOURCE = 'font/misaki_gothic.png';
+const BUNDLED_FONT_SOURCE = 'font/JF-Dot-Shinonome16.ttf';
+const BUNDLED_FONT_ATLAS_SOURCE = 'font/JF-Dot-Shinonome16-atlas.png';
+const BUNDLED_FONT_LABEL = '同梱 JF-Dot-Shinonome16.ttf';
+const LEGACY_BUNDLED_FONT_SOURCE = 'font/misaki_gothic.png';
+const DEFAULT_FONT_SIZE = 16;
+const DEFAULT_FONT_THRESHOLD = 190;
 const FIXED_RUNTIME_CHARACTERS = Object.freeze(['　', '▼', '◆']);
 
 function clamp(value, minimum, maximum, fallback) {
@@ -56,9 +61,16 @@ function normalizeFontSettings(value = {}) {
     source: kind === 'project' ? requestedSource : BUNDLED_FONT_SOURCE,
     label: kind === 'project'
       ? String(value.label || library.find((entry) => entry.file === requestedSource)?.label || requestedSource.split('/').pop()).slice(0, 120)
-      : '同梱 Misaki Gothic',
-    fontSize: clamp(value.fontSize, 8, 32, 16),
-    threshold: clamp(value.threshold, 1, 254, 32),
+      : BUNDLED_FONT_LABEL,
+    fontSize: clamp(value.fontSize, 8, 32, DEFAULT_FONT_SIZE),
+    threshold: clamp(
+      kind === 'bundled' && requestedSource === LEGACY_BUNDLED_FONT_SOURCE && Number(value.threshold) === 32
+        ? DEFAULT_FONT_THRESHOLD
+        : value.threshold,
+      1,
+      254,
+      DEFAULT_FONT_THRESHOLD,
+    ),
     xOffset: clamp(value.xOffset, -8, 8, 0),
     yOffset: clamp(value.yOffset, -8, 8, 0),
     previewText: String(value.previewText || 'MDノベルのフォント表示\n19文字x4行').slice(0, 512),
@@ -291,11 +303,11 @@ function jisCell(code) {
 function generateBundledAtlas(plan, sourceBuffer) {
   if (plan.font.kind !== 'bundled') throw new Error('Bundled atlas generation requires the bundled font');
   const source = decodePng(sourceBuffer);
-  if (source.width !== 752 || source.height !== 752) throw new Error('Bundled Misaki atlas has invalid dimensions');
+  if (source.width !== 1504 || source.height !== 1504) throw new Error('Bundled JF-Dot-Shinonome16 atlas has invalid dimensions');
   const indices = new Uint8Array(plan.width * plan.height);
   for (const [glyphIndex, entry] of plan.entries.entries()) {
     const cell = jisCell(entry.code);
-    if (!cell) throw new Error(`同梱Misakiに収録できない文字です: ${entry.character}`);
+    if (!cell) throw new Error(`同梱JF-Dot-Shinonome16に収録できない文字です: ${entry.character}`);
     const size = plan.font.fontSize;
     const cellX = (glyphIndex % FONT_GRID_COLUMNS) * FONT_CELL_SIZE;
     const cellY = Math.floor(glyphIndex / FONT_GRID_COLUMNS) * FONT_CELL_SIZE;
@@ -304,8 +316,8 @@ function generateBundledAtlas(plan, sourceBuffer) {
     let ink = 0;
     for (let targetY = 0; targetY < size; targetY += 1) {
       for (let targetX = 0; targetX < size; targetX += 1) {
-        const sourceX = cell.column * 8 + Math.min(7, Math.floor(targetX * 8 / size));
-        const sourceY = cell.row * 8 + Math.min(7, Math.floor(targetY * 8 / size));
+        const sourceX = cell.column * FONT_CELL_SIZE + Math.min(FONT_CELL_SIZE - 1, Math.floor(targetX * FONT_CELL_SIZE / size));
+        const sourceY = cell.row * FONT_CELL_SIZE + Math.min(FONT_CELL_SIZE - 1, Math.floor(targetY * FONT_CELL_SIZE / size));
         const sourcePixel = sourceY * source.width + sourceX;
         const rgbaOffset = sourcePixel * 4;
         const alpha = source.rgba[rgbaOffset + 3];
@@ -319,7 +331,7 @@ function generateBundledAtlas(plan, sourceBuffer) {
         ink += 1;
       }
     }
-    if (ink === 0 && entry.character !== '　') throw new Error(`同梱Misakiにglyphがありません: ${entry.character}`);
+    if (ink === 0 && entry.character !== '　') throw new Error(`同梱JF-Dot-Shinonome16にglyphがありません: ${entry.character}`);
   }
   return encodeIndexedPng(plan.width, plan.height, indices, [[0, 0, 0, 0], [255, 255, 255, 255]]);
 }
@@ -383,6 +395,11 @@ module.exports = {
   FONT_GRID_COLUMNS,
   FONT_OUTPUT_PATH,
   BUNDLED_FONT_SOURCE,
+  BUNDLED_FONT_ATLAS_SOURCE,
+  BUNDLED_FONT_LABEL,
+  LEGACY_BUNDLED_FONT_SOURCE,
+  DEFAULT_FONT_SIZE,
+  DEFAULT_FONT_THRESHOLD,
   FIXED_RUNTIME_CHARACTERS,
   fullWidthAscii,
   normalizeFontSettings,

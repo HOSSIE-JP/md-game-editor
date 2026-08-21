@@ -41,6 +41,8 @@ const prepareMdNovelFontGeneration = guarded((root, payload) => service.prepareF
 const commitMdNovelFontGeneration = guarded((root, payload) => service.commitFontGeneration(root, payload));
 const importMdNovelFont = guarded((root, payload) => service.importFont(root, payload));
 const deleteMdNovelFont = guarded((root, payload) => service.deleteFont(root, payload));
+const quantizeMdNovelPaletteGroup = guarded((root, payload) => service.quantizePaletteGroup(root, payload));
+const readMdNovelIndexedAssets = guarded((root, payload) => service.readIndexedAssets(root, payload));
 
 module.exports = {
   manifest,
@@ -55,4 +57,6 @@ module.exports = {
   commitMdNovelFontGeneration,
   importMdNovelFont,
   deleteMdNovelFont,
+  quantizeMdNovelPaletteGroup,
+  readMdNovelIndexedAssets,
 };

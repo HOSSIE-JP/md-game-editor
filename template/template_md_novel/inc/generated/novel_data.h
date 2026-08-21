@@ -6,7 +6,8 @@
 extern const NovelProject gNovelProject;
 const Image* novelDataBackground(u16 index);
 const SpriteDefinition* novelDataSprite(u16 index);
-u16 novelDataSpritePalette(u16 index);
+u16 novelDataBackgroundPaletteId(u16 index);
+u16 novelDataSpritePaletteId(u16 index);
 void novelDataPlayBgm(u16 index);
 void novelDataPlaySfx(u16 index);
 

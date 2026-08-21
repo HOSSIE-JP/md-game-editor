@@ -18,7 +18,8 @@
           "fadeOutFrames": 20,
           "fadeInFrames": 20,
           "x": 0,
-          "y": 0
+          "y": 0,
+          "palette": "PAL0"
         },
         {
           "type": "audio",
@@ -37,7 +38,8 @@
           "animationId": "default",
           "flipX": false,
           "flipY": false,
-          "visible": true
+          "visible": true,
+          "palette": "PAL1"
         },
         {
           "type": "message",
@@ -86,7 +88,8 @@
           "fadeOutFrames": 20,
           "fadeInFrames": 20,
           "x": 0,
-          "y": 0
+          "y": 0,
+          "palette": "PAL0"
         },
         {
           "type": "sprite",
@@ -97,7 +100,8 @@
           "animationId": "default",
           "flipX": false,
           "flipY": false,
-          "visible": true
+          "visible": true,
+          "palette": "PAL1"
         },
         {
           "type": "audio",

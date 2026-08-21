@@ -23,7 +23,7 @@ builder は hook-only です。`manifest.json` の `generator` は `false` で�
 - PCE JSON v2の18種（BG、Sprite、Sprite Move、Message、Variable、Choice、IF、Switch、Label、GOTO、Input、Jump、Wait、Cache、Audio、Effect、SpriteText、Comment）をCommandパレットまたはドラッグ&ドロップで追加できます。カードは1始まり番号、カテゴリ色、Skip、検索、並べ替え、コピー、前後貼り付け、削除を備えます。
 - 選択Commandは型別GUIで編集し、Scene単位でGUI/JSONを切り替えられます。JSONは選択Sceneのraw objectを表示し、`Scene JSONを適用`でsyntax、ID重複、ID形式、commands型/件数を検証して明示適用します。未適用JSONがある状態でGUI、Scene、tab、Preview、保存へ移動すると、適用・破棄・キャンセルを選びます。既知fieldだけをGUIからpatchするため、未知fieldは保持されます。未知commandはJSON専用で保持・編集し、既知commandへの型変更はその型の既定値で作り直します。
 - Undo/Redoは100段、Command clipboardは同じproject内で利用できます。`Ctrl+S`で保存、`Ctrl+Z`でUndo、`Ctrl+Y`または`Ctrl+Shift+Z`でRedoします。
-- `System`はPCE互換のmessage速度・AUTO初期値・auto waitとMD target設定を分離して表示します。`Font`は同梱Misakiまたはprojectへ登録したTTF/OTF/TTCを選択し、size 8..32、threshold 1..254、x/y offset -8..8、preview textを調整して、固定16x16のindexed bitmapを生成します。使用glyphはspeaker、本文、choice、SpriteText、固定記号のsubsetです。`Assets`はbindingとtile/sprite/audio容量、`診断`tabはpath付きwarning/errorを表示します。
+- `System`はPCE互換のmessage速度・AUTO初期値・auto waitとMD target設定を分離して表示します。`Font`は既定の同梱`JF-Dot-Shinonome16.ttf`（size 16、threshold 190）またはprojectへ登録したTTF/OTF/TTCを選択し、size 8..32、threshold 1..254、x/y offset -8..8、preview textを調整して、固定16x16のindexed bitmapを生成します。使用glyphはspeaker、本文、choice、SpriteText、固定記号のsubsetです。`Assets`はbinding、使用PAL、ordered RGB333 swatch、palette品質、tile/sprite/audio容量を表示し、同じprofileの画像を明示的なpalette groupとして「共同減色して保存」できます。`診断`tabはpath付きwarning/errorを表示します。
 
 右側のCommand Previewは選択Commandまでを評価した表示です。`Preview`は選択Sceneの先頭から動く別ウィンドウを開き、message、choice、変数、label分岐、scene遷移、待機、入力、AUTO、Sprite Move、PSG previewを同じscript interpreterで再生します。`最初から`、早送り、runtime/変数/sprite/budget Debugを備え、100,000 commandを超える無限ループは停止して診断します。入力は方向key、Z=I/B、X=II/C、Enter=RUN/START、A=SELECT/AUTOです。
 
@@ -39,6 +39,7 @@ assets/fonts/                      登録したproject-local TTF/OTF/TTC
 data/md-novel/target-profile.json  MD表示・音声・入力・budget設定
 data/md-novel/asset-bindings.json  assetId → MD resource binding
 data/md-novel/transaction.json     複数documentのcommit hash
+res/novel/font/JF-Dot-Shinonome16.ttf  既定font本体（付属license文書と同伴）
 res/novel/font/generated.png       使用glyphだけの16x16 indexed atlas
 res/novel/                         MD向け変換済みPNG/VGM/WAV
 res/novel.res                      builder生成ResComp定義
@@ -47,7 +48,7 @@ src/generated/novel_data.c         builder生成scene/resource table
 src/novel_runtime/                 builder所有SGDK runtime
 ```
 
-scene JSON は parsed object を丸ごと保持し、既知fieldだけをUIで変更します。未知のroot/scene/command fieldは保存時に落としません。MD固有fieldをscene JSONへ注入せず、target profileとbindingへ分離します。
+scene JSON は parsed object を丸ごと保持し、既知fieldだけをUIで変更します。未知のroot/scene/command fieldは保存時に落としません。今回のscript拡張として`background.palette`と`sprite.palette`だけを任意fieldで保持し、値は`PAL0`～`PAL3`です。field未指定はAuto（従来互換）として読みます。変換profile、ordered palette、fingerprint、品質、groupなどMD固有の物理情報はsceneへ混ぜず、target profileとbindingへ分離します。
 
 各documentはstable SHA-256 revisionを持ちます。保存はbase revisionを照合し、temp fileの`fsync`、backup、atomic renameを行います。transaction manifestのhashが一致しないprojectは保存・ビルドを停止します。絶対path、`..`、symlink/junction escape、危険なJSON key、過大JSON、過深nestingも拒否します。
 
@@ -59,7 +60,7 @@ scene JSON は parsed object を丸ごと保持し、既知fieldだけをUIで�
 4. 取込後に`診断`と`Assets`を確認し、`保存`します。
 5. `Build`または`Test Play`を実行します。
 
-importは元projectのscene/catalogを先に検証し、参照中assetだけを変換します。画像は元source PNGをMD RGB333 / indexed 16色へ再変換し、PCE generated 4bpp binaryは使用しません。立ち絵は`sp_<group>_*`のgroup単位でPAL2/PAL3へ決定的に分け、同じbank内は共同量子化します。PSGは実際に参照された`(assetId, channel)` variantだけを生成します。
+importは元projectのscene/catalogを先に検証し、参照中assetだけを変換します。既定fontは`JF-Dot-Shinonome16.ttf`、size 16、threshold 190で生成済みにするため、取込直後から画面操作なしでBuildできます。画像は元source PNGをMD RGB333 / indexed 16色へ再変換し、PCE generated 4bpp binaryは使用しません。PCE取込では既存のpalette fieldを固定規則で上書きし、BGをPAL0、sprite slot 0をPAL1、slot 1をPAL2、slot 2/3をPAL3へ割り当てます。各画像は独立に減色し、自動group化しません。同じPALへ同時表示してfingerprintが衝突するprojectも取込自体は完了して診断を表示しますが、Buildは停止します。必要な画像だけAssets tabで明示的に共同減色してください。PSGは実際に参照された`(assetId, channel)` variantだけを生成します。
 
 再importは自動監視ではありません。外部変更を取り込む前に未保存編集を保存し、明示的に再importしてください。
 
@@ -69,8 +70,8 @@ top-levelは`version`、`settings`、`startScene`、`scenes`です。sceneは`id
 
 | command | MD runtime |
 |---|---|
-| `background` | BG_Bへ表示。`transition: fade`はfadeOut/転送/fadeInを同期実行 |
-| `sprite` | 4 logical slotをSGDK Sprite Engineで保持。表示、反転、animationを反映 |
+| `background` | BG_Bへ表示。任意の`palette`（PAL0～PAL3）を読込み、`transition: fade`はfadeOut/転送/fadeInを同期実行 |
+| `sprite` | 4 logical slotをSGDK Sprite Engineで保持。任意の`palette`（PAL0～PAL3）、表示、反転、animationを反映 |
 | `spritemove` | 0..65535 frame、sync/async、animation切替を反映 |
 | `message` | speaker 1行 + 本文19列×4行。1押下目で全文、2押下目で次page/command |
 | `audio` | PSG songをXGM2、PSG SFXをXGM2 PCM CH2で再生。stop targetを保持 |
@@ -98,15 +99,24 @@ scene数は最大255、1 sceneのruntime commandは最大255、変数は予約�
 - BG_B=背景、BG_A=SpriteText overlay、WINDOW=会話/選択肢
 - WINDOWは下96px。16x16 glyph、speaker 1行、本文19列×4行、1page 75 cell
 - choice labelはJSON上24文字まで保持し、MD windowは先頭17文字を表示してwarning
-- PAL0=WINDOW/font/BG_A、PAL1=背景、PAL2/PAL3=立ち絵2系統
-- Unicode JSONを正本にし、build時にShift-JISへround-trip検査変換。同梱Misaki Gothic 8x8または登録fontを16x16 cellへrasterizeし、使用glyphだけVRAMへ転送
-- 登録fontはcontent hashで重複排除し、`cmap` format 4/12で全runtime文字の実在を検査します。壊れたfont、未収録glyph、未生成/stale atlas、PNG hash不一致はhard errorです。active fontを削除するときは先に同梱Misakiへ切替・再生成・保存してからproject copyだけを削除します
+- PAL0～PAL3はBG/Sprite Commandごとに選択可能。PAL0だけindex 0=黒、index 1=白をsystem色として予約し、WINDOW/font/BG_A文字も共有
+- 新規CommandはBG=PAL0、sprite slot 0=PAL1、slot 1=PAL2、slot 2/3=PAL3。palette未指定の既存JSONはAutoとして従来binding/fallback（BG=PAL1、Sprite=PAL2）を維持
+- Unicode JSONを正本にし、build時にShift-JISへround-trip検査変換。既定の同梱`JF-Dot-Shinonome16.ttf`（16px、threshold 190）または登録fontを16x16 cellへrasterizeし、使用glyphだけVRAMへ転送
+- 登録fontはcontent hashで重複排除し、`cmap` format 4/12で全runtime文字の実在を検査します。壊れたfont、未収録glyph、未生成/stale atlas、PNG hash不一致はhard errorです。active fontを削除するときは先に同梱`JF-Dot-Shinonome16.ttf`へ切替・再生成・保存してからproject copyだけを削除します。既定TTFと原配布物のREADME／東雲LICENSEはprojectへ同伴します
 
 SpriteTextはPCEの1文字1hardware spriteを再現しません。H40 scanline上限を避けるため、BG_Aのdirty tile compositorへ描画します。1px座標を保持するため1文字が最大9 tileへ触れます。WINDOW領域ではWINDOWがBG_Aを隠します。
 
 ## 画像・palette・VRAM制約
 
-画像は8px境界のindexed PNG、1 palette bankあたり透明index 0を含む16色です。preflightは`startScene`からscene/command PC単位の到達可能状態を探索し、label/goto/if/switch、choice/jump/nextScene、sync/async input watcher、終了後のstartScene再開を含めて、runtimeで実際に持続し得る背景・立ち絵・SpriteText・WINDOWだけを合算します。
+画像は8px境界のindexed PNGです。PAL0 profileはindex 0を黒、index 1を白へ固定し、残り14色を画像からCIEDE2000評価付きで選びます。PAL0のSpriteはindex 0を透明に使うため、可視黒は予約できず最も近い暗色へ写像します。PAL1～PAL3 profileはBGが16色、Spriteが透明index 0 + 15色です。減色後はすべてMD RGB333へsnapし、ordered 16色paletteのfingerprintをbindingへ保存します。平均ΔEが8超またはp95が20超なら画質warningです。
+
+同じ物理PALへ同時表示する画像はordered palette fingerprintが完全一致しなければBuild errorです。scene遷移など時間的に重ならない画像は同じPALを再利用できます。同じassetをPAL0とPAL1～PAL3の両profileで使うことはできないため、別assetへ複製します。`paletteGroup`は同じprofileの画像だけを共同減色する明示操作で、PAL0-reservedとgeneralの混在は拒否します。profile変更後の単体画像は保存時に再変換しますが、groupの再変換は画質が連動するため「共同減色して保存」でだけ実行します。Buildは画像を変更せず、stale conversionをerrorにします。
+
+RuntimeはBG/Sprite表示時に対象resourceのpaletteを指定PALへ読み込み、同じfingerprintならDMAを省略します。hide/replace時は論理ownerを解放し、Sprite Move中は割当を維持します。Previewもindexed pixelと物理PALの最終loadを使って再着色し、同時衝突を赤枠で表示します。
+
+PAL0のmessage/choice/SpriteTextはindex 1を共有します。通常は白へ復元し、`message.textColor`指定中だけindex 1を書き換え、message終了時に白へ戻します。非白messageがPAL0画像のindex 1または可視SpriteTextと重なる場合は、画像やSpriteTextを変色させないため、そのmessageだけ白で描画してwarningを出します。元の`message.textColor`はJSONに保持されます。`spritetext.color`もJSON互換のため保持しますがMD runtimeでは無視し、PAL0 index 1を使うwarningを出します。
+
+preflightは`startScene`からscene/command PC単位の到達可能状態を探索し、label/goto/if/switch、choice/jump/nextScene、sync/async input watcher、終了後のstartScene再開を含めて、runtimeで実際に持続し得る背景・立ち絵・SpriteText・WINDOWだけを合算します。
 
 | gate | hard limit |
 |---|---:|
@@ -153,7 +163,7 @@ src/novel_runtime/novel_runtime.c
 src/generated/novel_data.c
 ```
 
-`src/boot/rom_head.c`と`sega.s`は通常Cソースへ混入させません。`onBuildStart`が`{ok:false}`を返すかthrow/rejectした場合、hostはSGDKを開始せず、`onBuildError`と失敗`build-end`を1回だけ通知します。
+`src/boot/rom_head.c`と`sega.s`は通常Cソースへ混入させません。生成ABI 3では`NovelCommand.count`へBG/Spriteのpalette index（0～3）を格納し、resourceごとのordered palette fingerprint IDを`novelDataBackgroundPaletteId()` / `novelDataSpritePaletteId()`でruntimeへ渡します。`onBuildStart`が`{ok:false}`を返すかthrow/rejectした場合、hostはSGDKを開始せず、`onBuildError`と失敗`build-end`を1回だけ通知します。
 
 通常の`Build`は従来どおり`clean release`です。`Test Play`だけ`skipClean`を要求し、前回Build成功manifest、ROM、全object、生成物、toolchain、`SRC_C`、runtime ABI、font format、ResComp契約のhashが一致した場合に限って`clean`を省略して`make release`の依存判定を使います。scene/font/asset変更時は内容が変わった生成物だけmtimeを更新するため、その依存objectだけが再生成されます。
 

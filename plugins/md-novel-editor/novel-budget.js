@@ -11,6 +11,7 @@ function emptyBudget(diagnostics = []) {
     maxOverlayTiles: 0,
     maxBudget: 0,
     states: 0,
+    messageColorFallbacks: [],
     diagnostics,
   };
 }

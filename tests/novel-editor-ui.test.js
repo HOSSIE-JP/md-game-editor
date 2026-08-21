@@ -18,6 +18,9 @@ test('PCE型Script UIは18 command、階層Scene、参照renameを提供する',
     'background', 'sprite', 'spritemove', 'message', 'variable', 'choice', 'if', 'switch',
     'label', 'goto', 'inputcheck', 'jump', 'wait', 'cache', 'audio', 'effect', 'spritetext', 'comment',
   ]);
+  assert.equal(ui.defaultCommand('background').palette, 'PAL0');
+  assert.equal(ui.defaultCommand('sprite').palette, 'PAL1');
+  assert.match(ui.renderCommandFields({ type: 'background', assetId: 'bg', palette: 'PAL3' }, { catalog: { assets: [] } }), /name="palette"/);
   const scenes = [
     { id: 'intro', name: '第01話/オープニング', commands: [] },
     { id: 'branch', name: '第01話/分岐/選択1', commands: [] },
@@ -64,6 +67,67 @@ test('inline previewはSkip aliasとFull BGのmessage/choice禁止を維持す�
   assert.equal(state.choice, null);
 });
 
+test('physical palette preview applies last-loaded colors and reports conflicts', async () => {
+  const { physicalPaletteFrame } = await importEditorModule('rendering.mjs');
+  const red = Array.from({ length: 16 }, () => [0, 0, 0]);
+  const green = Array.from({ length: 16 }, () => [0, 0, 0]);
+  red[2] = [255, 0, 0];
+  green[2] = [0, 255, 0];
+  const bindings = { assets: {
+    bg: { paletteFingerprint: 'red', paletteRgb333: red },
+    actor: { paletteFingerprint: 'green', paletteRgb333: green },
+  } };
+  const physical = physicalPaletteFrame({
+    background: { type: 'background', assetId: 'bg', palette: 'PAL2', _paletteLoadOrder: 1 },
+    sprites: [{ type: 'sprite', assetId: 'actor', palette: 'PAL2', _paletteLoadOrder: 2, visible: true }],
+    spriteTexts: [],
+  }, bindings);
+  assert.deepEqual(physical.palettes.PAL2[2], [0, 255, 0]);
+  assert.deepEqual(physical.conflicts[0].assetIds, ['bg', 'actor']);
+  assert.equal(physical.conflicts[0].lastAssetId, 'actor');
+
+  bindings.assets.actor.paletteFingerprint = 'red';
+  bindings.assets.actor.paletteRgb333 = red;
+  const shared = physicalPaletteFrame({
+    background: { type: 'background', assetId: 'bg', palette: 'PAL2', _paletteLoadOrder: 1 },
+    sprites: [{ type: 'sprite', assetId: 'actor', palette: 'PAL2', _paletteLoadOrder: 2, visible: true }],
+  }, bindings);
+  assert.equal(shared.conflicts.length, 0);
+  const message = physicalPaletteFrame({ message: { textColor: '#ff0000' } }, { assets: {} });
+  assert.deepEqual(message.palettes.PAL0[0], [0, 0, 0]);
+  assert.deepEqual(message.palettes.PAL0[1], [255, 0, 0]);
+  assert.equal(message.messageColorFallback, null);
+
+  bindings.assets.bg.metadata = { usesPaletteIndex1: true };
+  const occupiedMessage = physicalPaletteFrame({
+    background: { type: 'background', assetId: 'bg', palette: 'PAL0' },
+    sprites: [],
+    spriteTexts: [],
+    message: { textColor: '#ff0000' },
+  }, bindings);
+  assert.deepEqual(occupiedMessage.palettes.PAL0[1], [255, 255, 255]);
+  assert.deepEqual(occupiedMessage.messageColorFallback?.assetIds, ['bg']);
+
+  const overlayMessage = physicalPaletteFrame({
+    spriteTexts: [{ text: 'overlay', visible: true }],
+    message: { textColor: '#ff0000' },
+  }, { assets: {} });
+  assert.deepEqual(overlayMessage.palettes.PAL0[1], [255, 255, 255]);
+  assert.equal(overlayMessage.messageColorFallback?.spriteTextVisible, true);
+});
+
+test('Assets UI exposes palette swatches, usage, and explicit joint quantization', async () => {
+  const { assetsHtml } = await importEditorModule('editor-render.mjs');
+  const palette = Array.from({ length: 16 }, (_, index) => [index * 17, 0, 0]);
+  const html = assetsHtml({
+    assets: { actor: { assetId: 'actor', runtimeType: 'SPRITE', sourcePath: 'actor.png', paletteRgb333: palette, paletteGroup: 'cast', conversion: { paletteProfile: 'general' }, metadata: { quality: { meanDeltaE: 2, p95DeltaE: 4 } } } },
+    paletteGroups: { cast: { id: 'cast', members: ['actor'], profile: 'general', paletteRgb333: palette, paletteFingerprint: 'abc', quality: {} } },
+  }, { scenes: [{ commands: [{ type: 'sprite', slot: 0, assetId: 'actor', palette: 'PAL3' }] }] });
+  assert.match(html, /共同減色して保存/);
+  assert.match(html, /mn-palette-swatches/);
+  assert.match(html, /PAL3/);
+  assert.match(html, /data-group-id="cast"/);
+});
 test('full preview interpreterは分岐、Scene遷移、sprite持続、入力待ちを再現する', async () => {
   const { createScriptRuntime } = await importEditorModule('preview-runtime.mjs');
   const document = {
@@ -170,6 +234,9 @@ test('renderer entryはPCE型3ペインv2 UIを有効化する', () => {
   assert.match(app, /importMdNovelFont/);
   assert.match(app, /commitMdNovelFontGeneration/);
   assert.match(fontUi, /ビットマップフォント生成/);
+  assert.match(fontUi, /JF-Dot-Shinonome16\.ttf/);
+  assert.match(fontUi, /しきい値190/);
+  assert.match(app, /DEFAULT_FONT_THRESHOLD = 190/);
   assert.match(css, /min-width:1280px/);
   assert.match(css, /mn-command-actions button \{ flex:0 0 28px; width:28px; height:28px/);
   assert.match(css, /mn-command-actions button \{[^}]*display:grid; place-items:center/);

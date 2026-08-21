@@ -51,12 +51,14 @@ function initialVariables(document) {
   return { AUTO_ENABLE: auto, MSG_SPEED: 0 };
 }
 
-function runtimeSprite(command, previous) {
+function runtimeSprite(command, previous, paletteLoadOrder) {
   if (command.visible === false || !command.assetId) return null;
   return {
     ...(previous || {}),
     assetId: String(command.assetId || previous?.assetId || ''),
     animationId: String(command.animationId || previous?.animationId || 'default'),
+    palette: String(command.palette || previous?.palette || ''),
+    _paletteLoadOrder: paletteLoadOrder,
     x: integer(command.x),
     y: integer(command.y),
     flipX: Boolean(command.flipX),
@@ -79,7 +81,7 @@ export function createScriptRuntime(document, options = {}) {
     sprites: [null, null, null, null], spriteTexts: [null, null, null, null],
     message: null, choice: null, choiceIndex: 0, waiting: null, watchers: [],
     variables: initialVariables(source), audio: { bgm: null, sfx: null }, effect: null,
-    stopped: false, error: null, fastForward: false, executed: 0,
+    stopped: false, error: null, fastForward: false, executed: 0, paletteLoadSequence: 0,
   };
 
   function emit(type, detail = {}) {
@@ -178,10 +180,10 @@ export function createScriptRuntime(document, options = {}) {
       if (!command || isSkipped(command) || command.type === 'comment') { state.pc += 1; continue; }
       const advancePc = () => { state.pc += 1; };
       switch (command.type) {
-        case 'background': state.background = clone(command); state.message = null; state.choice = null; emit('background', { command }); advancePc(); break;
+        case 'background': state.background = { ...clone(command), _paletteLoadOrder: ++state.paletteLoadSequence }; state.message = null; state.choice = null; emit('background', { command }); advancePc(); break;
         case 'sprite': {
           const slot = Math.max(0, Math.min(3, integer(command.slot)));
-          state.sprites[slot] = runtimeSprite(command, state.sprites[slot]);
+          state.sprites[slot] = runtimeSprite(command, state.sprites[slot], ++state.paletteLoadSequence);
           emit('sprite', { slot, command }); advancePc(); break;
         }
         case 'spritemove': {
@@ -348,7 +350,7 @@ export function createScriptRuntime(document, options = {}) {
       sprites: [null, null, null, null], spriteTexts: [null, null, null, null],
       message: null, choice: null, choiceIndex: 0, waiting: null, watchers: [],
       variables: initialVariables(source), audio: { bgm: null, sfx: null }, effect: null,
-      stopped: false, error: null, executed: 0,
+      stopped: false, error: null, executed: 0, paletteLoadSequence: 0,
     });
     events.length = 0;
     setScene(sceneId, 'restart');

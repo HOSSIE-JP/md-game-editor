@@ -10,6 +10,8 @@ const {
   hashDocument,
   isSkippedCommand,
   sanitizeSymbol,
+  paletteIndex,
+  resolveCommandPalette,
   validateSceneDocument,
 } = require('../md-novel-editor/novel-schema');
 
@@ -246,9 +248,10 @@ function collectVariableTable(sceneDocument) {
   }
   return { names, index, initialValues };
 }
-function compileScenes(sceneDocument, catalog, bindings, resources, pool, warnings, variables) {
+function compileScenes(sceneDocument, catalog, bindings, resources, pool, warnings, variables, options = {}) {
   const ids = sceneIdMap(sceneDocument);
   const catalogInfo = collectCatalog(catalog);
+  const messageColorFallbacks = new Set(options.messageColorFallbacks || []);
   const messages = [];
   const textCommands = [];
   const choices = [];
@@ -273,6 +276,8 @@ function compileScenes(sceneDocument, catalog, bindings, resources, pool, warnin
       if (command.type === 'background') {
         target = resources.bgIndex.get(String(command.assetId));
         if (target == null) throw new Error(`Missing background binding: ${command.assetId}`);
+        count = paletteIndex(resolveCommandPalette(command, bindings.assets?.[String(command.assetId)]));
+        if (count < 0) throw new Error('Invalid background palette: ' + command.palette);
         if (command.transition === 'fade') flags = 'NOV_FLAG_FADE';
         frames = clamp(command.fadeOutFrames, 0, 65535, 0);
         aux = String(clamp(command.fadeInFrames, 0, 65535, 0));
@@ -280,6 +285,8 @@ function compileScenes(sceneDocument, catalog, bindings, resources, pool, warnin
         flags = `${command.visible === false ? '0' : 'NOV_FLAG_VISIBLE'}${command.flipX ? ' | NOV_FLAG_FLIP_X' : ''}${command.flipY ? ' | NOV_FLAG_FLIP_Y' : ''}`;
         target = command.assetId ? resources.spriteIndex.get(String(command.assetId)) : -1;
         if (command.assetId && target == null) throw new Error(`Missing sprite binding: ${command.assetId}`);
+        count = paletteIndex(resolveCommandPalette(command, bindings.assets?.[String(command.assetId)]));
+        if (count < 0) throw new Error('Invalid sprite palette: ' + command.palette);
         if (command.visible === false) {
           target = -1;
           slotSpriteAssets[slot] = null;
@@ -308,7 +315,8 @@ function compileScenes(sceneDocument, catalog, bindings, resources, pool, warnin
         const speaker = pool.add(command.speaker || '', `scene ${scene.id} speaker ${commandIndex}`);
         const symbol = `nov_message_${messages.length}`;
         const array = `${symbol}_pages`;
-        messages.push({ symbol, array, pageSymbols, speaker, color: mdColor(command.textColor), mouthSlot: command.mouthSlot == null ? -1 : clamp(command.mouthSlot, 0, 3, 0) });
+        const textColor = messageColorFallbacks.has(`${sceneIndex}:${commandIndex}`) ? '#ffffff' : command.textColor;
+        messages.push({ symbol, array, pageSymbols, speaker, color: mdColor(textColor), mouthSlot: command.mouthSlot == null ? -1 : clamp(command.mouthSlot, 0, 3, 0) });
         data = `&${symbol}`;
       } else if (command.type === 'spritetext') {
         let value = String(command.text || '');
@@ -403,7 +411,7 @@ function compileScenes(sceneDocument, catalog, bindings, resources, pool, warnin
   return { compiled, messages, textCommands, choices, switches, startScene: ids.get(String(sceneDocument.startScene)) ?? 0 };
 }
 function dataHeader() {
-  return `#ifndef MD_NOVEL_GENERATED_DATA_H\n#define MD_NOVEL_GENERATED_DATA_H\n\n#include "novel_runtime/novel_runtime.h"\n\nextern const NovelProject gNovelProject;\nconst Image* novelDataBackground(u16 index);\nconst SpriteDefinition* novelDataSprite(u16 index);\nu16 novelDataSpritePalette(u16 index);\nvoid novelDataPlayBgm(u16 index);\nvoid novelDataPlaySfx(u16 index);\n\n#endif\n`;
+  return `#ifndef MD_NOVEL_GENERATED_DATA_H\n#define MD_NOVEL_GENERATED_DATA_H\n\n#include "novel_runtime/novel_runtime.h"\n\nextern const NovelProject gNovelProject;\nconst Image* novelDataBackground(u16 index);\nconst SpriteDefinition* novelDataSprite(u16 index);\nu16 novelDataBackgroundPaletteId(u16 index);\nu16 novelDataSpritePaletteId(u16 index);\nvoid novelDataPlayBgm(u16 index);\nvoid novelDataPlaySfx(u16 index);\n\n#endif\n`;
 }
 
 function generateDataSource(resources, compiled, pool, settings, profile, budget, variables, fontPlan) {
@@ -421,10 +429,13 @@ function generateDataSource(resources, compiled, pool, settings, profile, budget
   const initialVariables = `static const s16 nov_initial_variables[] = { ${variables.initialValues.join(', ')} };\nconst u16 nov_font_codes[] = { ${fontPlan.entries.map((entry) => `0x${Number(entry.code).toString(16).padStart(4, '0')}`).join(', ')} };\nconst u16 nov_font_glyph_count = ${fontPlan.entries.length};`;
   const bgSwitch = resources.backgrounds.map((entry, index) => `        case ${index}: return &${entry.symbol};`).join('\n');
   const sprSwitch = resources.sprites.map((entry, index) => `        case ${index}: return &${entry.symbol};`).join('\n');
-  const palSwitch = resources.sprites.map((entry, index) => `        case ${index}: return ${entry.palette === 'PAL3' ? 'PAL3' : 'PAL2'};`).join('\n');
+  const paletteFingerprints = [...new Set([...resources.backgrounds, ...resources.sprites].map((entry) => String(entry.paletteFingerprint || entry.assetId)))].sort();
+  const paletteId = (entry) => Math.max(1, paletteFingerprints.indexOf(String(entry.paletteFingerprint || entry.assetId)) + 1);
+  const bgPalIdSwitch = resources.backgrounds.map((entry, index) => '        case ' + index + ': return ' + paletteId(entry) + ';').join('\n');
+  const sprPalIdSwitch = resources.sprites.map((entry, index) => '        case ' + index + ': return ' + paletteId(entry) + ';').join('\n');
   const bgmSwitch = resources.bgm.map((entry, index) => `        case ${index}: XGM2_setLoopNumber(-1); XGM2_play(${entry.symbol}); break;`).join('\n');
   const sfxSwitch = resources.sfx.map((entry, index) => `        case ${index}: XGM2_stopPCM(SOUND_PCM_CH2); XGM2_playPCMEx(${entry.symbol}, sizeof(${entry.symbol}), SOUND_PCM_CH2, 6, TRUE, FALSE); break;`).join('\n');
-  return `#include <genesis.h>\n#include "novel.h"\n#include "generated/novel_data.h"\n\n${pool.source()}\n\n${messageSource}\n${textSource}\n${choiceSource}\n${switchSource}\n${initialVariables}\n\n${sceneSource}\n\nstatic const NovelScene nov_scenes[] = {\n${projectScenes}\n};\n\nconst NovelProject gNovelProject = { nov_scenes, ${compiled.compiled.length}, ${compiled.startScene}, ${clamp(settings.messageSpeedFrames, 0, 50, 10)}, ${settings.messageAdvanceMode === 'auto' ? 'TRUE' : 'FALSE'}, ${clamp(settings.messageAutoWaitFrames, 0, 255, 60)}, ${Math.max(1, budget.maxSpriteTiles)}, ${budget.maxOverlayTiles}, ${profile.coordinateMode === 'pce-legacy-256' ? 'TRUE' : 'FALSE'}, nov_initial_variables, ${variables.names.length} };\n\nconst Image* novelDataBackground(u16 index)\n{\n    switch (index)\n    {\n${bgSwitch}\n        default: return NULL;\n    }\n}\n\nconst SpriteDefinition* novelDataSprite(u16 index)\n{\n    switch (index)\n    {\n${sprSwitch}\n        default: return NULL;\n    }\n}\n\nu16 novelDataSpritePalette(u16 index)\n{\n    switch (index)\n    {\n${palSwitch}\n        default: return PAL2;\n    }\n}\n\nvoid novelDataPlayBgm(u16 index)\n{\n    switch (index)\n    {\n${bgmSwitch}\n        default: break;\n    }\n}\n\nvoid novelDataPlaySfx(u16 index)\n{\n    switch (index)\n    {\n${sfxSwitch}\n        default: break;\n    }\n}\n`;
+  return `#include <genesis.h>\n#include "novel.h"\n#include "generated/novel_data.h"\n\n${pool.source()}\n\n${messageSource}\n${textSource}\n${choiceSource}\n${switchSource}\n${initialVariables}\n\n${sceneSource}\n\nstatic const NovelScene nov_scenes[] = {\n${projectScenes}\n};\n\nconst NovelProject gNovelProject = { nov_scenes, ${compiled.compiled.length}, ${compiled.startScene}, ${clamp(settings.messageSpeedFrames, 0, 50, 10)}, ${settings.messageAdvanceMode === 'auto' ? 'TRUE' : 'FALSE'}, ${clamp(settings.messageAutoWaitFrames, 0, 255, 60)}, ${Math.max(1, budget.maxSpriteTiles)}, ${budget.maxOverlayTiles}, ${profile.coordinateMode === 'pce-legacy-256' ? 'TRUE' : 'FALSE'}, nov_initial_variables, ${variables.names.length} };\n\nconst Image* novelDataBackground(u16 index)\n{\n    switch (index)\n    {\n${bgSwitch}\n        default: return NULL;\n    }\n}\n\nconst SpriteDefinition* novelDataSprite(u16 index)\n{\n    switch (index)\n    {\n${sprSwitch}\n        default: return NULL;\n    }\n}\n\nu16 novelDataBackgroundPaletteId(u16 index)\n{\n    switch (index)\n    {\n${bgPalIdSwitch}\n        default: return 0xFFFF;\n    }\n}\n\nu16 novelDataSpritePaletteId(u16 index)\n{\n    switch (index)\n    {\n${sprPalIdSwitch}\n        default: return 0xFFFF;\n    }\n}\n\nvoid novelDataPlayBgm(u16 index)\n{\n    switch (index)\n    {\n${bgmSwitch}\n        default: break;\n    }\n}\n\nvoid novelDataPlaySfx(u16 index)\n{\n    switch (index)\n    {\n${sfxSwitch}\n        default: break;\n    }\n}\n`;
 }
 const NOVEL_WINDOW_VRAM_TILES = 381;
 const NOVEL_OVERLAY_MAX_TILES = 192;
@@ -440,7 +451,9 @@ function cloneVisualState(state) {
     sceneIndex: state.sceneIndex,
     pc: state.pc,
     backgroundTiles: state.backgroundTiles,
+    background: state.background ? { ...state.background } : null,
     windowVisible: state.windowVisible,
+    messageColor: state.messageColor || '',
     slots: state.slots.map((slot) => slot ? { ...slot } : null),
     spriteTexts: state.spriteTexts.map((entry) => entry ? { ...entry } : null),
     watchers: state.watchers.map((watcher) => ({ ...watcher })),
@@ -452,8 +465,10 @@ function visualStateKey(state) {
     state.sceneIndex,
     state.pc,
     state.backgroundTiles,
+    state.background ? [state.background.assetId, state.background.palette, state.background.paletteFingerprint] : null,
     state.windowVisible ? 1 : 0,
-    state.slots.map((slot) => slot ? [slot.assetId, slot.x, slot.yMin, slot.yMax] : null),
+    state.messageColor || '',
+    state.slots.map((slot) => slot ? [slot.assetId, slot.palette, slot.paletteFingerprint, slot.x, slot.yMin, slot.yMax] : null),
     state.spriteTexts.map((entry) => entry ? [entry.text, entry.x, entry.y] : null),
     state.watchers.map((watcher) => [watcher.mask, watcher.targetPc]),
   ]);
@@ -465,12 +480,12 @@ function enterVisualScene(state, sceneIndex, scenes) {
   entered.sceneIndex = sceneIndex;
   entered.pc = 0;
   entered.windowVisible = false;
+  entered.messageColor = '';
   entered.spriteTexts = [null, null, null, null];
   entered.watchers = [];
   if (scenes[sceneIndex].scene.fullScreenBg) entered.slots = [null, null, null, null];
   return entered;
 }
-
 function updateAsyncWatchers(watchers, mask, targetPc) {
   if (mask === 0) return watchers.map((watcher) => ({ ...watcher }));
   const updated = [];
@@ -518,6 +533,7 @@ function spriteTextTileCells(spriteTexts) {
 
 function visibleBudget(sceneDocument, bindings) {
   const diagnostics = [];
+  const messageColorFallbacks = new Set();
   const rawScenes = Array.isArray(sceneDocument.scenes) ? sceneDocument.scenes : [];
   if (!rawScenes.length) {
     return {
@@ -528,6 +544,7 @@ function visibleBudget(sceneDocument, bindings) {
       maxOverlayTiles: 0,
       maxBudget: 0,
       states: 0,
+      messageColorFallbacks: [],
       diagnostics,
     };
   }
@@ -540,11 +557,69 @@ function visibleBudget(sceneDocument, bindings) {
   let maxScanlinePieces = 0;
   let maxScanlinePixels = 0;
 
+  const paletteDiagnosticKeys = new Set();
+  const recordPaletteDiagnostic = (entry, state, keySuffix) => {
+    const key = `${entry.code}:${state.sceneIndex}:${keySuffix}`;
+    if (paletteDiagnosticKeys.has(key)) return;
+    paletteDiagnosticKeys.add(key);
+    diagnostics.push({
+      ...entry,
+      sceneId: String(rawScenes[state.sceneIndex]?.id || ''),
+      commandIndex: Math.max(0, state.pc - 1),
+    });
+  };
   const measure = (state) => {
     const metas = state.slots.filter(Boolean).map((slot) => ({
       ...slot,
       ...(bindings.assets?.[slot.assetId]?.metadata || {}),
     }));
+    const owners = [];
+    if (state.background) owners.push({ type: 'background', ...state.background });
+    for (let slot = 0; slot < state.slots.length; slot += 1) {
+      if (state.slots[slot]) owners.push({ type: 'sprite', slot, ...state.slots[slot] });
+    }
+    const ownersByPalette = new Map();
+    for (const owner of owners) {
+      const list = ownersByPalette.get(owner.palette) || [];
+      list.push(owner);
+      ownersByPalette.set(owner.palette, list);
+    }
+    for (const [palette, paletteOwners] of ownersByPalette) {
+      const fingerprints = [...new Set(paletteOwners.map((owner) => String(owner.paletteFingerprint || owner.assetId)))];
+      if (fingerprints.length > 1) {
+        const assetIds = [...new Set(paletteOwners.map((owner) => owner.assetId))].sort();
+        recordPaletteDiagnostic({
+          severity: 'error',
+          code: 'palette-runtime-conflict',
+          palette,
+          assetIds,
+          message: `${palette} is occupied by incompatible visible palettes (${assetIds.join(', ')}). Jointly quantize the assets into one palette group or assign different palette IDs.`,
+        }, state, `${palette}:${fingerprints.sort().join(',')}`);
+      }
+    }
+    if (state.messageColor && mdColor(state.messageColor) !== 0x0eee) {
+      const indexOneOwners = (ownersByPalette.get('PAL0') || []).filter((owner) => owner.usesPaletteIndex1);
+      if (indexOneOwners.length) {
+        const assetIds = [...new Set(indexOneOwners.map((owner) => owner.assetId))].sort();
+        messageColorFallbacks.add(`${state.sceneIndex}:${Math.max(0, state.pc - 1)}`);
+        recordPaletteDiagnostic({
+          severity: 'warning',
+          code: 'pal0-message-index1-conflict',
+          palette: 'PAL0',
+          assetIds,
+          message: `Non-white message text is rendered white because visible PAL0 assets use index 1 (${assetIds.join(', ')}). The source textColor is preserved.`,
+        }, state, assetIds.join(','));
+      }
+      if (state.spriteTexts.some(Boolean)) {
+        messageColorFallbacks.add(`${state.sceneIndex}:${Math.max(0, state.pc - 1)}`);
+        recordPaletteDiagnostic({
+          severity: 'warning',
+          code: 'pal0-message-spritetext-conflict',
+          palette: 'PAL0',
+          message: 'Non-white message text is rendered white because visible SpriteText shares PAL0 index 1. The source textColor is preserved.',
+        }, state, 'spritetext');
+      }
+    }
     const spriteTiles = metas.reduce((sum, meta) => sum + (meta.maxNumTile || 0), 0);
     const spritePieces = metas.reduce((sum, meta) => sum + (meta.maxNumSprite || 0), 0);
     const overlayTiles = spriteTextTileCells(state.spriteTexts).size;
@@ -570,12 +645,13 @@ function visibleBudget(sceneDocument, bindings) {
       windowVisible: state.windowVisible,
     });
   };
-
   const blank = {
     sceneIndex: startScene,
     pc: 0,
     backgroundTiles: 0,
+    background: null,
     windowVisible: false,
+    messageColor: '',
     slots: [null, null, null, null],
     spriteTexts: [null, null, null, null],
     watchers: [],
@@ -622,14 +698,28 @@ function visibleBudget(sceneDocument, bindings) {
     const next = cloneVisualState(state);
     next.pc += 1;
     if (command.type === 'background') {
-      next.backgroundTiles = bindings.assets?.[command.assetId]?.metadata?.uniqueTiles || 0;
+      const assetId = String(command.assetId || '');
+      const binding = bindings.assets?.[assetId] || {};
+      next.backgroundTiles = binding.metadata?.uniqueTiles || 0;
+      next.background = {
+        assetId,
+        palette: resolveCommandPalette(command, binding),
+        paletteFingerprint: String(binding.paletteFingerprint || assetId),
+        usesPaletteIndex1: Boolean(binding.metadata?.usesPaletteIndex1),
+      };
       next.windowVisible = false;
+      next.messageColor = '';
       enqueue(next);
     } else if (command.type === 'sprite') {
       const slot = clamp(command.slot, 0, 3, 0);
       const y = numberOrZero(command.y);
+      const assetId = String(command.assetId || '');
+      const binding = bindings.assets?.[assetId] || {};
       next.slots[slot] = command.visible === false ? null : {
-        assetId: String(command.assetId || ''),
+        assetId,
+        palette: resolveCommandPalette(command, binding),
+        paletteFingerprint: String(binding.paletteFingerprint || assetId),
+        usesPaletteIndex1: Boolean(binding.metadata?.usesPaletteIndex1),
         x: numberOrZero(command.x),
         yMin: y,
         yMax: y,
@@ -662,7 +752,12 @@ function visibleBudget(sceneDocument, bindings) {
       };
       enqueue(next);
     } else if (command.type === 'message') {
+      const displayed = cloneVisualState(next);
+      displayed.windowVisible = true;
+      displayed.messageColor = String(command.textColor || '');
+      measure(displayed);
       next.windowVisible = true;
+      next.messageColor = '';
       enqueue(next);
     } else if (command.type === 'choice') {
       next.windowVisible = true;
@@ -720,7 +815,9 @@ function visibleBudget(sceneDocument, bindings) {
       }
     } else if (command.type === 'effect' && command.effect === 'blank') {
       next.backgroundTiles = 0;
+      next.background = null;
       next.windowVisible = false;
+      next.messageColor = '';
       next.slots = [null, null, null, null];
       next.spriteTexts = [null, null, null, null];
       enqueue(next);
@@ -740,7 +837,17 @@ function visibleBudget(sceneDocument, bindings) {
   if (maxScanlinePieces > 20) diagnostics.push({ severity: 'error', code: 'sprite-scanline-pieces', message: `scanline sprite pieces ${maxScanlinePieces} > 20` });
   if (maxScanlinePixels > 320) diagnostics.push({ severity: 'error', code: 'sprite-scanline-pixels', message: `scanline sprite pixels ${maxScanlinePixels} > 320` });
   if (maxBudget > 1424) diagnostics.push({ severity: 'error', code: 'vram-budget', message: `scene VRAM budget ${maxBudget} tiles > 1424` });
-  return { maxSpriteTiles, maxSpritePieces, maxScanlinePieces, maxScanlinePixels, maxOverlayTiles, maxBudget, states: visited.size, diagnostics };
+  return {
+    maxSpriteTiles,
+    maxSpritePieces,
+    maxScanlinePieces,
+    maxScanlinePixels,
+    maxOverlayTiles,
+    maxBudget,
+    states: visited.size,
+    messageColorFallbacks: [...messageColorFallbacks].sort(),
+    diagnostics,
+  };
 }
 
 function numberOrZero(value) {
@@ -758,10 +865,13 @@ function generateProject(snapshot) {
   const warnings = validation.warnings.slice();
   const pool = new StringPool();
   const variables = collectVariableTable(snapshot.sceneDocument);
-  const compiled = compileScenes(snapshot.sceneDocument, snapshot.catalog, snapshot.bindings, resources, pool, warnings, variables);
   const budget = visibleBudget(snapshot.sceneDocument, snapshot.bindings);
   const errors = budget.diagnostics.filter((entry) => entry.severity === 'error');
   if (errors.length) throw new Error(`Novel preflight failed: ${errors[0].message}`);
+  warnings.push(...budget.diagnostics.filter((entry) => entry.severity === 'warning'));
+  const compiled = compileScenes(snapshot.sceneDocument, snapshot.catalog, snapshot.bindings, resources, pool, warnings, variables, {
+    messageColorFallbacks: budget.messageColorFallbacks,
+  });
   return {
     files: {
       'res/novel.res': generateResFile(resources),

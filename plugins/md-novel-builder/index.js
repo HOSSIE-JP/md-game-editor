@@ -17,7 +17,9 @@ const STATIC_FILES = Object.freeze({
   'src/novel_runtime/novel_runtime.c': 'src/novel_runtime/novel_runtime.c',
   'inc/novel_runtime/novel_runtime.h': 'inc/novel_runtime/novel_runtime.h',
   'src/boot/sega.s': 'src/boot/sega.s',
-  'res/novel/font/misaki_gothic.png': 'res/novel/font/misaki_gothic.png',
+  'res/novel/font/JF-Dot-Shinonome16.ttf': 'res/novel/font/JF-Dot-Shinonome16.ttf',
+  'res/novel/font/JF-Dot-Shinonome16-README.txt': 'res/novel/font/JF-Dot-Shinonome16-README.txt',
+  'res/novel/font/JF-Dot-Shinonome16-LICENSE': 'res/novel/font/JF-Dot-Shinonome16-LICENSE',
 });
 
 const SOURCE_FILES = Object.freeze([
@@ -110,7 +112,7 @@ function toolchainIdentity(toolchainPath) {
 function buildContractHash(payload, staticFiles) {
   const contract = {
     schemaVersion: GENERATED_MANIFEST_VERSION,
-    runtimeAbi: 2,
+    runtimeAbi: 3,
     fontFormatVersion: FONT_FORMAT_VERSION,
     sourceFiles: SOURCE_FILES,
     staticFiles: Object.fromEntries(Object.entries(staticFiles).map(([relativePath, value]) => [relativePath, fileHash(value)])),

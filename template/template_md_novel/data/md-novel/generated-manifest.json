@@ -1,16 +1,42 @@
 {
-  "schemaVersion": 1,
-  "buildId": "1787220498440-7fd48ed6-9d29-4e44-b706-141de811bdb9",
-  "generatedAt": "2026-08-20T10:08:18.504Z",
+  "schemaVersion": 3,
+  "buildId": "1787330660617-99f359d5-1f45-4df7-a517-9c09c5581952",
+  "generatedAt": "2026-08-21T16:44:20.646Z",
+  "contractHash": "5a1d9e94ee9b27434e73c2437802b383e703873a5dcdac7b6ef72b09c694fdfb",
+  "lastBuildSuccess": false,
+  "lastBuildAt": null,
+  "romPath": null,
+  "romSha256": null,
+  "objectFiles": [],
+  "objectHashes": {},
   "files": {
     "src/main.c": "ba2c0c6f9ec4cbb14569f1d5fce1a18f7cb67d07fe9ba73471d5357e878f44e5",
-    "src/novel_runtime/novel_runtime.c": "4d6b7389ffeed78855f2109c9ea4ad391d11545bc30d1afc0549da83e9fe362a",
+    "src/novel_runtime/novel_runtime.c": "2c1dbbb29000776725c587981abdc13fb154f221f3a3d2cf5af37f6700a5bd36",
     "inc/novel_runtime/novel_runtime.h": "495963d6f60f2ddce78a291f7e4e7511472e1ecf81d4fb3da3c56055c6dfa86e",
     "src/boot/sega.s": "42af2a9913bbbc032db09a17e3a46a312d9491b4d1f51b7dfc49925deffa85f4",
-    "res/novel/font/misaki_gothic.png": "a273dd232907e1c98aa008fa63b050c693a06336cfdfcfe575021a95aaf2769c",
-    "res/novel.res": "f2aedb88fb5720060c6ef89cdef4d569216b49fb9621d4868536d4d52035a4a6",
-    "inc/generated/novel_data.h": "6b5d79b6a489db5298cfdfa938b763463f4247142ef274e6a3533c6213d6a95f",
-    "src/generated/novel_data.c": "89e0d7057518292459b087b7a019de19d0dcc90cdd194be02db2163a6fb8cb08"
+    "res/novel/font/JF-Dot-Shinonome16.ttf": "5e265e45349b3328afa67dc3905a3ca3c628cf7c7e0eccea9c7ce8a8acc127cc",
+    "res/novel/font/JF-Dot-Shinonome16-README.txt": "6a26429b43ed39865a55a39f032db6f8b242579031707576bd7b232f70fa252c",
+    "res/novel/font/JF-Dot-Shinonome16-LICENSE": "86fbc28a39b01c4c0368e60b5234508353e860aeb10786057bf8ceb9b280afda",
+    "res/novel.res": "108947300bf027a4296625bed465ab7e83ea7754cf1ea7f2661ea4064e412401",
+    "inc/generated/novel_data.h": "ac2315d7eef2439239b140f008313186432fbf1eb68fc08cc6e4a73597930945",
+    "src/generated/novel_data.c": "22971299f910129b6a133a9ab7f07495dbf3a9f477671b50c07889e4123f2de1"
+  },
+  "fileStats": {
+    "changed": 0,
+    "unchanged": 10,
+    "changedFiles": [],
+    "unchangedFiles": [
+      "src/main.c",
+      "src/novel_runtime/novel_runtime.c",
+      "inc/novel_runtime/novel_runtime.h",
+      "src/boot/sega.s",
+      "res/novel/font/JF-Dot-Shinonome16.ttf",
+      "res/novel/font/JF-Dot-Shinonome16-README.txt",
+      "res/novel/font/JF-Dot-Shinonome16-LICENSE",
+      "res/novel.res",
+      "inc/generated/novel_data.h",
+      "src/generated/novel_data.c"
+    ]
   },
   "report": {
     "scenes": 4,
@@ -21,6 +47,7 @@
     "bgm": 1,
     "sfx": 1,
     "strings": 7,
+    "glyphs": 27,
     "variables": 3,
     "switches": 0,
     "budget": {
@@ -31,6 +58,7 @@
       "maxOverlayTiles": 0,
       "maxBudget": 418,
       "states": 27,
+      "messageColorFallbacks": [],
       "diagnostics": []
     }
   }

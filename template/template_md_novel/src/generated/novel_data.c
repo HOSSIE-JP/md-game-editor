@@ -22,11 +22,13 @@ static const NovelMessage nov_message_3 = { nov_text_1, nov_message_3_pages, 1, 
 static const NovelChoice nov_choice_0 = { 2, 0, 2, { { nov_text_2, 1, 1 }, { nov_text_3, 2, 0 } } };
 
 static const s16 nov_initial_variables[] = { 0, 0, 0 };
+const u16 nov_font_codes[] = { 0x8140, 0x8144, 0x817c, 0x819f, 0x81a5, 0x8260, 0x8261, 0x8262, 0x8263, 0x8264, 0x8265, 0x8266, 0x8267, 0x8268, 0x8269, 0x826a, 0x826b, 0x826c, 0x826d, 0x826e, 0x826f, 0x8271, 0x8272, 0x8273, 0x8274, 0x8275, 0x8276 };
+const u16 nov_font_glyph_count = 27;
 
 static const NovelCommand nov_scene_0_commands[] = {
     { NOV_CMD_BACKGROUND, NOV_FLAG_FADE, 0, 0, 0, 0, 20, 0, 20, NULL },
     { NOV_CMD_AUDIO, NOV_FLAG_AUDIO_PLAY | NOV_FLAG_AUDIO_BGM, 0, 0, 0, 0, 0, 0, 0, NULL },
-    { NOV_CMD_SPRITE, NOV_FLAG_VISIBLE, 0, 0, 96, 80, 0, 0, 0, NULL },
+    { NOV_CMD_SPRITE, NOV_FLAG_VISIBLE, 0, 1, 96, 80, 0, 0, 0, NULL },
     { NOV_CMD_MESSAGE, 0, 0, 0, 0, 0, 0, -1, 0, &nov_message_0 },
     { NOV_CMD_VARIABLE, NOV_VAR_DEFINE, 0, 0, 0, 0, 0, 2, 0, NULL },
     { NOV_CMD_CHOICE, 0, 0, 2, 0, 0, 0, -1, 0, &nov_choice_0 }
@@ -34,7 +36,7 @@ static const NovelCommand nov_scene_0_commands[] = {
 
 static const NovelCommand nov_scene_1_commands[] = {
     { NOV_CMD_BACKGROUND, NOV_FLAG_FADE, 0, 0, 0, 0, 20, 0, 20, NULL },
-    { NOV_CMD_SPRITE, NOV_FLAG_VISIBLE, 0, 0, 120, 80, 0, 0, 0, NULL },
+    { NOV_CMD_SPRITE, NOV_FLAG_VISIBLE, 0, 1, 120, 80, 0, 0, 0, NULL },
     { NOV_CMD_AUDIO, NOV_FLAG_AUDIO_PLAY | NOV_FLAG_AUDIO_SFX, 0, 0, 0, 0, 0, 0, 0, NULL },
     { NOV_CMD_MESSAGE, 0, 0, 0, 0, 0, 0, -1, 0, &nov_message_1 },
     { NOV_CMD_JUMP, 0, 0, 0, 0, 0, 0, 3, 0, NULL }
@@ -79,12 +81,21 @@ const SpriteDefinition* novelDataSprite(u16 index)
     }
 }
 
-u16 novelDataSpritePalette(u16 index)
+u16 novelDataBackgroundPaletteId(u16 index)
 {
     switch (index)
     {
-        case 0: return PAL2;
-        default: return PAL2;
+        case 0: return 2;
+        default: return 0xFFFF;
+    }
+}
+
+u16 novelDataSpritePaletteId(u16 index)
+{
+    switch (index)
+    {
+        case 0: return 1;
+        default: return 0xFFFF;
     }
 }
 

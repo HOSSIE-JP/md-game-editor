@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   SCHEMA_VERSION,
+  VISUAL_CONVERTER_VERSION,
   deepClone,
   hashDocument,
   collectCatalog,
@@ -12,6 +13,9 @@ const {
   validateSceneDocument,
   defaultTargetProfile,
   createAssetBindings,
+  collectVisualPaletteRequirements,
+  paletteProfile,
+  resolveCommandPalette,
 } = require('./novel-schema');
 const {
   hashBuffer,
@@ -19,10 +23,14 @@ const {
   generatePsgSongVgm,
   generatePsgSfxWav,
 } = require('./novel-convert');
+const { decodePng } = require('./novel-image');
 const { analyzeNovelBudget } = require('./novel-budget');
 const {
   FONT_OUTPUT_PATH,
   BUNDLED_FONT_SOURCE,
+  BUNDLED_FONT_ATLAS_SOURCE,
+  DEFAULT_FONT_SIZE,
+  DEFAULT_FONT_THRESHOLD,
   normalizeFontSettings,
   createFontPlan,
   generateBundledAtlas,
@@ -36,7 +44,13 @@ const fsp = fs.promises;
 const MAX_JSON_BYTES = 32 * 1024 * 1024;
 const MAX_FONT_BYTES = 32 * 1024 * 1024;
 const FONT_EXTENSION = /\.(?:ttf|otf|ttc)$/i;
-const BUNDLED_FONT_PATH = path.join(__dirname, '..', 'md-novel-builder', 'template', 'res', 'novel', 'font', 'misaki_gothic.png');
+const BUNDLED_FONT_ROOT = path.join(__dirname, '..', 'md-novel-builder', 'template', 'res', 'novel', 'font');
+const BUNDLED_FONT_PATH = path.join(BUNDLED_FONT_ROOT, path.basename(BUNDLED_FONT_SOURCE));
+const BUNDLED_FONT_ATLAS_PATH = path.join(BUNDLED_FONT_ROOT, path.basename(BUNDLED_FONT_ATLAS_SOURCE));
+const BUNDLED_FONT_AUXILIARY = Object.freeze([
+  'JF-Dot-Shinonome16-README.txt',
+  'JF-Dot-Shinonome16-LICENSE',
+]);
 const RELATIVE_PATHS = Object.freeze({
   scene: 'assets/pce-vn-scenes.json',
   catalog: 'assets/pce-assets.json',
@@ -271,6 +285,48 @@ function validateProfile(profile) {
   return diagnostics;
 }
 
+function pcePaletteForCommand(command) {
+  if (command?.type === 'background') return 'PAL0';
+  if (command?.type === 'sprite') {
+    const slot = Math.max(0, Math.min(3, Number(command.slot) || 0));
+    return ['PAL1', 'PAL2', 'PAL3', 'PAL3'][slot];
+  }
+  return '';
+}
+
+function injectPcePalettes(sceneDocument) {
+  const result = deepClone(sceneDocument);
+  for (const scene of result?.scenes || []) {
+    for (const command of scene?.commands || []) {
+      const palette = pcePaletteForCommand(command);
+      if (palette) command.palette = palette;
+    }
+  }
+  return result;
+}
+
+function visualProfileRequirements(sceneDocument, bindings) {
+  const requirements = collectVisualPaletteRequirements(sceneDocument, bindings);
+  const result = new Map();
+  for (const [assetId, entry] of requirements) {
+    result.set(assetId, {
+      ...entry,
+      palettes: Array.from(entry.palettes),
+      profiles: Array.from(entry.profiles),
+    });
+  }
+  return result;
+}
+
+function paletteGroups(bindings) {
+  const groups = [];
+  for (const [id, value] of Object.entries(bindings?.paletteGroups || {})) {
+    if (!value || Array.isArray(value) || typeof value !== 'object') continue;
+    groups.push({ id, ...value, members: [...new Set((value.members || []).map(String).filter(Boolean))] });
+  }
+  return groups;
+}
+
 function validateBindings(sceneDocument, catalog, bindings) {
   const diagnostics = [];
   if (!bindings || typeof bindings !== 'object') return [{ severity: 'error', code: 'bindings-missing', path: RELATIVE_PATHS.bindings, message: 'Mega Drive asset bindings are missing.' }];
@@ -278,29 +334,93 @@ function validateBindings(sceneDocument, catalog, bindings) {
   if (bindings.sourceSceneRevision !== sceneRevision) diagnostics.push({ severity: 'error', code: 'bindings-stale', path: 'sourceSceneRevision', message: 'Asset bindings do not match the scene document revision.' });
   const info = collectCatalog(catalog);
   const references = collectReferences(sceneDocument);
+  const requirements = visualProfileRequirements(sceneDocument, bindings);
   for (const reference of references) {
     const asset = info.byId.get(reference.assetId);
     if (!asset || ['adpcm', 'cdda-track'].includes(asset.type)) continue;
     if (['image', 'sprite'].includes(asset.type)) {
       const binding = bindings.assets?.[reference.assetId];
-      if (!binding?.sourcePath || !['IMAGE', 'SPRITE'].includes(binding.runtimeType)) diagnostics.push({ severity: 'error', code: 'binding-missing', path: reference.path, message: `Missing visual binding: ${reference.assetId}` });
+      if (!binding?.sourcePath || !['IMAGE', 'SPRITE'].includes(binding.runtimeType)) diagnostics.push({ severity: 'error', code: 'binding-missing', path: reference.path, message: 'Missing visual binding: ' + reference.assetId });
     }
     if (['psg-song', 'psg-sfx'].includes(asset.type)) {
-      const key = `${reference.assetId}@${reference.channel}`;
+      const key = reference.assetId + '@' + reference.channel;
       const variant = bindings.audioVariants?.[key];
-      if (!variant?.sourcePath || variant.status !== 'ready') diagnostics.push({ severity: 'error', code: 'audio-variant-missing', path: reference.path, message: `Missing converted PSG variant: ${key}` });
+      if (!variant?.sourcePath || variant.status !== 'ready') diagnostics.push({ severity: 'error', code: 'audio-variant-missing', path: reference.path, message: 'Missing converted PSG variant: ' + key });
     }
   }
+
+  for (const [assetId, requirement] of requirements) {
+    const binding = bindings.assets?.[assetId];
+    if (!binding) continue;
+    if (requirement.profiles.length > 1) {
+      diagnostics.push({
+        severity: 'error',
+        code: 'asset-palette-profile-conflict',
+        path: 'bindings.assets.' + assetId,
+        message: assetId + ' is used by both PAL0-reserved and general palettes; duplicate the source asset before assigning both profiles.',
+        assetId,
+        references: requirement.references,
+      });
+      continue;
+    }
+    const expected = requirement.profiles[0] || 'general';
+    const actual = binding.conversion?.paletteProfile || paletteProfile(binding.legacyPalette || binding.palette);
+    if (actual !== expected) diagnostics.push({
+      severity: 'error',
+      code: 'visual-conversion-stale',
+      path: 'bindings.assets.' + assetId + '.conversion.paletteProfile',
+      message: assetId + ' requires ' + expected + ' conversion but has ' + actual + '. Save the editor project to reconvert it.',
+      assetId,
+      expectedProfile: expected,
+      actualProfile: actual,
+    });
+    if (!binding.paletteFingerprint || !Array.isArray(binding.paletteRgb333) || binding.paletteRgb333.length !== 16) {
+      diagnostics.push({ severity: 'error', code: 'visual-palette-metadata-missing', path: 'bindings.assets.' + assetId, message: 'Converted palette metadata is missing: ' + assetId });
+    }
+    const quality = binding.metadata?.quality || {};
+    if (Number(quality.meanDeltaE) > 8 || Number(quality.p95DeltaE) > 20) {
+      diagnostics.push({
+        severity: 'warning',
+        code: 'palette-quality-loss',
+        path: 'bindings.assets.' + assetId + '.metadata.quality',
+        message: assetId + ' palette conversion quality is low (mean ΔE ' + Number(quality.meanDeltaE || 0).toFixed(2) + ', p95 ' + Number(quality.p95DeltaE || 0).toFixed(2) + ').',
+      });
+    }
+  }
+
+  const groupIds = new Set();
+  for (const group of paletteGroups(bindings)) {
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(group.id)) diagnostics.push({ severity: 'error', code: 'palette-group-id-invalid', path: 'paletteGroups.' + group.id, message: 'Invalid palette group id: ' + group.id });
+    if (groupIds.has(group.id)) diagnostics.push({ severity: 'error', code: 'palette-group-duplicate', path: 'paletteGroups.' + group.id, message: 'Duplicate palette group: ' + group.id });
+    groupIds.add(group.id);
+    const profiles = new Set();
+    const fingerprints = new Set();
+    for (const assetId of group.members) {
+      const binding = bindings.assets?.[assetId];
+      if (!binding || !['IMAGE', 'SPRITE'].includes(binding.runtimeType)) {
+        diagnostics.push({ severity: 'error', code: 'palette-group-member-missing', path: 'paletteGroups.' + group.id, message: 'Palette group member is missing: ' + assetId });
+        continue;
+      }
+      if (binding.paletteGroup !== group.id) diagnostics.push({ severity: 'error', code: 'palette-group-backref', path: 'bindings.assets.' + assetId + '.paletteGroup', message: assetId + ' does not reference palette group ' + group.id });
+      profiles.add(binding.conversion?.paletteProfile || paletteProfile(binding.legacyPalette || binding.palette));
+      if (binding.paletteFingerprint) fingerprints.add(binding.paletteFingerprint);
+    }
+    if (profiles.size > 1) diagnostics.push({ severity: 'error', code: 'palette-group-profile-conflict', path: 'paletteGroups.' + group.id, message: 'PAL0-reserved and general assets cannot share palette group ' + group.id });
+    if (fingerprints.size > 1 || (group.paletteFingerprint && fingerprints.size && !fingerprints.has(group.paletteFingerprint))) diagnostics.push({ severity: 'error', code: 'palette-group-fingerprint-conflict', path: 'paletteGroups.' + group.id, message: 'Palette group members were not converted with one ordered palette: ' + group.id });
+  }
+  for (const binding of Object.values(bindings.assets || {})) {
+    if (binding?.paletteGroup && !groupIds.has(binding.paletteGroup)) diagnostics.push({ severity: 'error', code: 'palette-group-missing', path: 'bindings.assets.' + binding.assetId + '.paletteGroup', message: 'Palette group does not exist: ' + binding.paletteGroup });
+  }
+
   const symbols = new Map();
   for (const entry of [...Object.values(bindings.assets || {}), ...Object.values(bindings.audioVariants || {})]) {
     if (!entry?.symbol) continue;
     const key = String(entry.symbol).toLowerCase();
-    if (symbols.has(key) && symbols.get(key) !== entry.assetId) diagnostics.push({ severity: 'error', code: 'symbol-duplicate', path: 'bindings', message: `Duplicate ResComp symbol: ${entry.symbol}` });
+    if (symbols.has(key) && symbols.get(key) !== entry.assetId) diagnostics.push({ severity: 'error', code: 'symbol-duplicate', path: 'bindings', message: 'Duplicate ResComp symbol: ' + entry.symbol });
     symbols.set(key, entry.assetId);
   }
   return diagnostics;
 }
-
 function validateFontSignature(buffer, extension) {
   if (!Buffer.isBuffer(buffer) || buffer.length < 12) throw new Error('Font file is empty or truncated');
   const tag = buffer.subarray(0, 4).toString('ascii');
@@ -317,6 +437,7 @@ async function readFontSource(projectDir, profileFont) {
   const font = normalizeFontSettings(profileFont);
   if (font.kind === 'bundled') {
     const buffer = await fsp.readFile(BUNDLED_FONT_PATH);
+    validateFontSignature(buffer, '.ttf');
     return { font, buffer, relativePath: `res/novel/${BUNDLED_FONT_SOURCE}` };
   }
   if (!/^assets\/fonts\/[A-Za-z0-9._-]+\.(?:ttf|otf|ttc)$/i.test(font.source)) {
@@ -366,12 +487,28 @@ function fontBufferFromDataUrl(value) {
   return Buffer.from(match[1].replace(/\s+/g, ''), 'base64');
 }
 
+async function provisionBundledFontPreviewFiles(projectDir, plan) {
+  if (plan.font.kind !== 'bundled') return;
+  const root = await ensureProjectRoot(projectDir);
+  const files = {
+    [plan.sourceRelativePath]: plan.sourceBuffer,
+  };
+  for (const fileName of BUNDLED_FONT_AUXILIARY) {
+    files[`res/novel/font/${fileName}`] = await fsp.readFile(path.join(BUNDLED_FONT_ROOT, fileName));
+  }
+  for (const [relativePath, buffer] of Object.entries(files)) {
+    const target = await resolveProjectPath(root, relativePath);
+    await writeAtomicIfChanged(root, target, buffer);
+  }
+}
+
 async function prepareFontGeneration(projectDir, payload = {}) {
   const current = await readProjectDocuments(projectDir);
   const sceneDocument = deepClone(payload.sceneDocument ?? current.sceneDocument);
   const targetProfile = deepClone(payload.targetProfile ?? current.targetProfile);
   targetProfile.font = normalizeFontSettings(targetProfile.font);
   const plan = await buildFontPlan(projectDir, sceneDocument, targetProfile);
+  await provisionBundledFontPreviewFiles(projectDir, plan);
   let currentValid = false;
   let validationError = '';
   try {
@@ -385,6 +522,15 @@ async function prepareFontGeneration(projectDir, payload = {}) {
   return { ok: true, ...publicFontPlan(plan, currentValid, validationError) };
 }
 
+function isBundledDefaultPreset(font) {
+  return font?.kind === 'bundled'
+    && font.source === BUNDLED_FONT_SOURCE
+    && font.fontSize === DEFAULT_FONT_SIZE
+    && font.threshold === DEFAULT_FONT_THRESHOLD
+    && font.xOffset === 0
+    && font.yOffset === 0;
+}
+
 async function commitFontGeneration(projectDir, payload = {}) {
   const current = await readProjectDocuments(projectDir);
   const sceneDocument = deepClone(payload.sceneDocument ?? current.sceneDocument);
@@ -392,9 +538,14 @@ async function commitFontGeneration(projectDir, payload = {}) {
   targetProfile.font = normalizeFontSettings(targetProfile.font);
   const plan = await buildFontPlan(projectDir, sceneDocument, targetProfile);
   if (payload.inputHash !== plan.inputHash) throw new Error('Font generation plan changed; regenerate the preview');
-  const png = plan.font.kind === 'bundled'
-    ? generateBundledAtlas(plan, plan.sourceBuffer)
-    : canonicalizeGeneratedAtlas(plan, fontBufferFromDataUrl(payload.pngDataUrl));
+  let png;
+  if (payload.pngDataUrl) {
+    png = canonicalizeGeneratedAtlas(plan, fontBufferFromDataUrl(payload.pngDataUrl));
+  } else if (isBundledDefaultPreset(plan.font)) {
+    png = generateBundledAtlas(plan, await fsp.readFile(BUNDLED_FONT_ATLAS_PATH));
+  } else {
+    throw new Error('Adjusted bundled font settings require renderer-generated PNG data');
+  }
   const generation = generationMetadata(plan, png);
   const changed = Boolean((await commitDocuments(projectDir, { [FONT_OUTPUT_PATH]: png }))?.documents?.[FONT_OUTPUT_PATH]);
   return { ok: true, generation, changed, ...publicFontPlan(plan, true, '') };
@@ -405,9 +556,18 @@ async function ensureFontDocuments(projectDir, sceneDocument, targetProfile, doc
   const plan = await buildFontPlan(projectDir, sceneDocument, targetProfile);
   let png;
   if (plan.font.kind === 'bundled') {
-    png = generateBundledAtlas(plan, plan.sourceBuffer);
-    targetProfile.font.generation = generationMetadata(plan, png);
+    if (isBundledDefaultPreset(plan.font)) {
+      png = generateBundledAtlas(plan, await fsp.readFile(BUNDLED_FONT_ATLAS_PATH));
+      targetProfile.font.generation = generationMetadata(plan, png);
+    } else {
+      const output = await resolveProjectPath(projectDir, FONT_OUTPUT_PATH, { mustExist: true });
+      png = await fsp.readFile(output);
+      validateGeneration(plan, targetProfile.font.generation, png);
+    }
     documents[plan.sourceRelativePath] = plan.sourceBuffer;
+    for (const fileName of BUNDLED_FONT_AUXILIARY) {
+      documents[`res/novel/font/${fileName}`] = await fsp.readFile(path.join(BUNDLED_FONT_ROOT, fileName));
+    }
   } else {
     const output = await resolveProjectPath(projectDir, FONT_OUTPUT_PATH, { mustExist: true });
     png = await fsp.readFile(output);
@@ -481,6 +641,233 @@ async function deleteFont(projectDir, payload = {}) {
   return { ok: true, relativePath };
 }
 
+function visualAssetCatalogEntry(catalogInfo, binding) {
+  const asset = catalogInfo.byId.get(String(binding?.assetId || ''));
+  if (!asset || !['image', 'sprite'].includes(asset.type)) throw new Error('Visual asset is missing from catalog: ' + String(binding?.assetId || ''));
+  return asset;
+}
+
+async function readVisualSource(projectDir, catalogInfo, binding) {
+  const asset = visualAssetCatalogEntry(catalogInfo, binding);
+  const relativePath = String(binding.originalSource || asset.source || '').split(String.fromCharCode(92)).join('/');
+  if (!relativePath) throw new Error('Visual source is missing: ' + asset.id);
+  const sourcePath = await resolveProjectPath(projectDir, relativePath, { mustExist: true });
+  return { asset, buffer: await fsp.readFile(sourcePath), relativePath };
+}
+
+async function conversionFreshnessDiagnostics(projectDir, sceneDocument, catalog, bindings) {
+  const diagnostics = [];
+  const catalogInfo = collectCatalog(catalog);
+  const requirements = visualProfileRequirements(sceneDocument, bindings);
+  const groupedAssets = new Set();
+  for (const group of paletteGroups(bindings)) {
+    const entries = [];
+    let complete = true;
+    for (const assetId of group.members) {
+      groupedAssets.add(assetId);
+      const binding = bindings.assets?.[assetId];
+      if (!binding || !['IMAGE', 'SPRITE'].includes(binding.runtimeType)) {
+        complete = false;
+        continue;
+      }
+      try {
+        entries.push({ ...(await readVisualSource(projectDir, catalogInfo, binding)), binding });
+      } catch (error) {
+        complete = false;
+        diagnostics.push({ severity: 'error', code: 'visual-source-missing', path: 'bindings.assets.' + assetId, message: error.message, assetId });
+      }
+    }
+    if (!complete || !entries.length) continue;
+    const profile = group.profile || entries[0].binding.conversion?.paletteProfile || 'general';
+    const reserveTransparent = Boolean(group.reserveTransparent);
+    const actualHash = conversionInputHash(entries, { paletteProfile: profile, reserveTransparent, paletteGroup: group.id });
+    const staleMember = entries.some((entry) => entry.binding.conversion?.converterVersion !== VISUAL_CONVERTER_VERSION || entry.binding.conversion?.inputHash !== actualHash);
+    if (group.inputHash !== actualHash || staleMember) {
+      diagnostics.push({
+        severity: 'error',
+        code: 'palette-group-conversion-stale',
+        path: 'paletteGroups.' + group.id,
+        message: 'Palette group source changed or uses an old converter. Run 共同減色して保存: ' + group.id,
+        groupId: group.id,
+      });
+    }
+  }
+  for (const [assetId, binding] of Object.entries(bindings.assets || {})) {
+    if (groupedAssets.has(assetId) || !['IMAGE', 'SPRITE'].includes(binding?.runtimeType)) continue;
+    try {
+      const source = await readVisualSource(projectDir, catalogInfo, binding);
+      const requirement = requirements.get(assetId);
+      const profile = requirement?.profiles?.[0] || binding.conversion?.paletteProfile || paletteProfile(binding.legacyPalette || binding.palette);
+      const reserveTransparent = source.asset.type === 'sprite';
+      const actualHash = conversionInputHash([source], { paletteProfile: profile, reserveTransparent });
+      if (binding.conversion?.converterVersion !== VISUAL_CONVERTER_VERSION || binding.conversion?.inputHash !== actualHash) {
+        diagnostics.push({
+          severity: 'error',
+          code: 'visual-conversion-source-stale',
+          path: 'bindings.assets.' + assetId + '.conversion.inputHash',
+          message: assetId + ' source changed or uses an old converter. Save the Novel project to reconvert it.',
+          assetId,
+        });
+      }
+    } catch (error) {
+      diagnostics.push({ severity: 'error', code: 'visual-source-missing', path: 'bindings.assets.' + assetId, message: error.message, assetId });
+    }
+  }
+  return diagnostics;
+}
+
+function conversionInputHash(entries, options = {}) {
+  return hashDocument({
+    converterVersion: VISUAL_CONVERTER_VERSION,
+    paletteProfile: options.paletteProfile || 'general',
+    reserveTransparent: Boolean(options.reserveTransparent),
+    paletteGroup: options.paletteGroup || null,
+    sources: entries.map((entry) => ({ assetId: entry.asset.id, sha256: hashBuffer(entry.buffer) })).sort((left, right) => left.assetId.localeCompare(right.assetId)),
+  });
+}
+
+function applyVisualOutput(binding, output, options = {}) {
+  binding.metadata = output.metadata;
+  binding.contentHash = output.contentHash;
+  binding.paletteFingerprint = output.paletteFingerprint;
+  binding.paletteRgb333 = output.paletteRgb333;
+  binding.paletteGroup = options.paletteGroup || null;
+  binding.conversion = {
+    ...(binding.conversion || {}),
+    converterVersion: VISUAL_CONVERTER_VERSION,
+    coordinateMode: options.coordinateMode || binding.conversion?.coordinateMode || 'pce-legacy-256',
+    paletteProfile: options.paletteProfile || 'general',
+    reserveTransparent: Boolean(options.reserveTransparent),
+    inputHash: options.inputHash || '',
+  };
+}
+
+async function reconvertChangedVisualProfiles(projectDir, sceneDocument, catalog, bindings, targetProfile, documents) {
+  const catalogInfo = collectCatalog(catalog);
+  const requirements = visualProfileRequirements(sceneDocument, bindings);
+  for (const [assetId, binding] of Object.entries(bindings.assets || {})) {
+    if (!['IMAGE', 'SPRITE'].includes(binding?.runtimeType)) continue;
+    const requirement = requirements.get(assetId);
+    if (requirement?.profiles?.length > 1) throw new Error(assetId + ' cannot be converted for PAL0 and PAL1-PAL3 at the same time');
+    const expectedProfile = requirement?.profiles?.[0]
+      || binding.conversion?.paletteProfile
+      || paletteProfile(binding.legacyPalette || binding.palette);
+    if (binding.paletteGroup) {
+      if (binding.conversion?.paletteProfile !== expectedProfile) throw new Error('Palette group ' + binding.paletteGroup + ' mixes PAL0 and general profiles');
+      continue;
+    }
+    const source = await readVisualSource(projectDir, catalogInfo, binding);
+    const reserveTransparent = source.asset.type === 'sprite';
+    const inputHash = conversionInputHash([source], { paletteProfile: expectedProfile, reserveTransparent });
+    const missingMetadata = !binding.paletteFingerprint || !Array.isArray(binding.paletteRgb333) || !binding.metadata;
+    const currentConversion = binding.conversion || {};
+    if (!missingMetadata && currentConversion.converterVersion === VISUAL_CONVERTER_VERSION && currentConversion.paletteProfile === expectedProfile && currentConversion.inputHash === inputHash) continue;
+    const output = convertVisualGroup([source], { paletteProfile: expectedProfile, reserveTransparent }).get(assetId);
+    applyVisualOutput(binding, output, {
+      paletteProfile: expectedProfile,
+      reserveTransparent,
+      coordinateMode: targetProfile.coordinateMode,
+      inputHash,
+    });
+    documents['res/' + binding.sourcePath] = output.png;
+  }
+}
+
+async function quantizePaletteGroup(projectDir, payload = {}) {
+  const current = await loadProject(projectDir);
+  if (current.diagnostics.some((entry) => entry.code?.startsWith('transaction-') && entry.severity === 'error')) throw new Error('Cannot edit palette groups while the Novel transaction is inconsistent');
+  for (const key of ['scene', 'bindings']) {
+    const expected = payload.baseRevisions?.[key];
+    if (expected && expected !== current.revisions[key]) throw new Error('Stale ' + key + ' document; reload before quantizing.');
+  }
+  const groupId = String(payload.groupId || '').trim();
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(groupId)) throw new Error('Palette group id must use 1..40 ASCII letters, digits, _ or -');
+  const members = [...new Set((Array.isArray(payload.members) ? payload.members : []).map(String).filter(Boolean))].sort();
+  if (!members.length) throw new Error('Palette group requires at least one visual asset');
+  const bindings = deepClone(current.bindings);
+  const requirements = visualProfileRequirements(current.sceneDocument, bindings);
+  const catalogInfo = collectCatalog(current.catalog);
+  const entries = [];
+  const profiles = new Set();
+  for (const assetId of members) {
+    const binding = bindings.assets?.[assetId];
+    if (!binding || !['IMAGE', 'SPRITE'].includes(binding.runtimeType)) throw new Error('Palette group visual asset is missing: ' + assetId);
+    const requirement = requirements.get(assetId);
+    if (requirement?.profiles?.length > 1) throw new Error(assetId + ' is used by both PAL0 and general commands');
+    const profile = requirement?.profiles?.[0] || binding.conversion?.paletteProfile || paletteProfile(binding.legacyPalette || binding.palette);
+    profiles.add(profile);
+    entries.push({ ...(await readVisualSource(projectDir, catalogInfo, binding)), binding });
+  }
+  if (profiles.size !== 1) throw new Error('PAL0-reserved and general assets cannot share one palette group');
+  const paletteProfileName = [...profiles][0];
+  const reserveTransparent = entries.some((entry) => entry.asset.type === 'sprite');
+  const inputHash = conversionInputHash(entries, { paletteProfile: paletteProfileName, reserveTransparent, paletteGroup: groupId });
+  const outputs = convertVisualGroup(entries, { paletteProfile: paletteProfileName, reserveTransparent });
+  const documents = {};
+  for (const entry of entries) {
+    const output = outputs.get(entry.asset.id);
+    applyVisualOutput(entry.binding, output, {
+      paletteProfile: paletteProfileName,
+      reserveTransparent,
+      paletteGroup: groupId,
+      coordinateMode: current.targetProfile.coordinateMode,
+      inputHash,
+    });
+    documents['res/' + entry.binding.sourcePath] = output.png;
+  }
+  for (const binding of Object.values(bindings.assets || {})) {
+    if (binding.paletteGroup === groupId && !members.includes(binding.assetId)) binding.paletteGroup = null;
+  }
+  const retainedGroups = {};
+  for (const group of paletteGroups(bindings)) {
+    if (group.id === groupId) continue;
+    const remainingMembers = (group.members || []).filter((assetId) => !members.includes(assetId));
+    if (remainingMembers.length) retainedGroups[group.id] = { ...group, members: remainingMembers };
+  }
+  const firstOutput = outputs.get(entries[0].asset.id);
+  retainedGroups[groupId] = {
+    id: groupId,
+    members,
+    profile: paletteProfileName,
+    reserveTransparent,
+    paletteFingerprint: firstOutput.paletteFingerprint,
+    paletteRgb333: firstOutput.paletteRgb333,
+    quality: {
+      meanDeltaE: Math.max(...entries.map((entry) => Number(outputs.get(entry.asset.id).metadata.quality.meanDeltaE || 0))),
+      p95DeltaE: Math.max(...entries.map((entry) => Number(outputs.get(entry.asset.id).metadata.quality.p95DeltaE || 0))),
+    },
+    inputHash,
+    convertedAt: new Date().toISOString(),
+  };
+  bindings.paletteGroups = retainedGroups;
+  bindings.sourceSceneRevision = hashDocument(current.sceneDocument);
+  documents[RELATIVE_PATHS.bindings] = bindings;
+  await commitDocuments(projectDir, documents, { sourceSceneRevision: bindings.sourceSceneRevision });
+  return loadProject(projectDir);
+}
+
+async function readIndexedAssets(projectDir, payload = {}) {
+  const current = await readProjectDocuments(projectDir);
+  const requested = [...new Set((Array.isArray(payload.assetIds) ? payload.assetIds : []).map(String).filter(Boolean))];
+  if (requested.length > 16) throw new Error('Indexed preview request is limited to 16 assets');
+  const assets = {};
+  for (const assetId of requested) {
+    const binding = current.bindings?.assets?.[assetId];
+    if (!binding?.sourcePath || !['IMAGE', 'SPRITE'].includes(binding.runtimeType)) continue;
+    const target = await resolveProjectPath(projectDir, 'res/' + binding.sourcePath, { mustExist: true });
+    const decoded = decodePng(await fsp.readFile(target));
+    if (!decoded.sourceIndices) throw new Error('Converted visual is not indexed: ' + assetId);
+    assets[assetId] = {
+      width: decoded.width,
+      height: decoded.height,
+      indicesBase64: Buffer.from(decoded.sourceIndices).toString('base64'),
+      paletteRgb333: binding.paletteRgb333 || decoded.palette.map((color) => color.slice(0, 3)),
+      paletteFingerprint: binding.paletteFingerprint || '',
+    };
+  }
+  return { ok: true, assets };
+}
+
 async function readProjectDocuments(projectDir) {
   const scenePath = await resolveProjectPath(projectDir, RELATIVE_PATHS.scene, { mustExist: true });
   const catalogPath = await resolveProjectPath(projectDir, RELATIVE_PATHS.catalog, { mustExist: true });
@@ -494,7 +881,6 @@ async function readProjectDocuments(projectDir) {
   ]);
   return { sceneDocument, catalog, pceFont, targetProfile, bindings, transaction };
 }
-
 async function loadProject(projectDir) {
   const documents = await readProjectDocuments(projectDir);
   const persistedProfileRevision = hashDocument(documents.targetProfile);
@@ -507,6 +893,7 @@ async function loadProject(projectDir) {
     ...validation.diagnostics,
     ...validateProfile(documents.targetProfile),
     ...validateBindings(documents.sceneDocument, documents.catalog, documents.bindings),
+    ...await conversionFreshnessDiagnostics(projectDir, documents.sceneDocument, documents.catalog, documents.bindings),
     ...await validateTransaction(projectDir, documents.transaction),
     ...await fontDiagnostics(projectDir, documents.sceneDocument, documents.targetProfile),
     ...budget.diagnostics,
@@ -542,15 +929,20 @@ async function saveProject(projectDir, payload = {}) {
   assertSafeJson(targetProfile);
   assertSafeJson(bindings);
   bindings.sourceSceneRevision = hashDocument(sceneDocument);
+  const documents = {};
+  await reconvertChangedVisualProfiles(projectDir, sceneDocument, current.catalog, bindings, targetProfile, documents);
   const validation = validateSceneDocument(sceneDocument, current.catalog);
-  const diagnostics = [...validation.diagnostics, ...validateProfile(targetProfile), ...validateBindings(sceneDocument, current.catalog, bindings)];
+  const diagnostics = [
+    ...validation.diagnostics,
+    ...validateProfile(targetProfile),
+    ...validateBindings(sceneDocument, current.catalog, bindings),
+    ...await conversionFreshnessDiagnostics(projectDir, sceneDocument, current.catalog, bindings),
+  ];
   const errors = diagnostics.filter((entry) => entry.severity === 'error');
-  if (errors.length) throw new Error(`Novel save validation failed: ${errors[0].message}`);
-  const documents = {
-    [RELATIVE_PATHS.scene]: sceneDocument,
-    [RELATIVE_PATHS.profile]: targetProfile,
-    [RELATIVE_PATHS.bindings]: bindings,
-  };
+  if (errors.length) throw new Error('Novel save validation failed: ' + errors[0].message);
+  documents[RELATIVE_PATHS.scene] = sceneDocument;
+  documents[RELATIVE_PATHS.profile] = targetProfile;
+  documents[RELATIVE_PATHS.bindings] = bindings;
   await ensureFontDocuments(projectDir, sceneDocument, targetProfile, documents);
   await commitDocuments(projectDir, documents, { sourceSceneRevision: bindings.sourceSceneRevision });
   return loadProject(projectDir);
@@ -564,7 +956,8 @@ function sourceProjectId(projectConfig, sourceRoot) {
 
 async function importPceProject(projectDir, payload = {}, context = {}) {
   const sourceRoot = await ensureProjectRoot(payload.sourceProjectDir);
-  const sceneDocument = await readJsonFile(await resolveSourcePath(sourceRoot, RELATIVE_PATHS.scene));
+  const sourceSceneDocument = await readJsonFile(await resolveSourcePath(sourceRoot, RELATIVE_PATHS.scene));
+  const sceneDocument = injectPcePalettes(sourceSceneDocument);
   const catalog = await readJsonFile(await resolveSourcePath(sourceRoot, RELATIVE_PATHS.catalog));
   const projectConfig = await readJsonFile(await resolveSourcePath(sourceRoot, 'project.json'));
   const pceFontPath = path.join(sourceRoot, RELATIVE_PATHS.pceFont.replace(/\//g, path.sep));
@@ -602,24 +995,21 @@ async function importPceProject(projectDir, payload = {}, context = {}) {
     documents[String(asset.source).replace(/\\/g, '/')] = buffer;
     visualEntries.push({ asset, binding, buffer });
   }
-  const backgrounds = visualEntries.filter((entry) => entry.asset.type === 'image');
-  for (const entry of backgrounds) {
-    const output = convertVisualGroup([entry], { reserveTransparent: false }).get(entry.asset.id);
-    entry.binding.metadata = output.metadata;
-    entry.binding.contentHash = output.contentHash;
-    documents[`res/${entry.binding.sourcePath}`] = output.png;
-  }
-  for (const paletteName of ['PAL2', 'PAL3']) {
-    const group = visualEntries.filter((entry) => entry.asset.type === 'sprite' && entry.binding.palette === paletteName);
-    if (!group.length) continue;
-    const outputs = convertVisualGroup(group, { reserveTransparent: true });
-    for (const entry of group) {
-      const output = outputs.get(entry.asset.id);
-      entry.binding.metadata = output.metadata;
-      entry.binding.contentHash = output.contentHash;
-      entry.binding.paletteFingerprint = hashDocument(output.palette);
-      documents[`res/${entry.binding.sourcePath}`] = output.png;
-    }
+  const requirements = visualProfileRequirements(sceneDocument, bindings);
+  for (const entry of visualEntries) {
+    const requirement = requirements.get(entry.asset.id);
+    if (requirement?.profiles?.length > 1) throw new Error(entry.asset.id + ' is used by PAL0 and PAL1-PAL3 in the imported script');
+    const paletteProfileName = requirement?.profiles?.[0] || paletteProfile(entry.binding.legacyPalette || entry.binding.palette);
+    const reserveTransparent = entry.asset.type === 'sprite';
+    const inputHash = conversionInputHash([entry], { paletteProfile: paletteProfileName, reserveTransparent });
+    const output = convertVisualGroup([entry], { paletteProfile: paletteProfileName, reserveTransparent }).get(entry.asset.id);
+    applyVisualOutput(entry.binding, output, {
+      paletteProfile: paletteProfileName,
+      reserveTransparent,
+      coordinateMode: targetProfile.coordinateMode,
+      inputHash,
+    });
+    documents['res/' + entry.binding.sourcePath] = output.png;
   }
   for (const variant of Object.values(bindings.audioVariants)) {
     const asset = catalogInfo.byId.get(variant.assetId);
@@ -688,6 +1078,11 @@ module.exports = {
   validateTransaction,
   validateProfile,
   validateBindings,
+  injectPcePalettes,
+  visualProfileRequirements,
+  conversionFreshnessDiagnostics,
+  quantizePaletteGroup,
+  readIndexedAssets,
   readProjectDocuments,
   loadProject,
   saveProject,

@@ -1,21 +1,24 @@
 {
   "schemaVersion": 1,
-  "transactionId": "4790d460-71c2-4967-bca6-4e7f6552a1e4",
-  "committedAt": "2026-08-20T16:34:16.466Z",
-  "sourceSceneRevision": "29f0c97b6e49d6d7f02b7b175d7a38390bed18eb63d09880806cd226d3fed442",
+  "transactionId": "b4e9ed82-bf0e-44fc-881f-a3e62777e82a",
+  "committedAt": "2026-08-21T16:44:20.536Z",
+  "sourceSceneRevision": "16f796699282383eaf6752114f0aa0e246b63de8bb5c8d8d6dc9710c8cfa092b",
   "documents": {
     "assets/images/bg_sample.png": "20252c9b68a4bc64e98ff16c68ccd9920ebd7ef8779fefda03c0e6f636b704d2",
     "assets/pce-assets.json": "9378ec5de6343d4d85b4f1ae319f4d44ed9a4d753ac52d8b1e06b59ca58bb560",
     "assets/pce-font.json": "3225cbf16fd584539a91c5d7cbe82f8a4756be357667fac2f70a9cc6ee1f29a8",
-    "assets/pce-vn-scenes.json": "c201c685924ff63b19393c9af49a8465021b22b6bdd8777dc63c54c14c92a782",
+    "assets/pce-vn-scenes.json": "6eba02a11aedd3d98630362632661cca2dc4cbf94bd3090ae049df05c7ac20d3",
     "assets/sprites/sp_hero.png": "08cad28ac516efdc5d91b10517340604c88e47deaeb6a69a03430879e4e370a0",
-    "data/md-novel/asset-bindings.json": "313b3a0b881d74b375d9f8c1aaf577535a80f306a84b71387b67f258a52bbfff",
-    "data/md-novel/target-profile.json": "4c44dffe454d1bb4287e9793de351d4c372e9fc47a49d7f9a616d436e8f7ca55",
-    "res/novel/backgrounds/nov_bg_bg_sample_7d16a41f.png": "61bec7f07ce849cb0a8e21f5467a179e4c7923a86d35233748eb8e7798fef3c4",
+    "data/md-novel/asset-bindings.json": "8e5d844e4bbdce06e03c98f0f88dfed9ed7944f507615c51f82b918acc2998c8",
+    "data/md-novel/target-profile.json": "7a2d683eead43cae7b4d707406bc962ceae7bfbcf4d779e4c761f362db44011f",
+    "res/novel/backgrounds/nov_bg_bg_sample_7d16a41f.png": "b590dfdf0a738c5c53731e0e904ea91be852c72fb16b3fafda0276beda1fd6ef",
     "res/novel/music/nov_bgm_sample_bgm_ch0_2f696355.vgm": "95f0374dd2983392c24a43e914d4800796500d0e2c07357285f513e3f7714f8b",
     "res/novel/sfx/nov_sfx_sample_sfx_ch0_aa319e7c.wav": "37de81bb985b99b444f5f844c69a8596a0b0d7a2dffe8e3d45b80373b9527b08",
-    "res/novel/sprites/nov_spr_sp_hero_b74c1708.png": "a6b7645cdbd6b086ecaa20cfc96faf3a2526e5e54b479c66aa0d29d50acccafe",
-    "res/novel/font/generated.png": "e6b74dd505fda9e3e3c7e9ab4f6415da8be7e3d5e49e2c2bda4ea964d087da97",
-    "res/novel/font/misaki_gothic.png": "a273dd232907e1c98aa008fa63b050c693a06336cfdfcfe575021a95aaf2769c"
+    "res/novel/sprites/nov_spr_sp_hero_b74c1708.png": "b5120db8c79c593f69ff33d9b8d37afce55ddbfa68654aca48e53dd4b3d26379",
+    "res/novel/font/generated.png": "ea3cf5245cef8ebe0af41240e42413dc95c54869c32dfd2f043d439a73b01508",
+    "res/novel/font/misaki_gothic.png": "a273dd232907e1c98aa008fa63b050c693a06336cfdfcfe575021a95aaf2769c",
+    "res/novel/font/JF-Dot-Shinonome16-LICENSE": "86fbc28a39b01c4c0368e60b5234508353e860aeb10786057bf8ceb9b280afda",
+    "res/novel/font/JF-Dot-Shinonome16-README.txt": "6a26429b43ed39865a55a39f032db6f8b242579031707576bd7b232f70fa252c",
+    "res/novel/font/JF-Dot-Shinonome16.ttf": "5e265e45349b3328afa67dc3905a3ca3c628cf7c7e0eccea9c7ce8a8acc127cc"
   }
 }

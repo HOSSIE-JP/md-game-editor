@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -150,6 +151,76 @@ test('joint portrait quantization reserves transparent index zero and shares one
   assert.equal(image.decodePng(outputs.get('a').png).sourceIndices.includes(0), true);
 });
 
+test('PAL0 visual conversion reserves black and white while sprite index zero stays transparent', () => {
+  const background = convert.convertVisualGroup([{
+    asset: { id: 'bg', type: 'image', options: {} },
+    buffer: solidPng(8, 8, [[8, 8, 8, 255], [240, 240, 240, 255], [220, 40, 40, 255]]),
+  }], { paletteProfile: 'pal0-reserved', reserveTransparent: false }).get('bg');
+  assert.deepEqual(background.palette[0], [0, 0, 0, 255]);
+  assert.deepEqual(background.palette[1], [255, 255, 255, 255]);
+  assert.equal(background.palette.length, 16);
+  assert.equal(background.metadata.paletteProfile, 'pal0-reserved');
+  assert.equal(Number.isFinite(background.metadata.quality.meanDeltaE), true);
+
+  const spriteSource = solidPng(8, 8, [[0, 0, 0, 0], [0, 0, 0, 255], [255, 0, 0, 255]]);
+  const sprite = convert.convertVisualGroup([{
+    asset: { id: 'sprite', type: 'sprite', options: { transparentIndex: 0, spriteEditor: { frameWidth: 8, frameHeight: 8 } } },
+    buffer: spriteSource,
+  }], { paletteProfile: 'pal0-reserved', reserveTransparent: true }).get('sprite');
+  assert.deepEqual(sprite.palette[0], [0, 0, 0, 0]);
+  assert.deepEqual(sprite.palette[1], [255, 255, 255, 255]);
+  const decoded = image.decodePng(sprite.png);
+  assert.equal(decoded.sourceIndices.includes(0), true);
+  assert.equal(decoded.sourceIndices.some((value) => value >= 2), true);
+  assert.equal(decoded.sourceIndices[1] >= 2, true);
+  assert.deepEqual(sprite.palette[decoded.sourceIndices[1]].slice(0, 3), [36, 36, 36]);
+
+  const shared = convert.convertVisualGroup([
+    { asset: { id: 'shared-bg', type: 'image', options: {} }, buffer: solidPng(8, 8, [[0, 0, 0, 255], [0, 0, 255, 255]]) },
+    { asset: { id: 'shared-sprite', type: 'sprite', options: { transparentIndex: 0, spriteEditor: { frameWidth: 8, frameHeight: 8 } } }, buffer: solidPng(8, 8, [[0, 0, 0, 0], [255, 0, 0, 255]]) },
+  ], { paletteProfile: 'pal0-reserved', reserveTransparent: true });
+  const sharedBackground = image.decodePng(shared.get('shared-bg').png);
+  const sharedSprite = image.decodePng(shared.get('shared-sprite').png);
+  assert.equal(sharedBackground.sourceIndices[0], 0);
+  assert.equal(sharedSprite.sourceIndices[0], 0);
+  assert.equal(shared.get('shared-bg').metadata.transparent, false);
+  assert.equal(shared.get('shared-sprite').metadata.transparent, true);
+  assert.equal(shared.get('shared-bg').paletteFingerprint, shared.get('shared-sprite').paletteFingerprint);
+});
+
+test('palette schema rejects invalid IDs and preserves ignored SpriteText color', () => {
+  const document = { version: 2, startScene: 's', scenes: [{ id: 's', commands: [
+    { type: 'background', assetId: 'bg', palette: 'PAL4' },
+    { type: 'spritetext', slot: 0, text: 'x', x: 0, y: 0, color: '#ff0000' },
+  ] }] };
+  const catalog = { assets: [{ id: 'bg', type: 'image', source: 'assets/bg.png' }] };
+  const validation = schema.validateSceneDocument(document, catalog);
+  assert.equal(validation.diagnostics.some((entry) => entry.code === 'palette-invalid' && entry.severity === 'error'), true);
+  assert.equal(validation.diagnostics.some((entry) => entry.code === 'spritetext-color-ignored' && entry.severity === 'warning'), true);
+  assert.equal(document.scenes[0].commands[1].color, '#ff0000');
+  assert.equal(schema.newCommandPalette('background'), 'PAL0');
+  assert.deepEqual([0, 1, 2, 3].map((slot) => schema.newCommandPalette('sprite', slot)), ['PAL1', 'PAL2', 'PAL3', 'PAL3']);
+});
+
+test('binding validation forbids one asset across PAL0 and general profiles', () => {
+  const sceneDocument = { version: 2, startScene: 's', scenes: [{ id: 's', commands: [
+    { type: 'background', assetId: 'bg', palette: 'PAL0' },
+    { type: 'background', assetId: 'bg', palette: 'PAL1' },
+  ] }] };
+  const catalog = { assets: [{ id: 'bg', type: 'image', source: 'assets/bg.png' }] };
+  const bindings = {
+    sourceSceneRevision: schema.hashDocument(sceneDocument),
+    assets: { bg: {
+      assetId: 'bg', runtimeType: 'IMAGE', sourcePath: 'novel/bg.png', symbol: 'bg',
+      legacyPalette: 'PAL0', paletteGroup: null, paletteFingerprint: 'fingerprint',
+      paletteRgb333: Array.from({ length: 16 }, () => [0, 0, 0]),
+      conversion: { paletteProfile: 'pal0-reserved' }, metadata: { quality: {} },
+    } },
+    audioVariants: {}, paletteGroups: {},
+  };
+  const diagnostics = service.validateBindings(sceneDocument, catalog, bindings);
+  assert.equal(diagnostics.some((entry) => entry.code === 'asset-palette-profile-conflict'), true);
+});
 test('PSG conversion creates valid VGM and mono PCM WAV containers', () => {
   const { catalog } = fixtureDocuments();
   const song = catalog.assets.find((asset) => asset.id === 'song');
@@ -163,8 +234,24 @@ test('PSG conversion creates valid VGM and mono PCM WAV containers', () => {
   assert.equal(wav.readUInt32LE(24), 6650);
 });
 
+test('default novel font is the bundled JF-Dot-Shinonome16 at 16px and threshold 190', () => {
+  const profile = font.normalizeFontSettings();
+  assert.equal(profile.kind, 'bundled');
+  assert.equal(profile.source, 'font/JF-Dot-Shinonome16.ttf');
+  assert.equal(profile.label, '同梱 JF-Dot-Shinonome16.ttf');
+  assert.equal(profile.fontSize, 16);
+  assert.equal(profile.threshold, 190);
+  const source = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'md-novel-builder', 'template', 'res', 'novel', 'font', 'JF-Dot-Shinonome16.ttf'));
+  assert.equal(crypto.createHash('sha256').update(source).digest('hex'), '5e265e45349b3328afa67dc3905a3ca3c628cf7c7e0eccea9c7ce8a8acc127cc');
+  const atlas = image.decodePng(fs.readFileSync(path.join(__dirname, '..', 'plugins', 'md-novel-builder', 'template', 'res', 'novel', 'font', 'JF-Dot-Shinonome16-atlas.png')));
+  assert.deepEqual([atlas.width, atlas.height], [1504, 1504]);
+  const migrated = font.normalizeFontSettings({ kind: 'bundled', source: 'font/misaki_gothic.png', fontSize: 16, threshold: 32 });
+  assert.equal(migrated.source, profile.source);
+  assert.equal(migrated.threshold, 190);
+});
 test('subset font plan generates indexed 16x16 glyphs and rejects unsupported text', () => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'md-novel-builder', 'template', 'res', 'novel', 'font', 'misaki_gothic.png'));
+  const source = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'md-novel-builder', 'template', 'res', 'novel', 'font', 'JF-Dot-Shinonome16.ttf'));
+  const atlas = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'md-novel-builder', 'template', 'res', 'novel', 'font', 'JF-Dot-Shinonome16-atlas.png'));
   const sceneDocument = {
     scenes: [{
       id: 'font',
@@ -176,7 +263,7 @@ test('subset font plan generates indexed 16x16 glyphs and rejects unsupported te
     }],
   };
   const plan = font.createFontPlan(sceneDocument, font.normalizeFontSettings(), source);
-  const png = font.generateBundledAtlas(plan, source);
+  const png = font.generateBundledAtlas(plan, atlas);
   const metadata = font.generationMetadata(plan, png);
   assert.equal(font.validateGeneration(plan, metadata, png), true);
   const decoded = image.decodePng(png);
@@ -239,7 +326,7 @@ test('project font import deduplicates, generates a validated subset, and delete
   assert.equal((await service.validateFontProject(target, saved.sceneDocument, saved.targetProfile)).plan.entries.length, entries.length);
 
   const fallbackProfile = structuredClone(saved.targetProfile);
-  fallbackProfile.font = { ...fallbackProfile.font, kind: 'bundled', source: 'font/misaki_gothic.png', library: [], generation: null };
+  fallbackProfile.font = { ...fallbackProfile.font, kind: 'bundled', source: font.BUNDLED_FONT_SOURCE, library: [], generation: null };
   const fallback = await service.saveProject(target, {
     sceneDocument: saved.sceneDocument,
     targetProfile: fallbackProfile,
@@ -247,32 +334,110 @@ test('project font import deduplicates, generates a validated subset, and delete
     baseRevisions: saved.revisions,
   });
   assert.equal(fallback.targetProfile.font.kind, 'bundled');
+  const adjustedProfile = structuredClone(fallback.targetProfile);
+  adjustedProfile.font = { ...adjustedProfile.font, threshold: 200, generation: null };
+  const adjustedPlan = await service.prepareFontGeneration(target, { sceneDocument: fallback.sceneDocument, targetProfile: adjustedProfile });
+  const adjustedIndices = new Uint8Array(adjustedPlan.width * adjustedPlan.height);
+  adjustedPlan.entries.forEach((entry, index) => {
+    if (entry.character !== '　') adjustedIndices[Math.floor(index / 16) * 16 * adjustedPlan.width + (index % 16) * 16] = 1;
+  });
+  const adjustedPng = image.encodeIndexedPng(adjustedPlan.width, adjustedPlan.height, adjustedIndices, [[0, 0, 0, 0], [255, 255, 255, 255]]);
+  const adjustedCommit = await service.commitFontGeneration(target, {
+    sceneDocument: fallback.sceneDocument,
+    targetProfile: adjustedProfile,
+    inputHash: adjustedPlan.inputHash,
+    pngDataUrl: `data:image/png;base64,${adjustedPng.toString('base64')}`,
+  });
+  adjustedProfile.font.generation = adjustedCommit.generation;
+  const adjustedSaved = await service.saveProject(target, {
+    sceneDocument: fallback.sceneDocument,
+    targetProfile: adjustedProfile,
+    bindings: fallback.bindings,
+    baseRevisions: fallback.revisions,
+  });
+  assert.equal(adjustedSaved.targetProfile.font.threshold, 200);
+  assert.equal(adjustedSaved.targetProfile.font.generation.pngSha256, adjustedCommit.generation.pngSha256);
   await service.deleteFont(target, { relativePath: first.entry.file });
   assert.equal(fs.existsSync(path.join(target, first.entry.file)), false);
 });
 
-test('import, optimistic save, transaction retention, and raw unknown-field round-trip', async (t) => {
+test('import, explicit PCE palettes, joint quantization, optimistic save, and unknown-field round-trip', async (t) => {
   const source = temporaryDirectory(t, 'md-novel-source-');
   const target = temporaryDirectory(t, 'md-novel-target-');
   const fixture = createSourceFixture(source);
   fs.writeFileSync(path.join(target, 'project.json'), JSON.stringify({ coreId: 'mega-drive' }, null, 2));
   const imported = await service.importPceProject(target, { sourceProjectDir: source, portraitPaletteGroups: { PAL2: ['mu'], PAL3: [] } });
   assert.equal(imported.ok, true);
-  assert.deepEqual(imported.sceneDocument, fixture.sceneDocument);
+  assert.equal(imported.targetProfile.font.source, 'font/JF-Dot-Shinonome16.ttf');
+  assert.equal(imported.targetProfile.font.fontSize, 16);
+  assert.equal(imported.targetProfile.font.threshold, 190);
+  for (const relativePath of [
+    'res/novel/font/JF-Dot-Shinonome16.ttf',
+    'res/novel/font/JF-Dot-Shinonome16-README.txt',
+    'res/novel/font/JF-Dot-Shinonome16-LICENSE',
+    'res/novel/font/generated.png',
+  ]) assert.equal(fs.existsSync(path.join(target, relativePath)), true, relativePath);
+  const bundledSourcePath = path.join(target, 'res', 'novel', 'font', 'JF-Dot-Shinonome16.ttf');
+  fs.rmSync(bundledSourcePath);
+  assert.equal(fs.existsSync(bundledSourcePath), false);
+  await service.prepareFontGeneration(target, { sceneDocument: imported.sceneDocument, targetProfile: imported.targetProfile });
+  assert.equal(fs.existsSync(bundledSourcePath), true);
+  assert.deepEqual(imported.sceneDocument, service.injectPcePalettes(fixture.sceneDocument));
+  assert.equal(imported.sceneDocument.scenes[0].commands[0].palette, 'PAL0');
+  assert.equal(imported.sceneDocument.scenes[0].commands[1].palette, 'PAL1');
+  assert.equal(imported.sceneDocument.scenes[0].commands[2].palette, 'PAL2');
   assert.equal(imported.bindings.audioVariants['song@0'].status, 'ready');
   assert.equal(imported.bindings.audioVariants['sfx@1'].status, 'ready');
   assert.equal(fs.existsSync(path.join(target, 'res', imported.bindings.audioVariants['song@0'].sourcePath)), true);
-  const fingerprints = new Set(['sp_mu_a', 'sp_mu_b'].map((id) => imported.bindings.assets[id].paletteFingerprint));
-  assert.equal(fingerprints.size, 1);
-  const originalTransactionPaths = Object.keys(imported.transaction.documents);
+  const independentFingerprints = new Set(['sp_mu_a', 'sp_mu_b'].map((id) => imported.bindings.assets[id].paletteFingerprint));
+  assert.equal(independentFingerprints.size, 2);
+  assert.equal(imported.bindings.assets.sp_mu_a.paletteGroup, null);
+  const indexed = await service.readIndexedAssets(target, { assetIds: ['bg', 'sp_mu_a'] });
+  assert.equal(Buffer.from(indexed.assets.bg.indicesBase64, 'base64').length, 64);
+  assert.equal(indexed.assets.bg.paletteRgb333.length, 16);
 
-  const edited = structuredClone(imported.sceneDocument);
+  const grouped = await service.quantizePaletteGroup(target, {
+    groupId: 'portraits',
+    members: ['sp_mu_a', 'sp_mu_b'],
+    baseRevisions: imported.revisions,
+  });
+  assert.equal(grouped.ok, true);
+  assert.equal(grouped.bindings.assets.sp_mu_a.paletteGroup, 'portraits');
+  assert.equal(grouped.bindings.assets.sp_mu_a.paletteFingerprint, grouped.bindings.assets.sp_mu_b.paletteFingerprint);
+  assert.deepEqual(grouped.bindings.paletteGroups.portraits.members, ['sp_mu_a', 'sp_mu_b']);
+
+  const legacyBindings = structuredClone(grouped.bindings);
+  legacyBindings.assets.bg.conversion.converterVersion = 1;
+  legacyBindings.assets.sp_mu_a.conversion.converterVersion = 1;
+  legacyBindings.assets.sp_mu_b.conversion.converterVersion = 1;
+  await service.commitDocuments(target, { [service.RELATIVE_PATHS.bindings]: legacyBindings }, { sourceSceneRevision: legacyBindings.sourceSceneRevision });
+  const staleConversions = await service.loadProject(target);
+  assert.equal(staleConversions.diagnostics.some((entry) => entry.code === 'visual-conversion-source-stale' && entry.assetId === 'bg'), true);
+  assert.equal(staleConversions.diagnostics.some((entry) => entry.code === 'palette-group-conversion-stale' && entry.groupId === 'portraits'), true);
+  const regrouped = await service.quantizePaletteGroup(target, {
+    groupId: 'portraits',
+    members: ['sp_mu_a', 'sp_mu_b'],
+    baseRevisions: staleConversions.revisions,
+  });
+  assert.equal(regrouped.diagnostics.some((entry) => entry.code === 'palette-group-conversion-stale'), false);
+  assert.equal(regrouped.diagnostics.some((entry) => entry.code === 'visual-conversion-source-stale' && entry.assetId === 'bg'), true);
+  const active = await service.saveProject(target, {
+    sceneDocument: regrouped.sceneDocument,
+    targetProfile: regrouped.targetProfile,
+    bindings: regrouped.bindings,
+    baseRevisions: regrouped.revisions,
+  });
+  assert.equal(active.ok, true);
+  assert.equal(active.diagnostics.some((entry) => entry.code.includes('conversion') && entry.severity === 'error'), false);
+  const originalTransactionPaths = Object.keys(active.transaction.documents);
+
+  const edited = structuredClone(active.sceneDocument);
   edited.scenes[0].commands[5].text = 'edited';
   const saved = await service.saveProject(target, {
     sceneDocument: edited,
-    targetProfile: imported.targetProfile,
-    bindings: imported.bindings,
-    baseRevisions: imported.revisions,
+    targetProfile: active.targetProfile,
+    bindings: active.bindings,
+    baseRevisions: active.revisions,
   });
   assert.equal(saved.ok, true);
   assert.equal(saved.sceneDocument.futureRoot.nested[1].flag, true);
@@ -285,7 +450,6 @@ test('import, optimistic save, transaction retention, and raw unknown-field roun
   assert.equal(tampered.diagnostics.some((entry) => entry.code === 'transaction-hash-mismatch'), true);
   await assert.rejects(() => service.saveProject(target, {}), /inconsistent Novel transaction/);
 });
-
 test('project path and JSON guards reject traversal and prototype keys', () => {
   assert.throws(() => service.normalizeRelative('../escape.json'), /Unsafe project path/);
   assert.throws(() => service.normalizeRelative('data//escape.json'), /Unsafe project path/);
@@ -337,6 +501,11 @@ test('md-novel-builder is hook-only and exports explicit source files without bo
   const runtime = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'md-novel-builder', 'template', 'src', 'novel_runtime', 'novel_runtime.c'), 'utf8');
   assert.match(runtime, /u16 guard = 0;/);
   assert.match(runtime, /guard < 512/);
+  assert.match(runtime, /palette = \(u16\)command->count & 3/);
+  assert.match(runtime, /loadedPaletteIds\[palette\] == paletteId/);
+  assert.match(runtime, /overlaySetPixel\(x \+ pixelX, y \+ pixelY, 1\)/);
+  assert.match(runtime, /restoreMessageColor\(\);/);
+  assert.doesNotMatch(runtime, /novelDataSpritePalette\(/);
 });
 
 test('codegen preserves control flow, variables, input mapping, animation, and 75-cell pagination', async (t) => {
@@ -369,9 +538,10 @@ test('codegen preserves control flow, variables, input mapping, animation, and 7
     { type: 'effect', effect: 'flash', frames: 2, color: '#ffffff' },
     { type: 'effect', effect: 'shake', frames: 2, intensity: 3 },
     { type: 'label', name: 'done' },
-    { type: 'message', speaker: 'A', text: 'A'.repeat(76), mouthSlot: 0 },
+    { type: 'message', speaker: 'A', text: 'A'.repeat(76), textColor: '#ff0000', mouthSlot: 0 },
   ];
   const bindings = structuredClone(imported.bindings);
+  bindings.assets.bg.metadata = { ...bindings.assets.bg.metadata, usesPaletteIndex1: true };
   bindings.sourceSceneRevision = schema.hashDocument(sceneDocument);
   const fontSource = await service.readFontSource(target, imported.targetProfile.font);
   const fontPlan = font.createFontPlan(sceneDocument, imported.targetProfile.font, fontSource.buffer);
@@ -383,6 +553,10 @@ test('codegen preserves control flow, variables, input mapping, animation, and 7
     bindings,
   });
   const c = generated.files['src/generated/novel_data.c'];
+  assert.match(c, /NOV_CMD_BACKGROUND, NOV_FLAG_FADE, 0, 0,/);
+  assert.match(c, /NOV_CMD_SPRITE, NOV_FLAG_VISIBLE, 0, 1,/);
+  assert.match(c, /u16 novelDataBackgroundPaletteId\(u16 index\)/);
+  assert.match(c, /u16 novelDataSpritePaletteId\(u16 index\)/);
   assert.match(c, /NOV_CMD_VARIABLE, NOV_VAR_DEFINE/);
   assert.match(c, /NOV_CMD_VARIABLE, NOV_VAR_ADD/);
   assert.match(c, /NOV_CMD_IF, NOV_COMPARE_EQ/);
@@ -394,6 +568,8 @@ test('codegen preserves control flow, variables, input mapping, animation, and 7
   assert.match(c, /static const NovelSwitch nov_switch_1 = \{ 0, \d+, \{ \{ 0, -1 \} \} \};/);
   assert.match(c, /static const s16 nov_initial_variables\[\] = \{ 0, 0, 5, 0 \}/);
   assert.match(c, /nov_message_0_pages\[\] = \{ nov_text_\d+, nov_text_\d+ \}/);
+  assert.match(c, /static const NovelMessage nov_message_0 = \{ [^\r\n]+0x0eee \};/);
+  assert.equal(generated.warnings.some((entry) => entry.code === 'pal0-message-index1-conflict'), true);
   assert.equal(generated.report.variables, 4);
   assert.equal(generated.report.switches, 2);
   assert.equal(generated.report.messages, 1);
@@ -442,6 +618,61 @@ test('preflight reserves disjoint VRAM for simultaneous SpriteText and WINDOW gl
   assert.equal(budget.diagnostics.length, 0);
 });
 
+test('preflight rejects simultaneous physical PAL conflicts but allows sequential or shared-fingerprint reuse', () => {
+  const asset = (fingerprint, sprite = false) => ({
+    paletteFingerprint: fingerprint,
+    metadata: sprite
+      ? { frameWidth: 8, frameHeight: 8, maxNumTile: 1, maxNumSprite: 1 }
+      : { uniqueTiles: 1 },
+  });
+  const simultaneous = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [
+    { type: 'background', assetId: 'bg', palette: 'PAL2' },
+    { type: 'sprite', slot: 0, assetId: 'actor', palette: 'PAL2', x: 0, y: 0, visible: true },
+  ] }] }, { assets: { bg: asset('bg-palette'), actor: asset('actor-palette', true) } });
+  assert.equal(simultaneous.diagnostics.some((entry) => entry.code === 'palette-runtime-conflict' && entry.palette === 'PAL2'), true);
+
+  const sequential = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [
+    { type: 'sprite', slot: 0, assetId: 'actor-a', palette: 'PAL2', x: 0, y: 0, visible: true },
+    { type: 'sprite', slot: 0, assetId: 'actor-b', palette: 'PAL2', x: 8, y: 0, visible: true },
+  ] }] }, { assets: { 'actor-a': asset('a', true), 'actor-b': asset('b', true) } });
+  assert.equal(sequential.diagnostics.some((entry) => entry.code === 'palette-runtime-conflict'), false);
+
+  const shared = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [
+    { type: 'background', assetId: 'bg', palette: 'PAL3' },
+    { type: 'sprite', slot: 0, assetId: 'actor', palette: 'PAL3', x: 0, y: 0, visible: true },
+  ] }] }, { assets: { bg: asset('joint'), actor: asset('joint', true) } });
+  assert.equal(shared.diagnostics.some((entry) => entry.code === 'palette-runtime-conflict'), false);
+});
+
+test('preflight falls non-white messages back to white when PAL0 index 1 is occupied', () => {
+  const pal0Background = {
+    paletteFingerprint: 'bg',
+    metadata: { uniqueTiles: 1, usesPaletteIndex1: true },
+  };
+  const assetBindings = { assets: { bg: pal0Background } };
+  const occupied = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [
+    { type: 'background', assetId: 'bg', palette: 'PAL0' },
+    { type: 'message', text: 'red', textColor: '#ff0000' },
+  ] }] }, assetBindings);
+  const occupiedDiagnostic = occupied.diagnostics.find((entry) => entry.code === 'pal0-message-index1-conflict');
+  assert.equal(occupiedDiagnostic?.severity, 'warning');
+  assert.deepEqual(occupied.messageColorFallbacks, ['0:1']);
+
+  const overlay = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [
+    { type: 'spritetext', slot: 0, text: 'overlay', x: 0, y: 0, visible: true },
+    { type: 'message', text: 'red', textColor: '#ff0000' },
+  ] }] }, { assets: {} });
+  const overlayDiagnostic = overlay.diagnostics.find((entry) => entry.code === 'pal0-message-spritetext-conflict');
+  assert.equal(overlayDiagnostic?.severity, 'warning');
+  assert.deepEqual(overlay.messageColorFallbacks, ['0:1']);
+
+  const white = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [
+    { type: 'background', assetId: 'bg', palette: 'PAL0' },
+    { type: 'message', text: 'white', textColor: '#ffffff' },
+  ] }] }, assetBindings);
+  assert.equal(white.diagnostics.some((entry) => entry.code?.startsWith('pal0-message-')), false);
+  assert.deepEqual(white.messageColorFallbacks, []);
+});
 test('builder rejects case-insensitive ResComp symbol conflicts', (t) => {
   const target = temporaryDirectory(t, 'md-novel-symbol-target-');
   fs.mkdirSync(path.join(target, 'res'), { recursive: true });

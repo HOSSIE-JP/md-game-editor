@@ -5,7 +5,10 @@ const { normalizeFontSettings } = require('./novel-font');
 
 const SCHEMA_VERSION = 1;
 const PCE_SCENE_VERSION = 2;
+const VISUAL_CONVERTER_VERSION = 3;
 const RESERVED_VARIABLES = Object.freeze(['AUTO_ENABLE', 'MSG_SPEED']);
+const PALETTE_NAMES = Object.freeze(['PAL0', 'PAL1', 'PAL2', 'PAL3']);
+const NEW_SPRITE_PALETTES = Object.freeze(['PAL1', 'PAL2', 'PAL3', 'PAL3']);
 const KNOWN_COMMANDS = new Set([
   'background',
   'sprite',
@@ -85,6 +88,53 @@ function isSkippedCommand(command) {
   return Boolean(command?.skip) || command?.type === 'comment';
 }
 
+function normalizedPalette(value) {
+  const palette = stringValue(value).trim().toUpperCase();
+  return PALETTE_NAMES.includes(palette) ? palette : '';
+}
+
+function paletteIndex(value) {
+  const palette = normalizedPalette(value);
+  return palette ? PALETTE_NAMES.indexOf(palette) : -1;
+}
+
+function paletteProfile(value) {
+  return normalizedPalette(value) === 'PAL0' ? 'pal0-reserved' : 'general';
+}
+
+function newCommandPalette(commandType, slot = 0) {
+  if (commandType === 'background') return 'PAL0';
+  if (commandType === 'sprite') return NEW_SPRITE_PALETTES[Math.max(0, Math.min(3, Number(slot) || 0))];
+  return '';
+}
+
+function resolveCommandPalette(command, binding = null) {
+  const explicit = normalizedPalette(command?.palette);
+  if (explicit) return explicit;
+  const legacy = normalizedPalette(binding?.legacyPalette || binding?.palette);
+  if (legacy) return legacy;
+  if (command?.type === 'background') return 'PAL1';
+  if (command?.type === 'sprite') return 'PAL2';
+  return '';
+}
+
+function collectVisualPaletteRequirements(sceneDocument, bindings = null) {
+  const assets = new Map();
+  for (const [sceneIndex, scene] of (sceneDocument?.scenes || []).entries()) {
+    for (const [commandIndex, command] of (scene?.commands || []).entries()) {
+      if (!command || isSkippedCommand(command) || !['background', 'sprite'].includes(command.type)) continue;
+      const assetId = stringValue(command.assetId).trim();
+      if (!assetId) continue;
+      const palette = resolveCommandPalette(command, bindings?.assets?.[assetId]);
+      if (!assets.has(assetId)) assets.set(assetId, { assetId, palettes: new Set(), profiles: new Set(), references: [] });
+      const requirement = assets.get(assetId);
+      requirement.palettes.add(palette);
+      requirement.profiles.add(paletteProfile(palette));
+      requirement.references.push({ sceneId: stringValue(scene.id), sceneIndex, commandIndex, commandType: command.type, palette });
+    }
+  }
+  return assets;
+}
 function assetTypeMatches(assetType, expected) {
   if (expected === 'image') return assetType === 'image';
   if (expected === 'sprite') return assetType === 'sprite';
@@ -247,6 +297,10 @@ function validateSceneDocument(sceneDocument, catalog = null, options = {}) {
         else labels.set(name, commandIndex);
       }
 
+      if (type === 'background' || type === 'sprite') {
+        const rawPalette = stringValue(command.palette).trim();
+        if (rawPalette && !normalizedPalette(rawPalette)) push('error', 'palette-invalid', `${path}.palette`, 'palette must be PAL0, PAL1, PAL2, or PAL3');
+      }
       if (type === 'background' || type === 'sprite' || type === 'spritemove' || type === 'spritetext') {
         const x = Number(command.x);
         const y = Number(command.y);
@@ -282,6 +336,9 @@ function validateSceneDocument(sceneDocument, catalog = null, options = {}) {
       }
       if (type === 'spritetext' && glyphLength(command.text) > 32) {
         push('warning', 'spritetext-clipped', `${path}.text`, 'SpriteText preserves the raw text but the Mega Drive renderer uses the first 32 characters');
+      }
+      if (type === 'spritetext' && stringValue(command.color).trim() && stringValue(command.color).toLowerCase() !== '#ffffff') {
+        push('warning', 'spritetext-color-ignored', `${path}.color`, 'SpriteText color is preserved but the Mega Drive renderer always uses PAL0 index 1 (white)');
       }
       if (type === 'cache') {
         push('warning', 'cache-noop', path, 'PCE cache command is a zero-time no-op on Mega Drive');
@@ -433,9 +490,11 @@ function defaultTargetProfile(options = {}) {
     },
     palettes: {
       system: 0,
-      background: 1,
-      portraitA: 2,
-      portraitB: 3,
+      selectable: [0, 1, 2, 3],
+      pal0Reserved: {
+        0: '#000000',
+        1: '#ffffff',
+      },
     },
     font: normalizeFontSettings(),
     audio: {
@@ -485,22 +544,17 @@ function characterGroup(assetId) {
 function paletteAssignment(assetId, options = {}) {
   const group = characterGroup(assetId);
   const explicit = options.portraitPaletteGroups || {};
+  if ((explicit.PAL1 || []).map(String).map((item) => item.toLowerCase()).includes(group)) return 'PAL1';
   if ((explicit.PAL2 || []).map(String).map((item) => item.toLowerCase()).includes(group)) return 'PAL2';
   if ((explicit.PAL3 || []).map(String).map((item) => item.toLowerCase()).includes(group)) return 'PAL3';
-  const groupOrder = Array.isArray(options.characterGroups) ? options.characterGroups : [];
-  return groupOrder.indexOf(group) <= 0 ? 'PAL2' : 'PAL3';
+  return 'PAL2';
 }
-
 function createAssetBindings(sceneDocument, catalog, options = {}) {
   const sceneRevision = options.sceneRevision || hashDocument(sceneDocument);
   const catalogInfo = collectCatalog(catalog);
   const validation = validateSceneDocument(sceneDocument, catalog);
   const referencedIds = new Set(validation.references.map((reference) => reference.assetId));
-  const characterGroups = Array.from(new Set(
-    catalogInfo.assets
-      .filter((asset) => asset.type === 'sprite' && referencedIds.has(asset.id))
-      .map((asset) => characterGroup(asset.id)),
-  )).sort();
+  const paletteRequirements = collectVisualPaletteRequirements(sceneDocument);
 
   const assets = {};
   for (const asset of catalogInfo.assets) {
@@ -508,17 +562,21 @@ function createAssetBindings(sceneDocument, catalog, options = {}) {
     if (!assetId || !referencedIds.has(assetId)) continue;
     const sourceType = stringValue(asset.type);
     let runtimeType = 'IGNORED';
-    let palette = null;
+    let legacyPalette = null;
+    let paletteProfileName = null;
     let subdir = 'ignored';
     let extension = '';
     if (sourceType === 'image') {
       runtimeType = 'IMAGE';
-      palette = 'PAL1';
+      legacyPalette = Array.from(paletteRequirements.get(assetId)?.palettes || [])[0] || 'PAL1';
+      paletteProfileName = paletteProfile(legacyPalette);
       subdir = 'backgrounds';
       extension = '.png';
     } else if (sourceType === 'sprite') {
       runtimeType = 'SPRITE';
-      palette = paletteAssignment(assetId, { ...options, characterGroups });
+      legacyPalette = Array.from(paletteRequirements.get(assetId)?.palettes || [])[0]
+        || paletteAssignment(assetId, options);
+      paletteProfileName = paletteProfile(legacyPalette);
       subdir = 'sprites';
       extension = '.png';
     } else if (sourceType === 'psg-song') {
@@ -536,12 +594,16 @@ function createAssetBindings(sceneDocument, catalog, options = {}) {
       sourceType,
       runtimeType,
       symbol,
-      palette,
-      sourcePath: runtimeType === 'IGNORED' ? '' : `novel/${subdir}/${symbol}${extension}`,
+      palette: legacyPalette,
+      legacyPalette,
+      paletteGroup: null,
+      sourcePath: runtimeType === 'IGNORED' ? '' : 'novel/' + subdir + '/' + symbol + extension,
       originalSource: stringValue(asset.source),
       conversion: {
-        converterVersion: 1,
+        converterVersion: VISUAL_CONVERTER_VERSION,
         coordinateMode: options.coordinateMode || 'pce-legacy-256',
+        paletteProfile: paletteProfileName,
+        inputHash: '',
       },
     };
   }
@@ -550,12 +612,12 @@ function createAssetBindings(sceneDocument, catalog, options = {}) {
   for (const variant of collectPsgVariants(sceneDocument, catalogInfo.byId).values()) {
     const asset = catalogInfo.byId.get(variant.assetId);
     const runtimeType = asset.type === 'psg-song' ? 'XGM2' : 'WAV';
-    const symbol = sanitizeSymbol(`${variant.assetId}_ch${variant.channel}`, runtimeType === 'XGM2' ? 'nov_bgm' : 'nov_sfx');
+    const symbol = sanitizeSymbol(String(variant.assetId) + '_ch' + variant.channel, runtimeType === 'XGM2' ? 'nov_bgm' : 'nov_sfx');
     audioVariants[variant.key] = {
       ...variant,
       runtimeType,
       symbol,
-      sourcePath: `novel/${runtimeType === 'XGM2' ? 'music' : 'sfx'}/${symbol}.${runtimeType === 'XGM2' ? 'vgm' : 'wav'}`,
+      sourcePath: 'novel/' + (runtimeType === 'XGM2' ? 'music' : 'sfx') + '/' + symbol + '.' + (runtimeType === 'XGM2' ? 'vgm' : 'wav'),
       status: 'pending',
     };
   }
@@ -565,17 +627,16 @@ function createAssetBindings(sceneDocument, catalog, options = {}) {
     sourceSceneRevision: sceneRevision,
     assets,
     audioVariants,
-    paletteGroups: {
-      PAL2: characterGroups.filter((group) => paletteAssignment(`sp_${group}_x`, { ...options, characterGroups }) === 'PAL2'),
-      PAL3: characterGroups.filter((group) => paletteAssignment(`sp_${group}_x`, { ...options, characterGroups }) === 'PAL3'),
-    },
+    paletteGroups: {},
   };
 }
-
 module.exports = {
   SCHEMA_VERSION,
   PCE_SCENE_VERSION,
+  VISUAL_CONVERTER_VERSION,
   RESERVED_VARIABLES,
+  PALETTE_NAMES,
+  NEW_SPRITE_PALETTES,
   KNOWN_COMMANDS,
   isPlainObject,
   deepClone,
@@ -584,6 +645,12 @@ module.exports = {
   glyphLength,
   makeDiagnostic,
   isSkippedCommand,
+  normalizedPalette,
+  paletteIndex,
+  paletteProfile,
+  newCommandPalette,
+  resolveCommandPalette,
+  collectVisualPaletteRequirements,
   collectCatalog,
   collectReferences,
   collectPsgVariants,

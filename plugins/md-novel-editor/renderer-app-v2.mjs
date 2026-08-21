@@ -30,6 +30,9 @@ import { openNovelPreview } from './preview-window.mjs';
 
 const STORAGE_PREFIX = 'md-novel-editor.pce-ui.v1';
 const HISTORY_LIMIT = 100;
+const DEFAULT_FONT_SOURCE = 'font/JF-Dot-Shinonome16.ttf';
+const DEFAULT_FONT_LABEL = '同梱 JF-Dot-Shinonome16.ttf';
+const DEFAULT_FONT_THRESHOLD = 190;
 
 function number(value, fallback = 0) {
   const parsed = Number(value);
@@ -141,6 +144,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     newCommandDragType: '',
     projectDir: '',
     imageCache: new Map(),
+    indexedAssetCache: new Map(),
+    paletteCanvasCache: new Map(),
     fontPlan: null,
     fontImage: null,
     fontFace: null,
@@ -208,6 +213,32 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     return { sceneDocument: state.sceneDocument, scene, catalog: state.catalog, bindings: state.bindings };
   }
 
+  function resolvedVisualPalette(command) {
+    const explicit = String(command?.palette || '').toUpperCase();
+    if (['PAL0', 'PAL1', 'PAL2', 'PAL3'].includes(explicit)) return explicit;
+    const binding = state.bindings?.assets?.[command?.assetId];
+    const legacy = String(binding?.legacyPalette || binding?.palette || '').toUpperCase();
+    if (['PAL0', 'PAL1', 'PAL2', 'PAL3'].includes(legacy)) return legacy;
+    return command?.type === 'background' ? 'PAL1' : 'PAL2';
+  }
+
+  function visualPaletteEditError(nextCommand) {
+    if (!['background', 'sprite'].includes(nextCommand?.type) || !nextCommand.assetId) return '';
+    const profile = resolvedVisualPalette(nextCommand) === 'PAL0' ? 'pal0-reserved' : 'general';
+    const binding = state.bindings?.assets?.[nextCommand.assetId];
+    if (binding?.paletteGroup && binding.conversion?.paletteProfile && binding.conversion.paletteProfile !== profile) {
+      return nextCommand.assetId + ' はpalette group ' + binding.paletteGroup + ' の ' + binding.conversion.paletteProfile + ' profileに固定されています。先にAssetsでgroupを変更してください。';
+    }
+    for (const scene of state.sceneDocument?.scenes || []) {
+      for (const [commandIndex, command] of (scene.commands || []).entries()) {
+        if (scene.id === state.selectedSceneId && commandIndex === state.selectedCommandIndex) continue;
+        if (!['background', 'sprite'].includes(command?.type) || command.assetId !== nextCommand.assetId || command.skip === true) continue;
+        const otherProfile = resolvedVisualPalette(command) === 'PAL0' ? 'pal0-reserved' : 'general';
+        if (otherProfile !== profile) return nextCommand.assetId + ' はPAL0とPAL1-PAL3の両profileでは共有できません。assetを複製して割り当ててください。';
+      }
+    }
+    return '';
+  }
   function documentState() {
     return clone({ sceneDocument: state.sceneDocument, targetProfile: state.targetProfile, bindings: state.bindings });
   }
@@ -370,6 +401,32 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     return state.imageCache.get(`asset:${path}`)?.image || null;
   }
 
+  function indexedForAsset(assetId) {
+    return state.indexedAssetCache.get(String(assetId || '')) || null;
+  }
+
+  function decodeBase64Bytes(value) {
+    const binary = atob(String(value || ''));
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  }
+
+  async function ensureIndexedAssets(assetIds) {
+    const missing = [...new Set(assetIds || [])].filter((assetId) => !state.indexedAssetCache.has(String(assetId)));
+    for (let offset = 0; offset < missing.length; offset += 16) {
+      const batch = missing.slice(offset, offset + 16);
+      if (!batch.length) continue;
+      const result = await api.plugins.invokeHook(plugin.id, 'readMdNovelIndexedAssets', { assetIds: batch });
+      if (!result?.ok) throw new Error(result?.error || 'Indexed preview assetを読込めません');
+      for (const [assetId, record] of Object.entries(result.assets || {})) {
+        state.indexedAssetCache.set(assetId, {
+          ...record,
+          indices: decodeBase64Bytes(record.indicesBase64),
+        });
+      }
+    }
+  }
   async function ensureAssetImages(assetIds) {
     await Promise.all([...new Set(assetIds || [])].map((assetId) => {
       const path = state.bindings?.assets?.[assetId]?.sourcePath;
@@ -384,12 +441,12 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const visual = scene ? simulateScene(scene, state.selectedCommandIndex, { columns: 19, rows: 4 }) : {};
     visual.choiceIndex = visual.choice?.defaultIndex || 0;
     visual.autoEnabled = state.sceneDocument?.settings?.messageAdvanceMode === 'auto';
-    drawNovelFrame(elements.commandPreview, visual, { coordinateMode: state.targetProfile?.coordinateMode, bindings: state.bindings, imageForAsset });
+    drawNovelFrame(elements.commandPreview, visual, { coordinateMode: state.targetProfile?.coordinateMode, bindings: state.bindings, imageForAsset, indexedForAsset, paletteCanvasCache: state.paletteCanvasCache });
     elements.previewLabel.textContent = scene && command ? `${scene.id} · #${state.selectedCommandIndex + 1}` : '';
     updateAudioPreviewState(command);
-    await ensureAssetImages(collectVisualAssetIds(visual));
+    await Promise.all([ensureAssetImages(collectVisualAssetIds(visual)), ensureIndexedAssets(collectVisualAssetIds(visual))]);
     if (generation !== state.previewGeneration) return;
-    drawNovelFrame(elements.commandPreview, visual, { coordinateMode: state.targetProfile?.coordinateMode, bindings: state.bindings, imageForAsset });
+    drawNovelFrame(elements.commandPreview, visual, { coordinateMode: state.targetProfile?.coordinateMode, bindings: state.bindings, imageForAsset, indexedForAsset, paletteCanvasCache: state.paletteCanvasCache });
   }
 
   function fontGenerationStatus(message, tone = '') {
@@ -405,19 +462,6 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     state.fontFaceName = '';
   }
 
-  function bundledJisCell(code) {
-    if (code <= 0xff) return null;
-    const lead = code >> 8;
-    const trail = code & 0xff;
-    if (!(((lead >= 0x81) && (lead <= 0x9f)) || ((lead >= 0xe0) && (lead <= 0xef)))) return null;
-    if (trail < 0x40 || trail > 0xfc || trail === 0x7f) return null;
-    let row = lead <= 0x9f ? ((lead - 0x81) * 2) + 0x21 : ((lead - 0xe0) * 2) + 0x5f;
-    let column;
-    if (trail >= 0x9f) { row += 1; column = trail - 0x7e; }
-    else column = trail - (trail < 0x7f ? 0x1f : 0x20);
-    return { row: row - 0x21, column: column - 0x21 };
-  }
-
   async function rasterizeFontPlan(plan) {
     const canvas = document.createElement('canvas');
     canvas.width = plan.width;
@@ -428,56 +472,38 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const size = clamp(plan.font?.fontSize, 8, 32, 16);
     const xOffset = clamp(plan.font?.xOffset, -8, 8, 0);
     const yOffset = clamp(plan.font?.yOffset, -8, 8, 0);
-    if (plan.font?.kind === 'bundled') {
-      const source = await loadProjectImage(plan.sourceRelativePath, `font-source:${plan.sourceHash}`);
-      if (!source) throw new Error('同梱Misaki font sourceを読込めません');
-      for (const [index, entry] of plan.entries.entries()) {
-        const cell = bundledJisCell(entry.code);
-        if (!cell) throw new Error(`同梱Misakiに収録できない文字です: ${entry.character}`);
-        const cellX = (index % 16) * 16;
-        const cellY = Math.floor(index / 16) * 16;
-        const x = cellX + Math.floor((16 - size) / 2) + xOffset;
-        const y = cellY + Math.floor((16 - size) / 2) + yOffset;
-        context.save();
-        context.beginPath();
-        context.rect(cellX, cellY, 16, 16);
-        context.clip();
-        context.drawImage(source, cell.column * 8, cell.row * 8, 8, 8, x, y, size, size);
-        context.restore();
-      }
-    } else {
-      const projectDir = await getProjectDir();
-      const read = await api.electronAPI.readFileAsDataUrl(`${projectDir}/${plan.sourceRelativePath}`);
-      if (!read?.ok || !read.dataUrl) throw new Error(read?.error || '登録fontを読込めません');
-      releaseFontFace();
-      state.fontFaceName = `md_novel_${String(plan.inputHash).slice(0, 16)}`;
-      state.fontFace = new FontFace(state.fontFaceName, `url("${read.dataUrl}")`);
-      await state.fontFace.load();
-      document.fonts.add(state.fontFace);
-      context.fillStyle = '#fff';
-      context.textAlign = 'left';
-      context.textBaseline = 'alphabetic';
-      context.font = `${size}px "${state.fontFaceName}"`;
-      for (const [index, entry] of plan.entries.entries()) {
-        if (entry.character === '　') continue;
-        const metrics = context.measureText(entry.character);
-        const ascent = Number(metrics.actualBoundingBoxAscent || size * .8);
-        const descent = Number(metrics.actualBoundingBoxDescent || size * .2);
-        const width = Number(metrics.width || size);
-        const cellX = (index % 16) * 16;
-        const cellY = Math.floor(index / 16) * 16;
-        const x = cellX + (16 - width) / 2 + xOffset;
-        const baseline = cellY + (16 - ascent - descent) / 2 + ascent + yOffset;
-        context.save();
-        context.beginPath();
-        context.rect(cellX, cellY, 16, 16);
-        context.clip();
-        context.fillText(entry.character, x, baseline);
-        context.restore();
-      }
+    const projectDir = await getProjectDir();
+    const read = await api.electronAPI.readFileAsDataUrl(`${projectDir}/${plan.sourceRelativePath}`);
+    const sourceLabel = plan.font?.kind === 'bundled' ? '同梱font' : '登録font';
+    if (!read?.ok || !read.dataUrl) throw new Error(read?.error || `${sourceLabel}を読込めません`);
+    releaseFontFace();
+    state.fontFaceName = `md_novel_${String(plan.inputHash).slice(0, 16)}`;
+    state.fontFace = new FontFace(state.fontFaceName, `url("${read.dataUrl}")`);
+    await state.fontFace.load();
+    document.fonts.add(state.fontFace);
+    context.fillStyle = '#fff';
+    context.textAlign = 'left';
+    context.textBaseline = 'alphabetic';
+    context.font = `${size}px "${state.fontFaceName}"`;
+    for (const [index, entry] of plan.entries.entries()) {
+      if (entry.character === '　') continue;
+      const metrics = context.measureText(entry.character);
+      const ascent = Number(metrics.actualBoundingBoxAscent || size * .8);
+      const descent = Number(metrics.actualBoundingBoxDescent || size * .2);
+      const width = Number(metrics.width || size);
+      const cellX = (index % 16) * 16;
+      const cellY = Math.floor(index / 16) * 16;
+      const x = cellX + (16 - width) / 2 + xOffset;
+      const baseline = cellY + (16 - ascent - descent) / 2 + ascent + yOffset;
+      context.save();
+      context.beginPath();
+      context.rect(cellX, cellY, 16, 16);
+      context.clip();
+      context.fillText(entry.character, x, baseline);
+      context.restore();
     }
     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    const threshold = clamp(plan.font?.threshold, 1, 254, 32);
+    const threshold = clamp(plan.font?.threshold, 1, 254, DEFAULT_FONT_THRESHOLD);
     for (let offset = 0; offset < imageData.data.length; offset += 4) {
       const alpha = imageData.data[offset + 3];
       const luminance = Math.max(imageData.data[offset], imageData.data[offset + 1], imageData.data[offset + 2]);
@@ -564,12 +590,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         return true;
       }
       setStatus('16×16 bitmap fontを生成中…');
-      let pngDataUrl = '';
-      if (plan.font.kind === 'project') {
-        const canvas = await rasterizeFontPlan(plan);
-        const imageData = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
-        pngDataUrl = await api.imageDataToIndexedPng(imageData);
-      }
+      const canvas = await rasterizeFontPlan(plan);
+      const imageData = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+      const pngDataUrl = await api.imageDataToIndexedPng(imageData);
       const result = await api.plugins.invokeHook(plugin.id, 'commitMdNovelFontGeneration', {
         sceneDocument: state.sceneDocument,
         targetProfile: state.targetProfile,
@@ -606,8 +629,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       const entry = font.library.find((item) => item.file === source);
       if (source === 'bundled' || !entry) {
         font.kind = 'bundled';
-        font.source = 'font/misaki_gothic.png';
-        font.label = '同梱 Misaki Gothic';
+        font.source = DEFAULT_FONT_SOURCE;
+        font.label = DEFAULT_FONT_LABEL;
       } else {
         font.kind = 'project';
         font.source = entry.file;
@@ -617,7 +640,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     } else if (field === 'previewText') {
       font.previewText = String(element.value || '').slice(0, 512);
     } else {
-      const ranges = { fontSize: [8, 32, 16], threshold: [1, 254, 32], xOffset: [-8, 8, 0], yOffset: [-8, 8, 0] };
+      const ranges = { fontSize: [8, 32, 16], threshold: [1, 254, DEFAULT_FONT_THRESHOLD], xOffset: [-8, 8, 0], yOffset: [-8, 8, 0] };
       const range = ranges[field];
       if (!range) return;
       font[field] = clamp(element.value, range[0], range[1], range[2]);
@@ -654,10 +677,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   async function deleteActiveFont() {
     const font = state.targetProfile.font || {};
     if (font.kind !== 'project' || !font.source) return;
-    const choice = await askDecision({ title: '登録fontを削除', message: `${font.label || font.source} をprojectから削除します。同梱Misakiへ切り替えて再生成します。`, confirmLabel: '削除', danger: true });
+    const choice = await askDecision({ title: '登録fontを削除', message: `${font.label || font.source} をprojectから削除します。同梱JF-Dot-Shinonome16へ切り替えて再生成します。`, confirmLabel: '削除', danger: true });
     if (choice !== 'confirm') return;
     const previous = clone(state.targetProfile.font);
-    state.targetProfile.font = { ...font, kind: 'bundled', source: 'font/misaki_gothic.png', label: '同梱 Misaki Gothic', library: (font.library || []).filter((entry) => entry.file !== font.source), generation: null };
+    state.targetProfile.font = { ...font, kind: 'bundled', source: DEFAULT_FONT_SOURCE, label: DEFAULT_FONT_LABEL, fontSize: 16, threshold: DEFAULT_FONT_THRESHOLD, library: (font.library || []).filter((entry) => entry.file !== font.source), generation: null };
     state.fontPlan = null;
     state.fontImage = null;
     setDirty(true);
@@ -672,10 +695,39 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     await loadFromDisk();
     state.tab = 'font';
     render();
-    setStatus('登録fontを削除し、同梱Misakiへ切り替えました', 'ok');
+    setStatus('登録fontを削除し、同梱JF-Dot-Shinonome16へ切り替えました', 'ok');
   }
 
-  function renderAssets() { elements.assetList.innerHTML = assetsHtml(state.bindings); }
+  function renderAssets() { elements.assetList.innerHTML = assetsHtml(state.bindings, state.sceneDocument); }
+
+  async function quantizePaletteGroup(button) {
+    const panel = button.closest('[data-palette-group-form]');
+    if (!panel) return;
+    const groupId = String(button.dataset.groupId || panel.querySelector('[data-palette-group-id]')?.value || '').trim();
+    const members = [...panel.querySelectorAll('[data-palette-member]:checked')].map((entry) => entry.value);
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(groupId)) { setStatus('Group IDは1-40文字の英数字、_、-で指定してください', 'error'); return; }
+    if (!members.length) { setStatus('共同減色する画像を1件以上選択してください', 'error'); return; }
+    if (!await saveCurrent()) return;
+    setStatus(`${groupId}: ${members.length}画像を共同減色中…`);
+    button.disabled = true;
+    try {
+      const selectedId = state.selectedSceneId;
+      const selectedIndex = state.selectedCommandIndex;
+      const result = await api.plugins.invokeHook(plugin.id, 'quantizeMdNovelPaletteGroup', {
+        groupId,
+        members,
+        baseRevisions: state.snapshot.revisions,
+      });
+      if (!result?.sceneDocument) throw new Error(result?.error || 'Palette group変換に失敗しました');
+      adoptSnapshot(result, { selectedId, selectedIndex, resetHistory: false });
+      state.tab = 'assets';
+      render();
+      setStatus(`${groupId} を共同減色して保存しました`, 'ok');
+    } catch (error) {
+      setStatus(error.message, 'error');
+      button.disabled = false;
+    }
+  }
   function renderDiagnostics() { elements.diagnostics.innerHTML = diagnosticsHtml(state.snapshot?.diagnostics || []); }
 
   function renderScript() {
@@ -724,6 +776,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     state.selectedSceneId = state.sceneDocument?.scenes?.some((scene) => scene.id === selectedId) ? selectedId : state.sceneDocument?.scenes?.[0]?.id || '';
     state.selectedCommandIndex = Math.max(0, Math.min(selectedIndex, Math.max(0, (selectedScene(state)?.commands?.length || 1) - 1)));
     state.imageCache.clear();
+    state.indexedAssetCache.clear();
+    state.paletteCanvasCache.clear();
     state.fontPlan = null;
     state.fontImage = null;
     state.fontPreviewGeneration += 1;
@@ -991,14 +1045,20 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const scene = selectedScene(state);
     const current = selectedCommand(state);
     if (!scene || !current || !isKnownCommand(current.type)) return;
+    const next = commandFromForm(elements.commandForm, current, contextFor(scene));
+    const paletteError = visualPaletteEditError(next);
+    if (paletteError) {
+      setStatus(paletteError, 'error');
+      renderDetail();
+      return;
+    }
     beginFormEdit();
-    scene.commands[state.selectedCommandIndex] = commandFromForm(elements.commandForm, current, contextFor(scene));
+    scene.commands[state.selectedCommandIndex] = next;
     setDirty(true);
     if (options.rerenderCommands !== false) renderCommands();
     if (options.rerenderDetail) renderDetail();
     void refreshCommandPreview();
   }
-
   async function changeCommandType(nextType) {
     const current = selectedCommand(state);
     if (!current || current.type === nextType) return;
@@ -1114,7 +1174,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         catalog: state.catalog,
         budget: state.snapshot?.budget?.perScene?.[state.selectedSceneId] || state.snapshot?.budget,
         imageForAsset,
+        indexedForAsset,
         ensureAssetImages,
+        ensureIndexedAssets,
+        paletteCanvasCache: state.paletteCanvasCache,
         onAudioEvent(event) { void playAudioCommand(event.command).catch((error) => logger.warn(error.message)); },
         onClose() { state.previewWindow = null; stopAudioPreview(); },
       });
@@ -1190,6 +1253,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     else if (action === 'font-import') await importFontFile();
     else if (action === 'font-delete') await deleteActiveFont();
     else if (action === 'font-generate') await ensureFontGenerated({ refreshPreview: true });
+    else if (action === 'quantize-palette-group') await quantizePaletteGroup(button);
   }
 
   function onInput(event) {

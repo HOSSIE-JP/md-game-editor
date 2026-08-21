@@ -16,6 +16,7 @@ extern const u16 nov_font_glyph_count;
 #define NOVEL_SPRITE_SLOTS         4
 #define NOVEL_INPUT_WATCHERS       7
 #define NOVEL_VARIABLE_MAX         255
+#define NOVEL_PALETTE_NONE         0xFF
 
 typedef enum
 {
@@ -94,10 +95,13 @@ static u16 syncInputMask;
 static s16 syncInputTarget;
 
 static u16 currentPalette[64];
+static u16 loadedPaletteIds[4];
+static u8 paletteOwnerCounts[4];
+static u8 backgroundPalette;
+static u8 actorPalettes[NOVEL_SPRITE_SLOTS];
 static u16 backgroundTileCount;
 static u16 workTileBase;
 static bool windowVisible;
-
 static const NovelMessage *activeMessage;
 static u8 activeMessagePage;
 static GlyphPlacement messageGlyphs[NOVEL_MESSAGE_MAX_GLYPHS];
@@ -216,17 +220,50 @@ static void copyPalette(u16 palette, const u16 *colors)
         currentPalette[palette * 16 + index] = colors[index];
 }
 
+static void loadPhysicalPalette(u16 palette, const u16 *colors, u16 paletteId)
+{
+    if ((palette > PAL3) || (colors == NULL))
+        return;
+    copyPalette(palette, colors);
+    if (loadedPaletteIds[palette] == paletteId)
+        return;
+    PAL_setPalette(palette, colors, DMA);
+    loadedPaletteIds[palette] = paletteId;
+}
+
+static void releasePaletteOwner(u8 palette)
+{
+    if ((palette <= PAL3) && (paletteOwnerCounts[palette] > 0))
+        paletteOwnerCounts[palette]--;
+}
+
+static void claimPaletteOwner(u8 palette)
+{
+    if ((palette <= PAL3) && (paletteOwnerCounts[palette] < 0xFF))
+        paletteOwnerCounts[palette]++;
+}
+
+static void restoreMessageColor(void)
+{
+    currentPalette[1] = 0x0EEE;
+    PAL_setColor(1, 0x0EEE);
+}
+
 static void initializeSystemPalette(void)
 {
     u16 index;
     for (index = 0; index < 64; index++)
         currentPalette[index] = 0;
     currentPalette[1] = 0x0EEE;
-    currentPalette[2] = 0x0888;
-    currentPalette[8] = 0x0000;
-    PAL_setPalette(PAL0, currentPalette, CPU);
+    for (index = 0; index < 4; index++)
+    {
+        loadedPaletteIds[index] = 0xFFFF;
+        paletteOwnerCounts[index] = 0;
+        actorPalettes[index] = NOVEL_PALETTE_NONE;
+    }
+    backgroundPalette = NOVEL_PALETTE_NONE;
+    PAL_setColors(0, currentPalette, 64, CPU);
 }
-
 static void loadSolidTile(u16 tile, u8 color)
 {
     u16 index;
@@ -249,16 +286,15 @@ static void hideWindow(void)
 static void showWindow(void)
 {
     u16 fillTile = windowTileBase();
-    u16 borderTile = fillTile + 1;
-    loadSolidTile(fillTile, 8);
-    loadSolidTile(borderTile, 2);
+    u16 cursorTile = fillTile + 1;
+    currentPalette[0] = 0x0000;
+    PAL_setColor(0, 0x0000);
+    loadSolidTile(fillTile, 0);
+    loadSolidTile(cursorTile, 1);
     VDP_setWindowOnBottom(NOVEL_WINDOW_ROWS);
     VDP_fillTileMapRect(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, fillTile), 0, NOVEL_WINDOW_TOP, 40, NOVEL_WINDOW_ROWS);
-    VDP_fillTileMapRect(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, borderTile), 0, NOVEL_WINDOW_TOP, 40, 1);
-    VDP_fillTileMapRect(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, borderTile), 0, NOVEL_WINDOW_TOP + NOVEL_WINDOW_ROWS - 1, 40, 1);
     windowVisible = TRUE;
 }
-
 static u16 findFontGlyph(u16 code)
 {
     u16 low = 0;
@@ -338,7 +374,7 @@ static void loadGlyph16(u16 atlas, u16 tile)
     u8 x;
     u8 y;
     for (index = 0; index < 128; index++)
-        target[index] = 0x88;
+        target[index] = 0x00;
     for (y = 0; y < 16; y++)
     {
         for (x = 0; x < 16; x++)
@@ -354,7 +390,6 @@ static void loadGlyph16(u16 atlas, u16 tile)
     }
     VDP_loadTileData(glyphBuffer, tile, 4, DMA);
 }
-
 static void drawGlyphPlacement(VDPPlane plane, const GlyphPlacement *placement)
 {
     u16 attr = TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, placement->tile);
@@ -457,10 +492,10 @@ static bool messageAdvancePressed(void)
 static void finishMessage(void)
 {
     setMouthAnimation(activeMessage->mouthSlot, 0);
+    restoreMessageColor();
     activeMessage = NULL;
     runtimeMode = MODE_RUN;
 }
-
 static void updateMessage(void)
 {
     if (!messageComplete)
@@ -532,13 +567,11 @@ static void drawImmediateText(const u8 *text, u8 startX, u8 startY, u16 *nextTil
 static void beginChoice(void)
 {
     showWindow();
-    PAL_setColor(1, 0x0EEE);
-    currentPalette[1] = 0x0EEE;
+    restoreMessageColor();
     choiceLoadIndex = 0;
     choiceNextTile = windowTileBase() + 2;
     runtimeMode = MODE_CHOICE_PREP;
 }
-
 static void updateChoicePrepare(void)
 {
     if (choiceLoadIndex < activeChoice->count)
@@ -629,8 +662,6 @@ static void renderSpriteTexts(void)
         bool newline;
         if (!state->visible || !state->blinkOn || (state->definition == NULL))
             continue;
-        currentPalette[slot + 1] = state->definition->color;
-        PAL_setColor(slot + 1, state->definition->color);
         originX = effectiveX(state->x);
         x = originX;
         y = state->y;
@@ -647,7 +678,7 @@ static void renderSpriteTexts(void)
             for (pixelY = 0; pixelY < 16; pixelY++)
                 for (pixelX = 0; pixelX < 16; pixelX++)
                     if (fontPixel(atlas, pixelX, pixelY) != 0)
-                        overlaySetPixel(x + pixelX, y + pixelY, slot + 1);
+                        overlaySetPixel(x + pixelX, y + pixelY, 1);
             x += 16;
             glyph++;
         }
@@ -663,7 +694,6 @@ static void renderSpriteTexts(void)
         previousOverlayCells[previousOverlayCount++] = cell;
     }
 }
-
 static void clearSpriteTexts(void)
 {
     u8 slot;
@@ -701,6 +731,8 @@ static void updateSpriteTextBlink(void)
 static void loadBackground(const NovelCommand *command)
 {
     const Image *image = novelDataBackground((u16)command->target);
+    u16 palette = (u16)command->count & 3;
+    u16 paletteId = novelDataBackgroundPaletteId((u16)command->target);
     u16 x;
     u16 y;
     if (image == NULL)
@@ -709,30 +741,34 @@ static void loadBackground(const NovelCommand *command)
     if (command->flags & NOV_FLAG_FADE)
         PAL_fadeOutAll(command->frames, FALSE);
     VDP_clearPlane(BG_B, TRUE);
-    copyPalette(PAL1, image->palette->data);
+    if (backgroundPalette != NOVEL_PALETTE_NONE)
+        releasePaletteOwner(backgroundPalette);
+    backgroundPalette = (u8)palette;
+    claimPaletteOwner(backgroundPalette);
+    loadPhysicalPalette(palette, image->palette->data, paletteId);
     x = runtimeProject->legacyCoordinates ? (u16)(4 + command->x) : (u16)(command->x >> 3);
     y = runtimeProject->legacyCoordinates ? (u16)command->y : (u16)(command->y >> 3);
-    VDP_drawImageEx(BG_B, image, TILE_ATTR_FULL(PAL1, FALSE, FALSE, FALSE, TILE_USER_INDEX), x, y, FALSE, TRUE);
+    VDP_drawImageEx(BG_B, image, TILE_ATTR_FULL(palette, FALSE, FALSE, FALSE, TILE_USER_INDEX), x, y, FALSE, TRUE);
     backgroundTileCount = image->tileset->numTile;
     workTileBase = TILE_USER_INDEX + backgroundTileCount;
     if (command->flags & NOV_FLAG_FADE)
         PAL_fadeInAll(currentPalette, command->aux, FALSE);
-    else
-        PAL_setPalette(PAL1, image->palette->data, DMA);
     renderSpriteTexts();
 }
-
 static void setActor(const NovelCommand *command)
 {
     u8 slot = command->slot;
     const SpriteDefinition *definition;
     u16 palette;
+    u16 paletteId;
     if (slot >= NOVEL_SPRITE_SLOTS)
         return;
     if (!(command->flags & NOV_FLAG_VISIBLE) || (command->target < 0))
     {
         if (actorSprites[slot] != NULL)
             SPR_setVisibility(actorSprites[slot], HIDDEN);
+        releasePaletteOwner(actorPalettes[slot]);
+        actorPalettes[slot] = NOVEL_PALETTE_NONE;
         actorResources[slot] = -1;
         actorAnimations[slot] = 0;
         actorMoves[slot].active = FALSE;
@@ -741,15 +777,21 @@ static void setActor(const NovelCommand *command)
     definition = novelDataSprite((u16)command->target);
     if (definition == NULL)
         return;
-    palette = novelDataSpritePalette((u16)command->target);
-    copyPalette(palette, definition->palette->data);
-    PAL_setPalette(palette, definition->palette->data, DMA);
+    palette = (u16)command->count & 3;
+    paletteId = novelDataSpritePaletteId((u16)command->target);
+    loadPhysicalPalette(palette, definition->palette->data, paletteId);
     if (actorSprites[slot] == NULL)
         actorSprites[slot] = SPR_addSpriteEx(definition, effectiveX(command->x), command->y, TILE_ATTR(palette, FALSE, FALSE, FALSE), SPR_FLAG_AUTO_VISIBILITY | SPR_FLAG_AUTO_VRAM_ALLOC | SPR_FLAG_AUTO_TILE_UPLOAD);
     else if (actorResources[slot] != command->target)
         SPR_setDefinition(actorSprites[slot], definition);
     if (actorSprites[slot] == NULL)
         return;
+    if (actorPalettes[slot] != palette)
+    {
+        releasePaletteOwner(actorPalettes[slot]);
+        actorPalettes[slot] = (u8)palette;
+        claimPaletteOwner(actorPalettes[slot]);
+    }
     actorResources[slot] = command->target;
     actorAnimations[slot] = (s16)command->aux;
     SPR_setPalette(actorSprites[slot], palette);
@@ -760,7 +802,6 @@ static void setActor(const NovelCommand *command)
         SPR_setAnim(actorSprites[slot], command->aux);
     SPR_setVisibility(actorSprites[slot], VISIBLE);
 }
-
 static void startMove(const NovelCommand *command)
 {
     MoveState *move;
@@ -826,6 +867,7 @@ static void enterScene(s16 sceneIndex)
     syncInputTarget = -1;
     activeMessage = NULL;
     activeChoice = NULL;
+    restoreMessageColor();
     hideWindow();
     for (slot = 0; slot < NOVEL_SPRITE_SLOTS; slot++)
         actorMoves[slot].active = FALSE;
@@ -839,12 +881,13 @@ static void enterScene(s16 sceneIndex)
                 SPR_releaseSprite(actorSprites[slot]);
                 actorSprites[slot] = NULL;
             }
+            releasePaletteOwner(actorPalettes[slot]);
+            actorPalettes[slot] = NOVEL_PALETTE_NONE;
             actorResources[slot] = -1;
             actorAnimations[slot] = 0;
         }
     }
 }
-
 static void executeCommand(const NovelCommand *command)
 {
     switch (command->type)
@@ -1003,7 +1046,13 @@ static void executeCommand(const NovelCommand *command)
                 {
                     actorMoves[slotIndex].active = FALSE;
                     if (actorSprites[slotIndex] != NULL) SPR_setVisibility(actorSprites[slotIndex], HIDDEN);
+                    releasePaletteOwner(actorPalettes[slotIndex]);
+                    actorPalettes[slotIndex] = NOVEL_PALETTE_NONE;
                 }
+                if (backgroundPalette != NOVEL_PALETTE_NONE)
+                    releasePaletteOwner(backgroundPalette);
+                backgroundPalette = NOVEL_PALETTE_NONE;
+                restoreMessageColor();
                 hideWindow();
                 clearSpriteTexts();
                 VDP_clearPlane(BG_A, TRUE);
@@ -1011,6 +1060,7 @@ static void executeCommand(const NovelCommand *command)
                 backgroundTileCount = 0;
                 workTileBase = TILE_USER_INDEX;
                 for (index = 0; index < 64; index++) effectPalette[index] = command->aux;
+                for (index = 0; index < 4; index++) loadedPaletteIds[index] = 0xFFFF;
                 PAL_setColors(0, effectPalette, 64, DMA);
             }
             else if (effectType == NOV_EFFECT_SHAKE)
@@ -1046,7 +1096,8 @@ static void executeCommand(const NovelCommand *command)
                 }
             }
             break;
-        }        default:
+        }
+        default:
             currentPc++;
             break;
     }
@@ -1084,6 +1135,7 @@ static void updateInputWatchers(void)
             syncInputActive = FALSE;
             activeMessage = NULL;
             activeChoice = NULL;
+            restoreMessageColor();
             for (slot = 0; slot < NOVEL_SPRITE_SLOTS; slot++) actorMoves[slot].active = FALSE;
             hideWindow();
             if (target >= 0) currentPc = (u16)target;
@@ -1096,6 +1148,7 @@ static void updateInputWatchers(void)
         s16 target = syncInputTarget;
         inputWatcherCount = 0;
         syncInputActive = FALSE;
+        restoreMessageColor();
         hideWindow();
         if (target >= 0) currentPc = (u16)target;
         runtimeMode = MODE_RUN;

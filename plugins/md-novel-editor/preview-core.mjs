@@ -45,12 +45,14 @@ export function paginateMessage(text, columns = 19, rows = 4) {
   });
 }
 
-function spriteState(command, previous = null) {
+function spriteState(command, previous = null, paletteLoadOrder = 0) {
   if (command.visible === false || !command.assetId) return null;
   return {
     ...(previous || {}),
     assetId: String(command.assetId || previous?.assetId || ''),
-    animationId: String(command.animationId || 'default'),
+    animationId: String(command.animationId || previous?.animationId || 'default'),
+    palette: String(command.palette || previous?.palette || ''),
+    _paletteLoadOrder: paletteLoadOrder,
     x: Number(command.x) || 0,
     y: Number(command.y) || 0,
     flipX: Boolean(command.flipX),
@@ -75,12 +77,12 @@ export function simulateScene(scene, commandIndex, options = {}) {
     const command = commands[index];
     if (!command || command.skip === true || command.skipped === true || command.debugSkip === true || command.type === 'comment') continue;
     if (command.type === 'background') {
-      state.background = clone(command);
+      state.background = { ...clone(command), _paletteLoadOrder: index + 1 };
       state.message = null;
       state.choice = null;
     } else if (command.type === 'sprite') {
       const slot = Math.max(0, Math.min(3, Number(command.slot) || 0));
-      state.sprites[slot] = spriteState(command, state.sprites[slot]);
+      state.sprites[slot] = spriteState(command, state.sprites[slot], index + 1);
     } else if (command.type === 'spritemove') {
       const slot = Math.max(0, Math.min(3, Number(command.slot) || 0));
       if (state.sprites[slot]) {

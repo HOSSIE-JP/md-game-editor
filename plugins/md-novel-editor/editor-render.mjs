@@ -62,7 +62,7 @@ export function systemFormHtml(sceneDocument, profile) {
   const speed = Number(settings.messageSpeedFrames ?? 10);
   const runtime = profile?.runtime || {};
   const rom = profile?.rom || {};
-  return `<section class="mn-settings-section"><h2>メッセージ</h2><p>PCE VN互換の全体設定です。</p><div class="mn-settings-grid"><label class="mn-field"><span>メッセージ速度（MSG_SPEED=0）</span><select name="messageSpeedFrames">${[0,10,20,30,40,50].map((value,index) => `<option value="${value}" ${speed === value ? 'selected' : ''}>速度${index + 1}${index === 0 ? '（速い）' : index === 5 ? '（遅い）' : ''}: ${value}</option>`).join('')}</select><small>MSG_SPEED=1..6で速度1..6を直接指定します。</small></label><label class="mn-field"><span>Advance（AUTO_ENABLE初期値）</span><select name="messageAdvanceMode"><option value="button" ${settings.messageAdvanceMode !== 'auto' ? 'selected' : ''}>button</option><option value="auto" ${settings.messageAdvanceMode === 'auto' ? 'selected' : ''}>auto</option></select><small>SELECT / MD Aで再生中に切替できます。</small></label><label class="mn-field"><span>Auto wait</span><input name="messageAutoWaitFrames" type="number" min="0" max="255" value="${Number(settings.messageAutoWaitFrames ?? 60)}"></label></div></section><section class="mn-settings-section"><h2>Mega Drive target</h2><p>H40、palette、DMA、ROM制約です。</p><div class="mn-settings-grid"><label class="mn-field"><span>座標モード</span><select name="coordinateMode"><option value="pce-legacy-256" ${profile?.coordinateMode !== 'md-h40' ? 'selected' : ''}>PCE legacy 256 → H40</option><option value="md-h40" ${profile?.coordinateMode === 'md-h40' ? 'selected' : ''}>MD H40 native</option></select></label><label class="mn-field"><span>DMA上限 bytes/frame</span><input name="dmaBytesPerFrame" type="number" min="512" max="16384" step="256" value="${Number(runtime.dmaBytesPerFrame ?? 6144)}"></label><label class="mn-field"><span>ROM警告 bytes</span><input name="targetBytes" type="number" value="${Number(rom.targetBytes ?? 3670016)}"></label><label class="mn-field"><span>ROM hard limit bytes</span><input name="hardLimitBytes" type="number" value="${Number(rom.hardLimitBytes ?? 4194304)}"></label></div><p class="mn-hint">PAL0=WINDOW/font/BG_A、PAL1=背景、PAL2/PAL3=立ち絵。CDDA/ADPCM/voiceは互換JSONに保持し、MDでは無音です。</p></section>`;
+  return `<section class="mn-settings-section"><h2>メッセージ</h2><p>PCE VN互換の全体設定です。</p><div class="mn-settings-grid"><label class="mn-field"><span>メッセージ速度（MSG_SPEED=0）</span><select name="messageSpeedFrames">${[0,10,20,30,40,50].map((value,index) => `<option value="${value}" ${speed === value ? 'selected' : ''}>速度${index + 1}${index === 0 ? '（速い）' : index === 5 ? '（遅い）' : ''}: ${value}</option>`).join('')}</select><small>MSG_SPEED=1..6で速度1..6を直接指定します。</small></label><label class="mn-field"><span>Advance（AUTO_ENABLE初期値）</span><select name="messageAdvanceMode"><option value="button" ${settings.messageAdvanceMode !== 'auto' ? 'selected' : ''}>button</option><option value="auto" ${settings.messageAdvanceMode === 'auto' ? 'selected' : ''}>auto</option></select><small>SELECT / MD Aで再生中に切替できます。</small></label><label class="mn-field"><span>Auto wait</span><input name="messageAutoWaitFrames" type="number" min="0" max="255" value="${Number(settings.messageAutoWaitFrames ?? 60)}"></label></div></section><section class="mn-settings-section"><h2>Mega Drive target</h2><p>H40、palette、DMA、ROM制約です。</p><div class="mn-settings-grid"><label class="mn-field"><span>座標モード</span><select name="coordinateMode"><option value="pce-legacy-256" ${profile?.coordinateMode !== 'md-h40' ? 'selected' : ''}>PCE legacy 256 → H40</option><option value="md-h40" ${profile?.coordinateMode === 'md-h40' ? 'selected' : ''}>MD H40 native</option></select></label><label class="mn-field"><span>DMA上限 bytes/frame</span><input name="dmaBytesPerFrame" type="number" min="512" max="16384" step="256" value="${Number(runtime.dmaBytesPerFrame ?? 6144)}"></label><label class="mn-field"><span>ROM警告 bytes</span><input name="targetBytes" type="number" value="${Number(rom.targetBytes ?? 3670016)}"></label><label class="mn-field"><span>ROM hard limit bytes</span><input name="hardLimitBytes" type="number" value="${Number(rom.hardLimitBytes ?? 4194304)}"></label></div><p class="mn-hint">各BG / Sprite CommandでPAL0-PAL3を指定できます。PAL0 index 0=黒、index 1=白（message / choice / SpriteText）を予約します。CDDA/ADPCM/voiceは互換JSONに保持し、MDでは無音です。</p></section>`;
 }
 
 export function fontSettingsHtml(profile, pceFont, glyphCount) {
@@ -70,7 +70,7 @@ export function fontSettingsHtml(profile, pceFont, glyphCount) {
   const active = font.kind === 'project' ? String(font.source || '') : 'bundled';
   const library = Array.isArray(font.library) ? font.library : [];
   const options = [
-    `<option value="bundled" ${active === 'bundled' ? 'selected' : ''}>同梱 Misaki Gothic</option>`,
+    `<option value="bundled" ${active === 'bundled' ? 'selected' : ''}>同梱 JF-Dot-Shinonome16.ttf</option>`,
     ...library.map((entry) => `<option value="${escapeHtml(entry.file)}" ${active === entry.file ? 'selected' : ''}>${escapeHtml(entry.label || entry.file)}</option>`),
   ].join('');
   const generation = font.generation || {};
@@ -78,7 +78,7 @@ export function fontSettingsHtml(profile, pceFont, glyphCount) {
     ? `${Number(generation.glyphCount || glyphCount)} glyph / ${Number(generation.width || 0)}×${Number(generation.height || 0)}`
     : '未生成';
   return `<h2>フォント</h2>
-    <p>任意のTTF / OTF / TTCを登録し、ゲームで使う文字だけを16×16 indexed bitmapへ生成します。</p>
+    <p>既定は JF-Dot-Shinonome16.ttf（サイズ16 / しきい値190）。任意のTTF / OTF / TTCも登録し、ゲームで使う文字だけを16×16 indexed bitmapへ生成します。</p>
     <section class="mn-settings-section">
       <h3>MD runtime font</h3>
       <div class="mn-font-toolbar">
@@ -88,7 +88,7 @@ export function fontSettingsHtml(profile, pceFont, glyphCount) {
       <div class="mn-settings-grid mn-font-control-grid">
         <label class="mn-field mn-font-source-field"><span>使用フォント</span><select data-font-field="source">${options}</select><small>OSフォントへの直接参照は行わず、projectへコピーします。</small></label>
         <label class="mn-field"><span>サイズ</span><input data-font-field="fontSize" type="number" min="8" max="32" value="${Number(font.fontSize || 16)}"></label>
-        <label class="mn-field"><span>しきい値</span><input data-font-field="threshold" type="number" min="1" max="254" value="${Number(font.threshold || 32)}"></label>
+        <label class="mn-field"><span>しきい値</span><input data-font-field="threshold" type="number" min="1" max="254" value="${Number(font.threshold || 190)}"></label>
         <label class="mn-field"><span>X offset</span><input data-font-field="xOffset" type="number" min="-8" max="8" value="${Number(font.xOffset || 0)}"></label>
         <label class="mn-field"><span>Y offset</span><input data-font-field="yOffset" type="number" min="-8" max="8" value="${Number(font.yOffset || 0)}"></label>
       </div>
@@ -99,10 +99,41 @@ export function fontSettingsHtml(profile, pceFont, glyphCount) {
     <section class="mn-settings-section"><h3>PCE移植元情報（読取専用）</h3><textarea class="mn-json-editor mn-font-provenance" readonly>${escapeHtml(formatJson(pceFont || {}))}</textarea></section>`;
 }
 
-export function assetsHtml(bindings = {}) {
+export function assetsHtml(bindings = {}, sceneDocument = {}) {
   const entries = Object.values(bindings.assets || {});
+  const visuals = entries.filter((entry) => ['IMAGE', 'SPRITE'].includes(entry.runtimeType));
   const variants = Object.values(bindings.audioVariants || {});
-  return `<table><thead><tr><th>assetId</th><th>MD type</th><th>palette</th><th>resource</th><th>budget/status</th></tr></thead><tbody>${entries.map((entry) => `<tr><td>${escapeHtml(entry.assetId)}</td><td>${escapeHtml(entry.runtimeType)}</td><td>${escapeHtml(entry.palette || '-')}</td><td>${escapeHtml(entry.sourcePath || '(ignored)')}</td><td>${entry.metadata ? `${entry.metadata.uniqueTiles || 0} tiles / ${entry.metadata.maxNumSprite || 0} pieces` : escapeHtml(entry.status || '-')}</td></tr>`).join('')}${variants.map((entry) => `<tr><td>${escapeHtml(entry.key)}</td><td>${escapeHtml(entry.runtimeType)}</td><td>-</td><td>${escapeHtml(entry.sourcePath || '(ignored)')}</td><td>${entry.metadata?.byteLength || 0} bytes / ${escapeHtml(entry.status || '-')}</td></tr>`).join('')}</tbody></table>`;
+  const usage = new Map();
+  const paletteFor = (command, binding) => {
+    const explicit = String(command?.palette || '').toUpperCase();
+    if (/^PAL[0-3]$/.test(explicit)) return explicit;
+    const legacy = String(binding?.legacyPalette || binding?.palette || '').toUpperCase();
+    if (/^PAL[0-3]$/.test(legacy)) return legacy;
+    return command?.type === 'background' ? 'PAL1' : 'PAL2';
+  };
+  for (const scene of sceneDocument?.scenes || []) {
+    for (const command of scene.commands || []) {
+      if (!['background', 'sprite'].includes(command?.type) || !command.assetId || command.skip === true) continue;
+      const values = usage.get(command.assetId) || new Set();
+      values.add(paletteFor(command, bindings.assets?.[command.assetId]));
+      usage.set(command.assetId, values);
+    }
+  }
+  const swatches = (palette) => Array.isArray(palette)
+    ? `<span class="mn-palette-swatches">${palette.slice(0, 16).map((color, index) => `<i title="index ${index}: ${escapeHtml((color || []).join(','))}" style="--swatch:rgb(${(color || [0,0,0]).slice(0,3).map((value) => Math.max(0, Math.min(255, Number(value) || 0))).join(',')})"></i>`).join('')}</span>`
+    : '<span class="mn-muted">未変換</span>';
+  const memberChecks = (members = []) => visuals.map((entry) => `<label><input type="checkbox" data-palette-member value="${escapeHtml(entry.assetId)}" ${members.includes(entry.assetId) ? 'checked' : ''}><span>${escapeHtml(entry.assetId)}</span><small>${escapeHtml((usage.get(entry.assetId) ? [...usage.get(entry.assetId)].join('/') : '未使用'))}</small></label>`).join('');
+  const groups = Object.values(bindings.paletteGroups || {}).sort((left, right) => String(left.id).localeCompare(String(right.id)));
+  const groupCards = groups.map((group) => `<section class="mn-palette-group-card" data-palette-group-form><div class="mn-palette-group-heading"><strong>${escapeHtml(group.id)}</strong><span>${escapeHtml(group.profile || '-')} · ${escapeHtml(String(group.paletteFingerprint || '').slice(0, 10))}</span></div>${swatches(group.paletteRgb333)}<div class="mn-palette-quality">ΔE mean ${Number(group.quality?.meanDeltaE || 0).toFixed(2)} / p95 ${Number(group.quality?.p95DeltaE || 0).toFixed(2)}</div><div class="mn-palette-members">${memberChecks(group.members || [])}</div><button type="button" class="primary" data-action="quantize-palette-group" data-group-id="${escapeHtml(group.id)}">共同減色して保存</button></section>`).join('');
+  const createCard = `<section class="mn-palette-group-card" data-palette-group-form><div class="mn-palette-group-heading"><strong>新規palette group</strong><label>Group ID <input data-palette-group-id maxlength="40" value="group_${groups.length + 1}"></label></div><p>同じprofileの画像だけを選択してください。PAL0-reservedとgeneralは混在できません。</p><div class="mn-palette-members">${memberChecks([])}</div><button type="button" class="primary" data-action="quantize-palette-group">共同減色して保存</button></section>`;
+  const rows = entries.map((entry) => {
+    const quality = entry.metadata?.quality || {};
+    const poor = Number(quality.meanDeltaE || 0) > 8 || Number(quality.p95DeltaE || 0) > 20;
+    const paletteUsage = usage.get(entry.assetId) ? [...usage.get(entry.assetId)].sort().join(', ') : '-';
+    const budget = entry.metadata ? `${entry.metadata.uniqueTiles || 0} tiles / ${entry.metadata.maxNumSprite || 0} pieces` : escapeHtml(entry.status || '-');
+    return `<tr><td>${escapeHtml(entry.assetId)}</td><td>${escapeHtml(entry.runtimeType)}</td><td><strong>${escapeHtml(paletteUsage)}</strong><small>${escapeHtml(entry.conversion?.paletteProfile || '-')}</small></td><td>${escapeHtml(entry.paletteGroup || '-')}</td><td>${swatches(entry.paletteRgb333)}<small class="${poor ? 'mn-quality-warning' : ''}">ΔE ${Number(quality.meanDeltaE || 0).toFixed(2)} / ${Number(quality.p95DeltaE || 0).toFixed(2)}</small></td><td>${escapeHtml(entry.sourcePath || '(ignored)')}<small>${budget}</small></td></tr>`;
+  }).join('');
+  const audioRows = variants.map((entry) => `<tr><td>${escapeHtml(entry.key)}</td><td>${escapeHtml(entry.runtimeType)}</td><td>-</td><td>-</td><td>-</td><td>${escapeHtml(entry.sourcePath || '(ignored)')}<small>${entry.metadata?.byteLength || 0} bytes / ${escapeHtml(entry.status || '-')}</small></td></tr>`).join('');
+  return `<section class="mn-palette-guide"><strong>物理Palette</strong><span>PAL0: index 0 黒 / index 1 白を予約、残り14色</span><span>PAL1-PAL3: 16色（Spriteはindex 0透明）</span><span>同じPALへ同時表示する画像は、同じordered palette fingerprintが必要です。</span></section><div class="mn-palette-group-grid">${groupCards}${createCard}</div><table><thead><tr><th>assetId</th><th>MD type</th><th>使用PAL / profile</th><th>group</th><th>palette / quality</th><th>resource / budget</th></tr></thead><tbody>${rows}${audioRows}</tbody></table>`;
 }
-
 export function diagnosticsHtml(diagnostics) { return diagnosticHtml(diagnostics); }

@@ -25,7 +25,9 @@
     "prepareMdNovelFontGeneration",
     "commitMdNovelFontGeneration",
     "importMdNovelFont",
-    "deleteMdNovelFont"
+    "deleteMdNovelFont",
+    "quantizeMdNovelPaletteGroup",
+    "readMdNovelIndexedAssets"
   ],
   "mainApi": {
     "hooks": [
@@ -36,7 +38,9 @@
       "prepareMdNovelFontGeneration",
       "commitMdNovelFontGeneration",
       "importMdNovelFont",
-      "deleteMdNovelFont"
+      "deleteMdNovelFont",
+      "quantizeMdNovelPaletteGroup",
+      "readMdNovelIndexedAssets"
     ]
   },
   "tab": {

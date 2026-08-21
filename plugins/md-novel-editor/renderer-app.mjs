@@ -163,7 +163,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         <label>Glyph width<input name="glyphWidth" type="number" min="8" max="16" value="${number(font.glyphWidth, 16)}"></label>
         <label>Glyph height<input name="glyphHeight" type="number" min="8" max="16" value="${number(font.glyphHeight, 16)}"></label>
         <label>Bundled source<input name="source" value="${escapeHtml(font.source || '')}"></label>
-        <p>Unicode JSONを正本とし、ビルド時に使用glyphだけをShift-JIS/Misaki atlasから16×16へ展開します。</p>
+        <p>Unicode JSONを正本とし、ビルド時に使用glyphだけをShift-JIS/JF-Dot-Shinonome16から16×16へ展開します。</p>
       </fieldset>
       <fieldset><legend>PCE font provenance (read only)</legend><textarea rows="12" readonly>${escapeHtml(formatJson(source))}</textarea></fieldset>`;
   }

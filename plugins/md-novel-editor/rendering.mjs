@@ -16,14 +16,125 @@ export function collectVisualAssetIds(visual = {}) {
   ].filter(Boolean))];
 }
 
+function visualPalette(command, binding = null) {
+  const explicit = String(command?.palette || '').toUpperCase();
+  if (/^PAL[0-3]$/.test(explicit)) return explicit;
+  const legacy = String(binding?.legacyPalette || binding?.palette || '').toUpperCase();
+  if (/^PAL[0-3]$/.test(legacy)) return legacy;
+  return command?.type === 'background' ? 'PAL1' : 'PAL2';
+}
+
+function defaultPhysicalPalette(name) {
+  const palette = Array.from({ length: 16 }, () => [0, 0, 0]);
+  if (name === 'PAL0') palette[1] = [255, 255, 255];
+  return palette;
+}
+
+function rgbFromColor(value, fallback = [255, 255, 255]) {
+  const normalized = safeColor(value, '');
+  if (!normalized) return [...fallback];
+  return [1, 3, 5].map((offset) => parseInt(normalized.slice(offset, offset + 2), 16));
+}
+
+function isMdWhite(value) {
+  return rgbFromColor(value).every((channel) => Math.round(channel * 7 / 255) === 7);
+}
+
+function clonedPalette(value, fallbackName) {
+  if (!Array.isArray(value) || value.length !== 16) return defaultPhysicalPalette(fallbackName);
+  return value.map((color) => [0, 1, 2].map((index) => Math.max(0, Math.min(255, Number(color?.[index]) || 0))));
+}
+
+export function physicalPaletteFrame(visual = {}, bindings = {}, indexedForAsset = () => null) {
+  const owners = [];
+  if (visual.background?.assetId) owners.push({ type: 'background', order: number(visual.background._paletteLoadOrder, 0), command: visual.background });
+  (visual.sprites || []).forEach((sprite, slot) => {
+    if (sprite?.assetId && sprite.visible !== false) owners.push({ type: 'sprite', slot, order: number(sprite._paletteLoadOrder, slot + 1), command: sprite });
+  });
+  owners.forEach((owner) => {
+    owner.assetId = String(owner.command.assetId || '');
+    owner.binding = bindings.assets?.[owner.assetId] || {};
+    owner.palette = visualPalette({ ...owner.command, type: owner.type }, owner.binding);
+    owner.paletteFingerprint = String(owner.binding.paletteFingerprint || owner.assetId);
+  });
+  owners.sort((left, right) => left.order - right.order);
+  const palettes = Object.fromEntries(['PAL0', 'PAL1', 'PAL2', 'PAL3'].map((name) => [name, defaultPhysicalPalette(name)]));
+  const byPalette = new Map();
+  for (const owner of owners) {
+    const indexed = indexedForAsset(owner.assetId);
+    owner.usesPaletteIndex1 = Boolean(owner.binding.metadata?.usesPaletteIndex1)
+      || Boolean(indexed?.indices?.some?.((index) => (index & 15) === 1));
+    palettes[owner.palette] = clonedPalette(owner.binding.paletteRgb333 || indexed?.paletteRgb333, owner.palette);
+    const entries = byPalette.get(owner.palette) || [];
+    entries.push(owner);
+    byPalette.set(owner.palette, entries);
+  }
+  palettes.PAL0[0] = [0, 0, 0];
+  const pal0IndexOneOwners = (byPalette.get('PAL0') || []).filter((owner) => owner.usesPaletteIndex1);
+  const spriteTextVisible = (visual.spriteTexts || []).some((entry) => entry && entry.visible !== false);
+  const messageColorFallback = visual.message && !isMdWhite(visual.message.textColor) && (pal0IndexOneOwners.length || spriteTextVisible)
+    ? {
+      requestedColor: safeColor(visual.message.textColor),
+      assetIds: [...new Set(pal0IndexOneOwners.map((owner) => owner.assetId))],
+      spriteTextVisible,
+    }
+    : null;
+  palettes.PAL0[1] = visual.message && !messageColorFallback ? rgbFromColor(visual.message.textColor) : [255, 255, 255];
+  const conflicts = [];
+  for (const [palette, paletteOwners] of byPalette) {
+    const fingerprints = [...new Set(paletteOwners.map((owner) => owner.paletteFingerprint))];
+    if (fingerprints.length > 1) conflicts.push({
+      palette,
+      assetIds: [...new Set(paletteOwners.map((owner) => owner.assetId))],
+      lastAssetId: paletteOwners[paletteOwners.length - 1].assetId,
+    });
+  }
+  return { palettes, owners, conflicts, messageColorFallback };
+}
+
+function indexedSurface(canvas, assetId, palette, record, transparent, cache) {
+  if (!record?.indices || !record.width || !record.height) return null;
+  const signature = palette.flat().join(',');
+  const key = `${assetId}:${transparent ? 'sprite' : 'image'}:${signature}`;
+  if (cache?.has(key)) return cache.get(key);
+  const documentRef = canvas?.ownerDocument || globalThis.document;
+  const surface = documentRef?.createElement?.('canvas');
+  if (!surface) return null;
+  surface.width = record.width;
+  surface.height = record.height;
+  const context = surface.getContext('2d');
+  const image = context.createImageData(record.width, record.height);
+  for (let index = 0; index < record.indices.length; index += 1) {
+    const colorIndex = record.indices[index] & 15;
+    const color = palette[colorIndex] || [0, 0, 0];
+    const offset = index * 4;
+    image.data[offset] = color[0];
+    image.data[offset + 1] = color[1];
+    image.data[offset + 2] = color[2];
+    image.data[offset + 3] = transparent && colorIndex === 0 ? 0 : 255;
+  }
+  context.putImageData(image, 0, 0);
+  cache?.set(key, surface);
+  return surface;
+}
+
 export function drawNovelFrame(canvas, visual = {}, options = {}) {
   const context = canvas?.getContext?.('2d');
   if (!context) return;
   const coordinateMode = options.coordinateMode || 'pce-legacy-256';
   const imageForAsset = options.imageForAsset || (() => null);
+  const indexedForAsset = options.indexedForAsset || (() => null);
   const bindings = options.bindings || {};
+  const physical = physicalPaletteFrame(visual, bindings, indexedForAsset);
   const width = canvas.width || 320;
   const height = canvas.height || 224;
+  const sourceFor = (command, type) => {
+    const assetId = command?.assetId;
+    const binding = bindings.assets?.[assetId] || {};
+    const paletteName = visualPalette({ ...command, type }, binding);
+    const record = indexedForAsset(assetId);
+    return indexedSurface(canvas, assetId, physical.palettes[paletteName], record, type === 'sprite', options.paletteCanvasCache) || imageForAsset(assetId);
+  };
   context.save();
   context.imageSmoothingEnabled = false;
   context.fillStyle = '#000';
@@ -31,7 +142,7 @@ export function drawNovelFrame(canvas, visual = {}, options = {}) {
   const shake = visual.effect?.effect === 'shake' ? Math.max(0, Math.min(8, number(visual.effect.intensity, 4))) : 0;
   if (shake) context.translate((Math.floor(number(options.time) / 60) % 2 ? shake : -shake), 0);
   if (visual.background) {
-    const image = imageForAsset(visual.background.assetId);
+    const image = sourceFor(visual.background, 'background');
     if (image) {
       const x = effectiveX('background', visual.background.x, coordinateMode);
       const y = coordinateMode === 'pce-legacy-256' ? number(visual.background.y) * 8 : number(visual.background.y);
@@ -40,7 +151,7 @@ export function drawNovelFrame(canvas, visual = {}, options = {}) {
   }
   for (const sprite of visual.sprites || []) {
     if (!sprite || sprite.visible === false) continue;
-    const image = imageForAsset(sprite.assetId);
+    const image = sourceFor(sprite, 'sprite');
     if (!image) continue;
     const metadata = bindings.assets?.[sprite.assetId]?.metadata || {};
     const frameWidth = Math.max(1, number(metadata.frameWidth, image.naturalWidth || image.width));
@@ -55,21 +166,19 @@ export function drawNovelFrame(canvas, visual = {}, options = {}) {
   }
   context.textBaseline = 'top';
   context.font = '16px monospace';
+  context.fillStyle = `rgb(${physical.palettes.PAL0[1].join(',')})`;
   for (const entry of visual.spriteTexts || []) {
     if (!entry || entry.visible === false) continue;
-    context.fillStyle = safeColor(entry.color);
     const x = effectiveX('spritetext', entry.x, coordinateMode);
     const lines = String(entry.text || '').split('\n');
     lines.forEach((line, row) => context.fillText(Array.from(line).slice(0, 32).join(''), x, number(entry.y) + row * 16));
   }
   if (visual.message || visual.choice) {
-    context.fillStyle = '#070b11';
+    context.fillStyle = '#000';
     context.fillRect(0, 128, 320, 96);
-    context.strokeStyle = '#8298b3';
-    context.strokeRect(.5, 128.5, 319, 95);
     context.font = '14px sans-serif';
     if (visual.message) {
-      context.fillStyle = safeColor(visual.message.textColor);
+      context.fillStyle = `rgb(${physical.palettes.PAL0[1].join(',')})`;
       context.fillText(String(visual.message.speaker || ''), 8, 140);
       const page = visual.message.pages?.[visual.message.pageIndex || 0] || [];
       page.forEach((line, row) => context.fillText(line, 8, 160 + row * 16));
@@ -91,9 +200,19 @@ export function drawNovelFrame(canvas, visual = {}, options = {}) {
       context.globalAlpha = 1;
     }
   }
+  if (physical.conflicts.length) {
+    context.lineWidth = 3;
+    context.strokeStyle = '#ff3154';
+    context.strokeRect(1.5, 1.5, width - 3, height - 3);
+    context.fillStyle = '#ff3154';
+    context.fillRect(0, 0, width, 18);
+    context.fillStyle = '#fff';
+    context.font = 'bold 11px sans-serif';
+    context.fillText(`PAL競合: ${physical.conflicts.map((entry) => entry.palette).join(', ')}（後勝ち表示）`, 5, 3);
+  }
   context.restore();
+  return physical;
 }
-
 let shiftJisGlyphMap = null;
 
 function jisCell(lead, trail) {

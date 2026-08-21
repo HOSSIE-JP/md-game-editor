@@ -91,9 +91,9 @@ function firstAssetId(context, types) {
 export function defaultCommand(type, context = {}) {
   switch (type) {
     case 'background':
-      return { type, assetId: firstAssetId(context, ['image']), transition: 'fade', fadeOutFrames: 30, fadeInFrames: 30, x: 2, y: 1 };
+      return { type, palette: 'PAL0', assetId: firstAssetId(context, ['image']), transition: 'fade', fadeOutFrames: 30, fadeInFrames: 30, x: 2, y: 1 };
     case 'sprite':
-      return { type, slot: 0, assetId: firstAssetId(context, ['sprite']), x: 128, y: 24, animationId: 'default', flipX: false, flipY: false, visible: true };
+      return { type, slot: 0, palette: 'PAL1', assetId: firstAssetId(context, ['sprite']), x: 128, y: 24, animationId: 'default', flipX: false, flipY: false, visible: true };
     case 'spritemove':
       return { type, slot: 0, x: 128, y: 24, frames: 30, async: false, animationAssetId: '', animationId: '' };
     case 'message':
@@ -138,8 +138,8 @@ function assetLabel(context, assetId) {
 
 export function commandSummary(command = {}, context = {}) {
   switch (command.type) {
-    case 'background': return `${assetLabel(context, command.assetId)} @ ${number(command.x)},${number(command.y)}`;
-    case 'sprite': return `${assetLabel(context, command.assetId)} slot ${number(command.slot)} (${number(command.x)}, ${number(command.y)})`;
+    case 'background': return `${assetLabel(context, command.assetId)} ${command.palette || 'Auto'} @ ${number(command.x)},${number(command.y)}`;
+    case 'sprite': return `${assetLabel(context, command.assetId)} slot ${number(command.slot)} ${command.palette || 'Auto'} (${number(command.x)}, ${number(command.y)})`;
     case 'spritemove': return `slot ${number(command.slot)} → (${number(command.x)}, ${number(command.y)}) ${number(command.frames)}f ${command.async ? 'async' : 'sync'}`;
     case 'message': return `${command.speaker ? `${command.speaker}: ` : ''}${command.text || '本文なし'}`;
     case 'audio': return `${command.kind || 'psg'}:${command.action || 'play'}${command.assetId ? ` ${assetLabel(context, command.assetId)}` : ''}${command.kind === 'psg' && command.action !== 'stop' ? ` ch${number(command.channel)}` : ''}`;
@@ -175,6 +175,10 @@ export function commandSearchText(command, context = {}) {
 
 function option(value, label, current, disabled = false) {
   return `<option value="${escapeHtml(value)}" ${String(value) === String(current ?? '') ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${escapeHtml(label)}</option>`;
+}
+
+function paletteOptions(current) {
+  return [option('', 'Auto（従来互換）', current), ...['PAL0', 'PAL1', 'PAL2', 'PAL3'].map((value) => option(value, value, current))].join('');
 }
 
 function assetOptions(context, types, current, emptyLabel = 'なし') {
@@ -222,8 +226,8 @@ export function renderCommandFields(command, context = {}) {
   if (!isKnownCommand(type)) {
     return `<div class="mn-unknown-command"><p>このCommand typeは現在のMDエディタでは未対応です。JSONを保持したまま表示しています。</p><textarea data-role="unknown-command-json" class="mn-json-editor" spellcheck="false">${escapeHtml(JSON.stringify(command, null, 2))}</textarea><button type="button" data-action="apply-unknown-command" class="primary">JSONを適用</button></div>`;
   }
-  if (type === 'background') return `<div class="mn-form-grid"><label class="mn-field"><span>背景</span><select name="assetId">${assetOptions(context, ['image'], command.assetId)}</select></label></div><div class="mn-form-grid compact"><label class="mn-field"><span>X tile</span><input name="x" type="number" min="0" max="63" value="${number(command.x)}"></label><label class="mn-field"><span>Y tile</span><input name="y" type="number" min="0" max="31" value="${number(command.y)}"></label><label class="mn-field"><span>Fade out</span><select name="fadeOutFrames">${[0, 15, 30, 60].map((value) => option(value, `${value}f`, command.fadeOutFrames)).join('')}</select></label><label class="mn-field"><span>Fade in</span><select name="fadeInFrames">${[0, 15, 30, 60].map((value) => option(value, `${value}f`, command.fadeInFrames)).join('')}</select></label></div>`;
-  if (type === 'sprite') return `<div class="mn-form-grid"><label class="mn-field"><span>Sprite</span><select name="assetId">${assetOptions(context, ['sprite'], command.assetId)}</select></label><label class="mn-field"><span>Animation</span><select name="animationId">${animationOptions(context, command.assetId, command.animationId)}</select></label></div><div class="mn-form-grid compact"><label class="mn-field"><span>Slot</span><input name="slot" type="number" min="0" max="3" value="${number(command.slot)}"></label><label class="mn-field"><span>X</span><input name="x" type="number" min="0" max="319" value="${number(command.x)}"></label><label class="mn-field"><span>Y</span><input name="y" type="number" min="0" max="223" value="${number(command.y)}"></label></div><div class="mn-check-row"><label class="mn-check"><input name="flipX" type="checkbox" ${command.flipX ? 'checked' : ''}><span>flip X</span></label><label class="mn-check"><input name="flipY" type="checkbox" ${command.flipY ? 'checked' : ''}><span>flip Y</span></label><label class="mn-check"><input name="visible" type="checkbox" ${command.visible !== false ? 'checked' : ''}><span>visible</span></label></div>`;
+  if (type === 'background') return `<div class="mn-form-grid"><label class="mn-field"><span>背景</span><select name="assetId">${assetOptions(context, ['image'], command.assetId)}</select></label><label class="mn-field"><span>Palette</span><select name="palette">${paletteOptions(command.palette)}</select></label></div><div class="mn-form-grid compact"><label class="mn-field"><span>X tile</span><input name="x" type="number" min="0" max="63" value="${number(command.x)}"></label><label class="mn-field"><span>Y tile</span><input name="y" type="number" min="0" max="31" value="${number(command.y)}"></label><label class="mn-field"><span>Fade out</span><select name="fadeOutFrames">${[0, 15, 30, 60].map((value) => option(value, `${value}f`, command.fadeOutFrames)).join('')}</select></label><label class="mn-field"><span>Fade in</span><select name="fadeInFrames">${[0, 15, 30, 60].map((value) => option(value, `${value}f`, command.fadeInFrames)).join('')}</select></label></div>`;
+  if (type === 'sprite') return `<div class="mn-form-grid"><label class="mn-field"><span>Sprite</span><select name="assetId">${assetOptions(context, ['sprite'], command.assetId)}</select></label><label class="mn-field"><span>Animation</span><select name="animationId">${animationOptions(context, command.assetId, command.animationId)}</select></label><label class="mn-field"><span>Palette</span><select name="palette">${paletteOptions(command.palette)}</select></label></div><div class="mn-form-grid compact"><label class="mn-field"><span>Slot</span><input name="slot" type="number" min="0" max="3" value="${number(command.slot)}"></label><label class="mn-field"><span>X</span><input name="x" type="number" min="0" max="319" value="${number(command.x)}"></label><label class="mn-field"><span>Y</span><input name="y" type="number" min="0" max="223" value="${number(command.y)}"></label></div><div class="mn-check-row"><label class="mn-check"><input name="flipX" type="checkbox" ${command.flipX ? 'checked' : ''}><span>flip X</span></label><label class="mn-check"><input name="flipY" type="checkbox" ${command.flipY ? 'checked' : ''}><span>flip Y</span></label><label class="mn-check"><input name="visible" type="checkbox" ${command.visible !== false ? 'checked' : ''}><span>visible</span></label></div>`;
   if (type === 'spritemove') return `<div class="mn-form-grid compact"><label class="mn-field"><span>Slot</span><input name="slot" type="number" min="0" max="3" value="${number(command.slot)}"></label><label class="mn-field"><span>Target X</span><input name="x" type="number" min="0" max="319" value="${number(command.x)}"></label><label class="mn-field"><span>Target Y</span><input name="y" type="number" min="0" max="223" value="${number(command.y)}"></label><label class="mn-field"><span>Frames</span><input name="frames" type="number" min="1" max="65535" value="${number(command.frames, 30)}"></label></div><label class="mn-check"><input name="async" type="checkbox" ${command.async ? 'checked' : ''}><span>async（同時移動）</span></label><div class="mn-form-grid"><label class="mn-field"><span>Animation sprite</span><select name="animationAssetId">${assetOptions(context, ['sprite'], command.animationAssetId, 'slotの表示中sprite')}</select></label><label class="mn-field"><span>Animation</span><input name="animationId" value="${escapeHtml(command.animationId || '')}" placeholder="変更なし"></label></div>`;
   if (type === 'message') return `<div class="mn-form-grid"><label class="mn-field"><span>話者</span><input name="speaker" value="${escapeHtml(command.speaker || '')}"></label><label class="mn-field"><span>ADPCM voice <em>MDでは無音</em></span><select name="voiceAssetId">${assetOptions(context, ['adpcm'], command.voiceAssetId)}</select></label></div><label class="mn-field"><span>本文</span><textarea name="text" rows="4" placeholder="空欄でメッセージをクリア">${escapeHtml(command.text || '')}</textarea></label>${colorField('textColor', '文字色', command.textColor, { toggle: true })}<label class="mn-field"><span>Mouth slot <em>voice無音時は本文表示中のみ</em></span><select name="mouthSlot">${option('', 'なし（ナレーション）', command.mouthSlot == null ? '' : command.mouthSlot)}${[0, 1, 2, 3].map((slot) => option(slot, `slot ${slot}`, command.mouthSlot)).join('')}</select></label>`;
   if (type === 'audio') {
@@ -278,8 +282,8 @@ export function commandFromForm(form, current, context = {}) {
   const data = new FormData(form);
   const next = { ...clone(current), type: current.type };
   switch (current.type) {
-    case 'background': Object.assign(next, { assetId: formString(data, 'assetId'), transition: 'fade', x: clamp(formNumber(data, 'x'), 0, 63), y: clamp(formNumber(data, 'y'), 0, 31), fadeOutFrames: clamp(formNumber(data, 'fadeOutFrames', 30), 0, 255), fadeInFrames: clamp(formNumber(data, 'fadeInFrames', 30), 0, 255) }); break;
-    case 'sprite': Object.assign(next, { assetId: formString(data, 'assetId'), animationId: formString(data, 'animationId', 'default') || 'default', slot: clamp(formNumber(data, 'slot'), 0, 3), x: clamp(formNumber(data, 'x'), 0, 319), y: clamp(formNumber(data, 'y'), 0, 223), flipX: data.has('flipX'), flipY: data.has('flipY'), visible: data.has('visible') }); break;
+    case 'background': Object.assign(next, { palette: formString(data, 'palette'), assetId: formString(data, 'assetId'), transition: 'fade', x: clamp(formNumber(data, 'x'), 0, 63), y: clamp(formNumber(data, 'y'), 0, 31), fadeOutFrames: clamp(formNumber(data, 'fadeOutFrames', 30), 0, 255), fadeInFrames: clamp(formNumber(data, 'fadeInFrames', 30), 0, 255) }); break;
+    case 'sprite': Object.assign(next, { palette: formString(data, 'palette'), assetId: formString(data, 'assetId'), animationId: formString(data, 'animationId', 'default') || 'default', slot: clamp(formNumber(data, 'slot'), 0, 3), x: clamp(formNumber(data, 'x'), 0, 319), y: clamp(formNumber(data, 'y'), 0, 223), flipX: data.has('flipX'), flipY: data.has('flipY'), visible: data.has('visible') }); break;
     case 'spritemove': Object.assign(next, { slot: clamp(formNumber(data, 'slot'), 0, 3), x: clamp(formNumber(data, 'x'), 0, 319), y: clamp(formNumber(data, 'y'), 0, 223), frames: clamp(formNumber(data, 'frames', 30), 1, 65535), async: data.has('async'), animationAssetId: formString(data, 'animationAssetId'), animationId: formString(data, 'animationId') }); break;
     case 'message': Object.assign(next, { speaker: formString(data, 'speaker').slice(0, 16), text: formString(data, 'text').slice(0, 96), voiceAssetId: formString(data, 'voiceAssetId'), mouthSlot: formString(data, 'mouthSlot') === '' ? null : clamp(formNumber(data, 'mouthSlot'), 0, 3), textColor: normalizedColor(data, 'textColor', data.has('textColorEnabled')) }); break;
     case 'audio': {
@@ -318,6 +322,7 @@ export function commandFromForm(form, current, context = {}) {
     case 'spritetext': Object.assign(next, { text: Array.from(formString(data, 'text')).slice(0, 32).join(''), slot: clamp(formNumber(data, 'slot'), 0, 3), x: clamp(formNumber(data, 'x'), 0, 319), y: clamp(formNumber(data, 'y'), 0, 223), blinkFrames: clamp(formNumber(data, 'blinkFrames'), 0, 255), color: normalizedColor(data, 'color') || '#ffffff', visible: data.has('visible') }); break;
     default: break;
   }
+  if (['background', 'sprite'].includes(next.type) && !next.palette) delete next.palette;
   return next;
 }
 

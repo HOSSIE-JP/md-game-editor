@@ -1,25 +1,41 @@
 {
   "schemaVersion": 1,
-  "sourceSceneRevision": "29f0c97b6e49d6d7f02b7b175d7a38390bed18eb63d09880806cd226d3fed442",
+  "sourceSceneRevision": "16f796699282383eaf6752114f0aa0e246b63de8bb5c8d8d6dc9710c8cfa092b",
   "assets": {
     "bg_sample": {
       "assetId": "bg_sample",
       "sourceType": "image",
       "runtimeType": "IMAGE",
       "symbol": "nov_bg_bg_sample_7d16a41f",
-      "palette": "PAL1",
+      "palette": "PAL0",
+      "legacyPalette": "PAL0",
+      "paletteGroup": null,
       "sourcePath": "novel/backgrounds/nov_bg_bg_sample_7d16a41f.png",
       "originalSource": "assets/images/bg_sample.png",
       "conversion": {
-        "converterVersion": 1,
-        "coordinateMode": "pce-legacy-256"
+        "converterVersion": 3,
+        "coordinateMode": "pce-legacy-256",
+        "paletteProfile": "pal0-reserved",
+        "inputHash": "eecbaaccfab890f4b38d62a9e33991ac5d8b1553e904956110125b8c8b2d5a4a",
+        "reserveTransparent": false
       },
       "metadata": {
         "width": 256,
         "height": 224,
         "uniqueTiles": 5,
-        "paletteEntries": 3,
+        "paletteEntries": 16,
+        "paletteIndicesUsed": [
+          2,
+          3,
+          4
+        ],
+        "usesPaletteIndex1": false,
         "transparent": false,
+        "paletteProfile": "pal0-reserved",
+        "quality": {
+          "meanDeltaE": 0,
+          "p95DeltaE": 0
+        },
         "frameWidth": 256,
         "frameHeight": 224,
         "maxNumTile": 0,
@@ -27,26 +43,125 @@
         "timing": "",
         "collision": ""
       },
-      "contentHash": "61bec7f07ce849cb0a8e21f5467a179e4c7923a86d35233748eb8e7798fef3c4"
+      "contentHash": "b590dfdf0a738c5c53731e0e904ea91be852c72fb16b3fafda0276beda1fd6ef",
+      "paletteFingerprint": "fe8ece580cf41fe0a431dd177f3a82861ed1b5f3c5208702345d145a793ce24d",
+      "paletteRgb333": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          255,
+          255,
+          255
+        ],
+        [
+          36,
+          109,
+          146
+        ],
+        [
+          73,
+          146,
+          182
+        ],
+        [
+          36,
+          36,
+          73
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ]
+      ]
     },
     "sp_hero": {
       "assetId": "sp_hero",
       "sourceType": "sprite",
       "runtimeType": "SPRITE",
       "symbol": "nov_spr_sp_hero_b74c1708",
-      "palette": "PAL2",
+      "palette": "PAL1",
+      "legacyPalette": "PAL1",
+      "paletteGroup": null,
       "sourcePath": "novel/sprites/nov_spr_sp_hero_b74c1708.png",
       "originalSource": "assets/sprites/sp_hero.png",
       "conversion": {
-        "converterVersion": 1,
-        "coordinateMode": "pce-legacy-256"
+        "converterVersion": 3,
+        "coordinateMode": "pce-legacy-256",
+        "paletteProfile": "general",
+        "inputHash": "e7faf4fe10c5b2a51eb13371f69db1638384c35bf2cc6ee14683678995a26b48",
+        "reserveTransparent": true
       },
       "metadata": {
         "width": 32,
         "height": 64,
         "uniqueTiles": 10,
-        "paletteEntries": 3,
+        "paletteEntries": 16,
+        "paletteIndicesUsed": [
+          0,
+          1,
+          2
+        ],
+        "usesPaletteIndex1": true,
         "transparent": true,
+        "paletteProfile": "general",
+        "quality": {
+          "meanDeltaE": 0,
+          "p95DeltaE": 0
+        },
         "frameWidth": 32,
         "frameHeight": 64,
         "maxNumTile": 32,
@@ -54,8 +169,90 @@
         "timing": "[[12]]",
         "collision": "NONE"
       },
-      "contentHash": "a6b7645cdbd6b086ecaa20cfc96faf3a2526e5e54b479c66aa0d29d50acccafe",
-      "paletteFingerprint": "775f0a0204bb01353d87f6b7f7f380260f19b435e31de857fa360a3e654e7dad"
+      "contentHash": "b5120db8c79c593f69ff33d9b8d37afce55ddbfa68654aca48e53dd4b3d26379",
+      "paletteFingerprint": "d46035203df137f1578b98db4af6b3f3e2a08ff1daab727857f390ac3b43a097",
+      "paletteRgb333": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          219,
+          73,
+          109
+        ],
+        [
+          255,
+          219,
+          146
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ]
+      ]
     },
     "sample_bgm": {
       "assetId": "sample_bgm",
@@ -63,11 +260,15 @@
       "runtimeType": "XGM2",
       "symbol": "nov_audio_sample_bgm_73ea24a9",
       "palette": null,
+      "legacyPalette": null,
+      "paletteGroup": null,
       "sourcePath": "novel/music/nov_audio_sample_bgm_73ea24a9.vgm",
       "originalSource": "",
       "conversion": {
-        "converterVersion": 1,
-        "coordinateMode": "pce-legacy-256"
+        "converterVersion": 2,
+        "coordinateMode": "pce-legacy-256",
+        "paletteProfile": null,
+        "inputHash": ""
       }
     },
     "sample_sfx": {
@@ -76,11 +277,15 @@
       "runtimeType": "WAV",
       "symbol": "nov_audio_sample_sfx_006aa44b",
       "palette": null,
+      "legacyPalette": null,
+      "paletteGroup": null,
       "sourcePath": "novel/sfx/nov_audio_sample_sfx_006aa44b.wav",
       "originalSource": "",
       "conversion": {
-        "converterVersion": 1,
-        "coordinateMode": "pce-legacy-256"
+        "converterVersion": 2,
+        "coordinateMode": "pce-legacy-256",
+        "paletteProfile": null,
+        "inputHash": ""
       }
     }
   },
@@ -130,10 +335,5 @@
       }
     }
   },
-  "paletteGroups": {
-    "PAL2": [
-      "hero"
-    ],
-    "PAL3": []
-  }
+  "paletteGroups": {}
 }

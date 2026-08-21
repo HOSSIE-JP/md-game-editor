@@ -172,12 +172,20 @@ function visualMetadata(asset, image, converted, options = {}) {
   const editor = asset?.options?.spriteEditor || {};
   const frameWidth = sprite ? clamp(editor.frameWidth ?? animation.frameWidth, 8, 248, image.width) : image.width;
   const frameHeight = sprite ? clamp(editor.frameHeight ?? animation.frameHeight, 8, 248, image.height) : image.height;
+  const used = [...new Set(converted.indices)].sort((left, right) => left - right);
   return {
     width: image.width,
     height: image.height,
     uniqueTiles: countUniqueTiles(converted.indices, image.width, image.height),
     paletteEntries: converted.palette.length,
+    paletteIndicesUsed: used,
+    usesPaletteIndex1: used.includes(1),
     transparent: Boolean(options.reserveTransparent),
+    paletteProfile: options.paletteProfile || 'general',
+    quality: {
+      meanDeltaE: Number(converted.quality?.meanDeltaE || 0),
+      p95DeltaE: Number(converted.quality?.p95DeltaE || 0),
+    },
     frameWidth,
     frameHeight,
     maxNumTile: sprite ? frameWidth * frameHeight / 64 : 0,
@@ -188,22 +196,32 @@ function visualMetadata(asset, image, converted, options = {}) {
 }
 
 function convertVisualGroup(entries, options = {}) {
+  const paletteProfile = options.paletteProfile === 'pal0-reserved' ? 'pal0-reserved' : 'general';
+  const reserveTransparent = Boolean(options.reserveTransparent);
   const decoded = entries.map((entry) => ({
     ...decodePng(entry.buffer),
     assetId: entry.asset.id,
     transparentIndex: entry.asset?.options?.transparentIndex,
+    reserveTransparent: entry.asset.type === 'sprite',
   }));
   const result = quantizeImages(decoded, {
-    reserveTransparent: Boolean(options.reserveTransparent),
+    reserveTransparent,
     transparentIndex: options.transparentIndex,
+    fixedPalette: paletteProfile === 'pal0-reserved'
+      ? [[0, 0, 0, 255], [255, 255, 255, 255]]
+      : [],
   });
+  const physicalPalette = result.palette.map((color) => color.slice(0, 3));
+  const paletteFingerprint = hashBuffer(Buffer.from(JSON.stringify(physicalPalette), 'utf8'));
   const outputs = new Map();
   result.images.forEach((converted, index) => {
     const entry = entries[index];
     outputs.set(entry.asset.id, {
       png: converted.png,
       palette: result.palette,
-      metadata: visualMetadata(entry.asset, decoded[index], converted, options),
+      paletteRgb333: physicalPalette,
+      paletteFingerprint,
+      metadata: visualMetadata(entry.asset, decoded[index], converted, { ...options, paletteProfile, reserveTransparent: entry.asset.type === 'sprite' }),
       contentHash: hashBuffer(converted.png),
     });
   });

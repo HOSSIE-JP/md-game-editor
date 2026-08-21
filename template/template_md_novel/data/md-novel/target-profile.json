@@ -22,19 +22,26 @@
   },
   "palettes": {
     "system": 0,
-    "background": 1,
-    "portraitA": 2,
-    "portraitB": 3
+    "selectable": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "pal0Reserved": {
+      "0": "#000000",
+      "1": "#ffffff"
+    }
   },
   "font": {
+    "kind": "bundled",
     "renderer": "subset-16x16-v1",
     "glyphWidth": 16,
     "glyphHeight": 16,
-    "source": "font/misaki_gothic.png",
-    "kind": "bundled",
-    "label": "同梱 Misaki Gothic",
+    "source": "font/JF-Dot-Shinonome16.ttf",
+    "label": "同梱 JF-Dot-Shinonome16.ttf",
     "fontSize": 16,
-    "threshold": 32,
+    "threshold": 190,
     "xOffset": 0,
     "yOffset": 0,
     "previewText": "MDノベルのフォント表示\n19文字x4行",
@@ -42,10 +49,10 @@
     "generation": {
       "formatVersion": 1,
       "renderer": "subset-16x16-v1",
-      "inputHash": "06e7d50acc0cc84a8480498aca9dbaa9e0585c8586886270d714ac11bbd0f0c8",
-      "sourceHash": "a273dd232907e1c98aa008fa63b050c693a06336cfdfcfe575021a95aaf2769c",
+      "inputHash": "180d83b9dd64164fd8dae29640a7ea55667ff875f84ffbaf2caf38a0d5e3256f",
+      "sourceHash": "5e265e45349b3328afa67dc3905a3ca3c628cf7c7e0eccea9c7ce8a8acc127cc",
       "outputPath": "res/novel/font/generated.png",
-      "pngSha256": "e6b74dd505fda9e3e3c7e9ab4f6415da8be7e3d5e49e2c2bda4ea964d087da97",
+      "pngSha256": "ea3cf5245cef8ebe0af41240e42413dc95c54869c32dfd2f043d439a73b01508",
       "glyphCount": 27,
       "width": 256,
       "height": 32

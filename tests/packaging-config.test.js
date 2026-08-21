@@ -58,6 +58,10 @@ test('packaging source contains the MD novel plugins and clean starter template'
     'plugins/md-novel-editor/manifest.json',
     'plugins/md-novel-editor/renderer-app.mjs',
     'plugins/md-novel-editor/novel-font.js',
+    'plugins/md-novel-builder/template/res/novel/font/JF-Dot-Shinonome16.ttf',
+    'plugins/md-novel-builder/template/res/novel/font/JF-Dot-Shinonome16-atlas.png',
+    'plugins/md-novel-builder/template/res/novel/font/JF-Dot-Shinonome16-README.txt',
+    'plugins/md-novel-builder/template/res/novel/font/JF-Dot-Shinonome16-LICENSE',
     'plugins/md-novel-builder/manifest.json',
     'plugins/md-novel-builder/template/src/novel_runtime/novel_runtime.c',
     'template/template_md_novel/project.json',
@@ -65,6 +69,9 @@ test('packaging source contains the MD novel plugins and clean starter template'
     'template/template_md_novel/data/md-novel/asset-bindings.json',
     'template/template_md_novel/data/md-novel/target-profile.json',
     'template/template_md_novel/res/novel/font/generated.png',
+    'template/template_md_novel/res/novel/font/JF-Dot-Shinonome16.ttf',
+    'template/template_md_novel/res/novel/font/JF-Dot-Shinonome16-README.txt',
+    'template/template_md_novel/res/novel/font/JF-Dot-Shinonome16-LICENSE',
   ];
   for (const relativePath of requiredFiles) {
     assert.equal(fs.existsSync(path.join(root, relativePath)), true, relativePath);
