@@ -271,7 +271,7 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 
 | フック | 呼ばれるタイミング | payload の主要フィールド |
 |---|---|---|
-| `onBuildStart` | ビルド開始直前 | `projectDir` |
+| `onBuildStart` | ビルド開始直前 | `projectDir`, `toolchainPath`, `skipClean` |
 | `onBuildLog` | ビルドログ 1 行ごと | `text`, `level` |
 | `onBuildEnd` | ビルド成功後 | `projectDir`, `romPath`, `elapsed` |
 | `onBuildError` | ビルド失敗時 | `projectDir`, `error` |
@@ -283,6 +283,8 @@ TileMap エディタの collision は ResComp の `MAP` / `TILEMAP` layer_id で
 ---
 
 `onBuildStart`が`{ ok: false }`を返す、throwする、またはPromise rejectした場合、MD/PCEともtoolchainは開始されず、`onBuildError`が1回だけ呼ばれる。hook専用builderは`generator: false`にし、preflight/codegenは`onBuildStart`へ一本化する。
+
+MDの`skipClean` payloadは呼出側の要求であり、builderの承認ではない。前回成功artifactとbuild契約をhash検証できたときだけ戻り値で`skipClean: true`を返し、それ以外はclean buildへ戻す。
 
 renderer activationの`beforeBuild` / `beforeProjectSwitch`はmain process hookではなく、未保存renderer stateを永続化またはvetoする非同期lifecycleである。
 
@@ -322,7 +324,8 @@ renderer activationの`beforeBuild` / `beforeProjectSwitch`はmain process hook�
 - `md-novel-editor`は`assets/pce-vn-scenes.json` v2を正本として未知fieldを保持し、MD設定を`data/md-novel/target-profile.json`、asset対応を`asset-bindings.json`へ分離する。
 - renderer UI、import、preview、診断はplugin内に置き、main serviceはproject root/realpath検査、revision、atomic replace、transaction hashを必須とする。
 - `beforeBuild` / `beforeProjectSwitch`は未保存編集をatomic saveし、失敗した場合はvetoする。古いdisk状態でBuild/Test Playを成功させない。
-- `md-novel-builder`は`generator: false`のhook-only builder。canonical dataを変更せず、staging生成物をhash検証してからcommitし、`makeVariables.SRC_C`へ全C sourceを明示する。
+- `md-novel-builder`は`generator: false`のhook-only builder。canonical dataを変更せず、staging生成物をhash検証してからcommitし、`makeVariables.SRC_C`へ全C sourceを明示する。通常Buildはclean、Test Playは検証済みmanifest/ROM/object/生成物/build契約だけを差分buildへ再利用する。
+- Font tabはproject-local TTF/OTF/TTCまたは同梱Misakiから固定16x16の使用glyph subsetを生成する。Shift-JIS round-trip、font cmap、atlas hashをsave/buildで検査し、silent fallbackしない。
 - H40 320x224、PAL0=system、PAL1=background、PAL2/PAL3=portrait。背景・立ち絵のscene持続を含むVRAM、sprite、scanline、DMA、4MiB ROM gateをbuild時に再検査する。
 - CDDA/ADPCM/voiceはwarning+NOP、PSG song/SFXは参照された`(assetId, channel)` variantだけをXGM2/VGMまたはWAVへ変換する。
 - 実装、`docs/PLUGIN.md`、`docs/NOVEL.md`、`tests/novel-plugins.test.js`を同じ作業で更新する。

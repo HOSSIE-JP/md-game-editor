@@ -21,14 +21,22 @@
     "loadMdNovelProject",
     "saveMdNovelProject",
     "importPceNovelProject",
-    "validateMdNovelProject"
+    "validateMdNovelProject",
+    "prepareMdNovelFontGeneration",
+    "commitMdNovelFontGeneration",
+    "importMdNovelFont",
+    "deleteMdNovelFont"
   ],
   "mainApi": {
     "hooks": [
       "loadMdNovelProject",
       "saveMdNovelProject",
       "importPceNovelProject",
-      "validateMdNovelProject"
+      "validateMdNovelProject",
+      "prepareMdNovelFontGeneration",
+      "commitMdNovelFontGeneration",
+      "importMdNovelFont",
+      "deleteMdNovelFont"
     ]
   },
   "tab": {

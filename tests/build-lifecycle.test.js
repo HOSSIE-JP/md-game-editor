@@ -33,7 +33,7 @@ function loadMain() {
   }).__test;
 }
 
-function installBuildFakes(main, coreId) {
+function installBuildFakes(main, coreId, options = {}) {
   const buildSystem = main.buildSystem;
   const setupManager = require('../setup-manager');
   const pluginManager = require('../plugin-manager');
@@ -54,6 +54,7 @@ function installBuildFakes(main, coreId) {
 
   const pluginId = coreId === 'pc-engine' ? 'fake-pce-builder' : 'fake-md-builder';
   const hookCalls = [];
+  const buildOptions = [];
   let buildCalls = 0;
   const sent = [];
 
@@ -69,8 +70,9 @@ function installBuildFakes(main, coreId) {
   patch(buildSystem, 'getPceSetupManager', () => ({
     getToolchainPath: () => path.join(projectDir, 'toolchain'),
   }));
-  patch(buildSystem, 'buildProject', async () => {
+  patch(buildSystem, 'buildProject', async (_toolchain, _java, _onLog, receivedOptions) => {
     buildCalls += 1;
+    buildOptions.push(receivedOptions);
     return { success: true };
   });
   patch(setupManager, 'getToolchainDir', () => path.join(projectDir, 'sgdk'));
@@ -85,7 +87,7 @@ function installBuildFakes(main, coreId) {
   }]);
   patch(pluginManager, 'invokeHook', async (_id, hookName, payload) => {
     hookCalls.push({ hookName, payload });
-    if (hookName === 'onBuildStart') return { ok: false, error: 'preflight rejected' };
+    if (hookName === 'onBuildStart') return typeof options.startResult === 'function' ? options.startResult(payload) : options.startResult || { ok: false, error: 'preflight rejected' };
     return { ok: true };
   });
 
@@ -104,6 +106,7 @@ function installBuildFakes(main, coreId) {
     pluginId,
     projectDir,
     restore,
+    getBuildOptions: () => buildOptions,
     sent,
     getBuildCalls: () => buildCalls,
   };
@@ -133,9 +136,33 @@ for (const coreId of ['mega-drive', 'pc-engine']) {
   });
 }
 
+test('MD forwards the Test Play incremental request and keeps ordinary Build clean', async () => {
+  const main = loadMain();
+  const fake = installBuildFakes(main, 'mega-drive', {
+    startResult(payload) {
+      return { ok: true, skipClean: Boolean(payload.skipClean), makeVariables: { SRC_C: 'src/main.c' } };
+    },
+  });
+  try {
+    assert.equal((await main.runBuildFull()).success, true);
+    assert.equal((await main.runBuildFull({ skipClean: true })).success, true);
+    const starts = fake.hookCalls.filter((call) => call.hookName === 'onBuildStart');
+    assert.equal(starts.length, 2);
+    assert.equal(starts[0].payload.skipClean, false);
+    assert.equal(starts[1].payload.skipClean, true);
+    assert.equal(fake.getBuildOptions()[0].skipClean, false);
+    assert.equal(fake.getBuildOptions()[1].skipClean, true);
+    assert.equal(fake.getBuildOptions()[1].makeVariables.SRC_C, 'src/main.c');
+  } finally {
+    main.setMainWindowForTest(null);
+    fake.restore();
+  }
+});
+
 test('existing standard WASM Test Play window reloads every requested ROM', async () => {
   const main = loadMain();
   const loads = [];
+
   let focusCalls = 0;
   const fakeWindow = {
     isDestroyed: () => false,

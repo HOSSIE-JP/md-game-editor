@@ -46,7 +46,6 @@ export function buildEditorShell() {
             <main class="mn-center-column">
               <div class="mn-scene-sticky">
                 <div class="mn-scene-title-row">
-                  <button type="button" class="icon mn-column-toggle" data-action="toggle-left" title="左列を折り畳む">☰</button>
                   <div class="mn-scene-title-block">
                     <h2 data-role="scene-title">Scene</h2>
                     <div class="mn-scene-fields">
@@ -59,12 +58,11 @@ export function buildEditorShell() {
                       <input data-role="command-list-search" class="mn-input mn-list-search" placeholder="Scene内Command検索" aria-label="Scene内Command検索">
                     </div>
                   </div>
-                  <div class="mn-scene-actions">
-                    <label class="mn-check"><input type="checkbox" data-role="scene-full-bg"><span>Full BG</span></label>
-                    <button type="button" data-action="open-preview">▶ Preview</button>
-                    <button type="button" data-action="save" class="primary">保存</button>
-                    <button type="button" class="icon mn-column-toggle" data-action="toggle-right" title="右列を折り畳む">▣</button>
-                  </div>
+                </div>
+                <div class="mn-scene-actions" aria-label="Scene操作">
+                  <label class="mn-check"><input type="checkbox" data-role="scene-full-bg"><span>Full BG</span></label>
+                  <button type="button" data-action="open-preview">▶ Preview</button>
+                  <button type="button" data-action="save" class="primary">保存</button>
                 </div>
                 <div class="mn-budget" data-role="scene-budget" data-level="ok">
                   <div class="mn-budget-head"><span data-role="budget-label">MD Scene予算</span><span data-role="budget-value"></span></div>

@@ -17,13 +17,13 @@ builder は hook-only です。`manifest.json` の `generator` は `false` で�
 
 ## PCE型エディターUI
 
-`Script`タブはPCE Visual Novel Editorの基本操作をMD plugin内へ移植しています。左に階層化SceneとCommandパレット、中央に色分けされたCommandカード、右に選択Command時点の320x224 previewとGUI編集フォームを配置します。列幅はドラッグで変更でき、狭い画面では左右列を個別に折り畳めます。列幅、Commandパレット、Sceneグループの開閉状態はprojectを開き直しても保持します。
+`Script`タブはPCE Visual Novel Editorの基本操作をMD plugin内へ移植しています。左に階層化SceneとCommandパレット、中央に色分けされたCommandカード、右に選択Command時点の320x224 previewとGUI編集フォームを配置します。列幅はresizerで変更でき、3列は常に表示します。viewportが1280px未満のときは列を隠したり重ねたりせず、workspace全体を横scrollします。列幅、Commandパレット、Sceneグループの開閉状態はprojectを開き直しても保持します。
 
 - Scene名の`/`区切りをグループとして表示し、Scene追加・削除・開始Scene指定・並べ替えを行えます。ID変更時は`startScene`、`nextSceneId`、`jump`、`choice`の参照も更新します。参照されているSceneの削除は確認し、移動先を暗黙に変更しません。
 - PCE JSON v2の18種（BG、Sprite、Sprite Move、Message、Variable、Choice、IF、Switch、Label、GOTO、Input、Jump、Wait、Cache、Audio、Effect、SpriteText、Comment）をCommandパレットまたはドラッグ&ドロップで追加できます。カードは1始まり番号、カテゴリ色、Skip、検索、並べ替え、コピー、前後貼り付け、削除を備えます。
-- 選択Commandは型別GUIで編集し、Scene単位でGUI/JSONを切り替えられます。既知fieldだけをGUIからpatchするため、未知fieldは保持されます。未知commandはJSON専用で保持・編集し、既知commandへの型変更はその型の既定値で作り直します。
+- 選択Commandは型別GUIで編集し、Scene単位でGUI/JSONを切り替えられます。JSONは選択Sceneのraw objectを表示し、`Scene JSONを適用`でsyntax、ID重複、ID形式、commands型/件数を検証して明示適用します。未適用JSONがある状態でGUI、Scene、tab、Preview、保存へ移動すると、適用・破棄・キャンセルを選びます。既知fieldだけをGUIからpatchするため、未知fieldは保持されます。未知commandはJSON専用で保持・編集し、既知commandへの型変更はその型の既定値で作り直します。
 - Undo/Redoは100段、Command clipboardは同じproject内で利用できます。`Ctrl+S`で保存、`Ctrl+Z`でUndo、`Ctrl+Y`または`Ctrl+Shift+Z`でRedoします。
-- `System`はPCE互換のmessage速度・AUTO初期値・auto waitとMD target設定を分離して表示します。`Font`は実際に使用するMisaki Gothic 16x16表示と使用glyph atlas、PCE font provenanceを読取専用で表示します。`Assets`はbindingとtile/sprite/audio容量、`診断`はpath付きwarning/errorを表示します。
+- `System`はPCE互換のmessage速度・AUTO初期値・auto waitとMD target設定を分離して表示します。`Font`は同梱Misakiまたはprojectへ登録したTTF/OTF/TTCを選択し、size 8..32、threshold 1..254、x/y offset -8..8、preview textを調整して、固定16x16のindexed bitmapを生成します。使用glyphはspeaker、本文、choice、SpriteText、固定記号のsubsetです。`Assets`はbindingとtile/sprite/audio容量、`診断`tabはpath付きwarning/errorを表示します。
 
 右側のCommand Previewは選択Commandまでを評価した表示です。`Preview`は選択Sceneの先頭から動く別ウィンドウを開き、message、choice、変数、label分岐、scene遷移、待機、入力、AUTO、Sprite Move、PSG previewを同じscript interpreterで再生します。`最初から`、早送り、runtime/変数/sprite/budget Debugを備え、100,000 commandを超える無限ループは停止して診断します。入力は方向key、Z=I/B、X=II/C、Enter=RUN/START、A=SELECT/AUTOです。
 
@@ -35,9 +35,11 @@ CD-DA、ADPCM、message voiceはフォームとJSONに残りますが、MDでは
 assets/pce-vn-scenes.json          PCE互換script正本
 assets/pce-assets.json             PCE互換asset catalog/provenance
 assets/pce-font.json               PCE font provenance（任意）
+assets/fonts/                      登録したproject-local TTF/OTF/TTC
 data/md-novel/target-profile.json  MD表示・音声・入力・budget設定
 data/md-novel/asset-bindings.json  assetId → MD resource binding
 data/md-novel/transaction.json     複数documentのcommit hash
+res/novel/font/generated.png       使用glyphだけの16x16 indexed atlas
 res/novel/                         MD向け変換済みPNG/VGM/WAV
 res/novel.res                      builder生成ResComp定義
 inc/generated/novel_data.h         builder生成宣言
@@ -97,7 +99,8 @@ scene数は最大255、1 sceneのruntime commandは最大255、変数は予約�
 - WINDOWは下96px。16x16 glyph、speaker 1行、本文19列×4行、1page 75 cell
 - choice labelはJSON上24文字まで保持し、MD windowは先頭17文字を表示してwarning
 - PAL0=WINDOW/font/BG_A、PAL1=背景、PAL2/PAL3=立ち絵2系統
-- Unicode JSONを正本にし、build時にShift-JISへ検査変換。bundled Misaki Gothic 8x8 atlasを16x16へ拡大して使用glyphだけVRAMへ転送
+- Unicode JSONを正本にし、build時にShift-JISへround-trip検査変換。同梱Misaki Gothic 8x8または登録fontを16x16 cellへrasterizeし、使用glyphだけVRAMへ転送
+- 登録fontはcontent hashで重複排除し、`cmap` format 4/12で全runtime文字の実在を検査します。壊れたfont、未収録glyph、未生成/stale atlas、PNG hash不一致はhard errorです。active fontを削除するときは先に同梱Misakiへ切替・再生成・保存してからproject copyだけを削除します
 
 SpriteTextはPCEの1文字1hardware spriteを再現しません。H40 scanline上限を避けるため、BG_Aのdirty tile compositorへ描画します。1px座標を保持するため1文字が最大9 tileへ触れます。WINDOW領域ではWINDOWがBG_Aを隠します。
 
@@ -140,7 +143,7 @@ message送りはB/C/START/RIGHT/DOWN、choice決定はB/C/STARTです。Aは`AUT
 
 ## Build生成と失敗条件
 
-`onBuildStart`はscene/profile/binding/transactionを再検証し、build ID別stagingへ全生成物を書き、hash確認後にcommit manifestを最後に更新します。正本JSONはbuildから変更しません。ResComp symbolは大文字小文字を無視して重複検査します。
+`onBuildStart`はscene/profile/binding/transaction/fontを再検証し、build ID別stagingへ全生成物を書き、hash確認後にcommit manifestを最後に更新します。内容が同じ生成物とstatic runtimeは書き直さずmtimeを保持します。正本JSONはbuildから変更しません。ResComp symbolは大文字小文字を無視して重複検査します。
 
 builderが返す`makeVariables.SRC_C`は次の3ファイルだけです。
 
@@ -151,6 +154,10 @@ src/generated/novel_data.c
 ```
 
 `src/boot/rom_head.c`と`sega.s`は通常Cソースへ混入させません。`onBuildStart`が`{ok:false}`を返すかthrow/rejectした場合、hostはSGDKを開始せず、`onBuildError`と失敗`build-end`を1回だけ通知します。
+
+通常の`Build`は従来どおり`clean release`です。`Test Play`だけ`skipClean`を要求し、前回Build成功manifest、ROM、全object、生成物、toolchain、`SRC_C`、runtime ABI、font format、ResComp契約のhashが一致した場合に限って`clean`を省略して`make release`の依存判定を使います。scene/font/asset変更時は内容が変わった生成物だけmtimeを更新するため、その依存objectだけが再生成されます。
+
+manifest欠落/破損、前回失敗、ROM/object/生成物の欠落またはhash不一致、toolchain/SRC_C/runtime ABI/font format/ResComp契約変更ではTest Playも自動的にclean buildへ戻ります。Build Logには生成物のchanged/unchanged件数、cache hit/miss理由、完全無変更時の`input unchanged/object reused`を出します。ROMだけをblind reuseしてTest Playを開始することはありません。
 
 未保存のplugin編集はBuild/Test Play/Project切替前にgeneric lifecycleで保存されます。保存が失敗した場合は操作を中止します。Test Play windowを再利用する場合も、新しいROM URLへreloadします。
 

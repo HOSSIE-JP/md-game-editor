@@ -25,7 +25,7 @@ import {
   systemFormHtml,
 } from './editor-render.mjs';
 import { simulateScene } from './preview-core.mjs';
-import { collectVisualAssetIds, drawFontPreviews, drawNovelFrame } from './rendering.mjs';
+import { collectVisualAssetIds, drawSubsetFontPreviews, drawNovelFrame } from './rendering.mjs';
 import { openNovelPreview } from './preview-window.mjs';
 
 const STORAGE_PREFIX = 'md-novel-editor.pce-ui.v1';
@@ -135,15 +135,19 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     commandListSearch: '',
     collapsedGroups: new Set(readStoredJson('collapsedSceneGroups', [])),
     commandLibraryCollapsed: Boolean(readStoredJson('commandLibraryCollapsed', false)),
-    leftCollapsed: false,
-    rightCollapsed: false,
     columnLayout: { left: 320, right: 440, ...readStoredJson('columnLayout', {}) },
     sceneDragId: '',
     commandDragIndex: null,
     newCommandDragType: '',
     projectDir: '',
     imageCache: new Map(),
+    fontPlan: null,
     fontImage: null,
+    fontFace: null,
+    fontFaceName: '',
+    fontPreviewGeneration: 0,
+    fontPreviewTimer: 0,
+    fontGenerating: false,
     previewGeneration: 0,
     audioPlayer: null,
     audioContext: null,
@@ -168,6 +172,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     details.hidden = !options.details;
     const save = panel.querySelector('[data-decision="save"]');
     save.hidden = !options.allowSave;
+    save.textContent = options.saveLabel || '保存';
     const confirm = panel.querySelector('[data-decision="confirm"]');
     confirm.textContent = options.confirmLabel || (options.allowSave ? '破棄' : '実行');
     confirm.classList.toggle('danger', Boolean(options.danger));
@@ -185,6 +190,13 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   function setStatus(message, tone = '') {
     elements.status.textContent = String(message || '');
     elements.status.dataset.tone = tone;
+  }
+
+  function documentsDifferFromSnapshot() {
+    if (!state.snapshot) return false;
+    return JSON.stringify(state.sceneDocument) !== JSON.stringify(state.snapshot.sceneDocument)
+      || JSON.stringify(state.targetProfile) !== JSON.stringify(state.snapshot.targetProfile)
+      || JSON.stringify(state.bindings) !== JSON.stringify(state.snapshot.bindings);
   }
 
   function setDirty(value) {
@@ -264,8 +276,6 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     state.columnLayout = { left, right };
     elements.scriptWorkspace.style.setProperty('--mn-left-width', `${left}px`);
     elements.scriptWorkspace.style.setProperty('--mn-right-width', `${right}px`);
-    elements.scriptWorkspace.dataset.leftCollapsed = String(state.leftCollapsed);
-    elements.scriptWorkspace.dataset.rightCollapsed = String(state.rightCollapsed);
   }
 
   function renderTabs() {
@@ -298,7 +308,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     elements.sceneBudget.dataset.level = level;
     elements.budgetValue.textContent = `${maximum || 0} / 1424 tiles`;
     elements.budgetFill.style.width = `${Math.min(100, ratio * 100).toFixed(1)}%`;
-    elements.budgetMetrics.innerHTML = `<span>states ${budget.states ?? 0}</span><span>overlay ${budget.maxOverlayTiles ?? 0}/192</span><span>sprite tiles ${budget.maxSpriteTiles ?? 0}</span><span>pieces ${budget.maxSpritePieces ?? 0}/80</span><span>scanline ${budget.maxScanlinePieces ?? 0}/20 · ${budget.maxScanlinePixels ?? 0}/320px</span><span>DMA ${state.targetProfile?.runtime?.dmaBytesPerFrame ?? 6144}B/f</span><button type="button" data-action="show-diagnostics">診断を開く</button>`;
+    elements.budgetMetrics.innerHTML = `<span>states ${budget.states ?? 0}</span><span>overlay ${budget.maxOverlayTiles ?? 0}/192</span><span>sprite tiles ${budget.maxSpriteTiles ?? 0}</span><span>pieces ${budget.maxSpritePieces ?? 0}/80</span><span>scanline ${budget.maxScanlinePieces ?? 0}/20 · ${budget.maxScanlinePixels ?? 0}/320px</span><span>DMA ${state.targetProfile?.runtime?.dmaBytesPerFrame ?? 6144}B/f</span>`;
   }
 
   function updateSceneJsonText(force = false) {
@@ -382,14 +392,287 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     drawNovelFrame(elements.commandPreview, visual, { coordinateMode: state.targetProfile?.coordinateMode, bindings: state.bindings, imageForAsset });
   }
 
+  function fontGenerationStatus(message, tone = '') {
+    const status = elements.fontSettings.querySelector('[data-role="font-generation-status"]');
+    if (!status) return;
+    status.textContent = String(message || '');
+    status.dataset.tone = tone;
+  }
+
+  function releaseFontFace() {
+    if (state.fontFace && document.fonts?.delete) document.fonts.delete(state.fontFace);
+    state.fontFace = null;
+    state.fontFaceName = '';
+  }
+
+  function bundledJisCell(code) {
+    if (code <= 0xff) return null;
+    const lead = code >> 8;
+    const trail = code & 0xff;
+    if (!(((lead >= 0x81) && (lead <= 0x9f)) || ((lead >= 0xe0) && (lead <= 0xef)))) return null;
+    if (trail < 0x40 || trail > 0xfc || trail === 0x7f) return null;
+    let row = lead <= 0x9f ? ((lead - 0x81) * 2) + 0x21 : ((lead - 0xe0) * 2) + 0x5f;
+    let column;
+    if (trail >= 0x9f) { row += 1; column = trail - 0x7e; }
+    else column = trail - (trail < 0x7f ? 0x1f : 0x20);
+    return { row: row - 0x21, column: column - 0x21 };
+  }
+
+  async function rasterizeFontPlan(plan) {
+    const canvas = document.createElement('canvas');
+    canvas.width = plan.width;
+    canvas.height = plan.height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.imageSmoothingEnabled = false;
+    const size = clamp(plan.font?.fontSize, 8, 32, 16);
+    const xOffset = clamp(plan.font?.xOffset, -8, 8, 0);
+    const yOffset = clamp(plan.font?.yOffset, -8, 8, 0);
+    if (plan.font?.kind === 'bundled') {
+      const source = await loadProjectImage(plan.sourceRelativePath, `font-source:${plan.sourceHash}`);
+      if (!source) throw new Error('同梱Misaki font sourceを読込めません');
+      for (const [index, entry] of plan.entries.entries()) {
+        const cell = bundledJisCell(entry.code);
+        if (!cell) throw new Error(`同梱Misakiに収録できない文字です: ${entry.character}`);
+        const cellX = (index % 16) * 16;
+        const cellY = Math.floor(index / 16) * 16;
+        const x = cellX + Math.floor((16 - size) / 2) + xOffset;
+        const y = cellY + Math.floor((16 - size) / 2) + yOffset;
+        context.save();
+        context.beginPath();
+        context.rect(cellX, cellY, 16, 16);
+        context.clip();
+        context.drawImage(source, cell.column * 8, cell.row * 8, 8, 8, x, y, size, size);
+        context.restore();
+      }
+    } else {
+      const projectDir = await getProjectDir();
+      const read = await api.electronAPI.readFileAsDataUrl(`${projectDir}/${plan.sourceRelativePath}`);
+      if (!read?.ok || !read.dataUrl) throw new Error(read?.error || '登録fontを読込めません');
+      releaseFontFace();
+      state.fontFaceName = `md_novel_${String(plan.inputHash).slice(0, 16)}`;
+      state.fontFace = new FontFace(state.fontFaceName, `url("${read.dataUrl}")`);
+      await state.fontFace.load();
+      document.fonts.add(state.fontFace);
+      context.fillStyle = '#fff';
+      context.textAlign = 'left';
+      context.textBaseline = 'alphabetic';
+      context.font = `${size}px "${state.fontFaceName}"`;
+      for (const [index, entry] of plan.entries.entries()) {
+        if (entry.character === '　') continue;
+        const metrics = context.measureText(entry.character);
+        const ascent = Number(metrics.actualBoundingBoxAscent || size * .8);
+        const descent = Number(metrics.actualBoundingBoxDescent || size * .2);
+        const width = Number(metrics.width || size);
+        const cellX = (index % 16) * 16;
+        const cellY = Math.floor(index / 16) * 16;
+        const x = cellX + (16 - width) / 2 + xOffset;
+        const baseline = cellY + (16 - ascent - descent) / 2 + ascent + yOffset;
+        context.save();
+        context.beginPath();
+        context.rect(cellX, cellY, 16, 16);
+        context.clip();
+        context.fillText(entry.character, x, baseline);
+        context.restore();
+      }
+    }
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    const threshold = clamp(plan.font?.threshold, 1, 254, 32);
+    for (let offset = 0; offset < imageData.data.length; offset += 4) {
+      const alpha = imageData.data[offset + 3];
+      const luminance = Math.max(imageData.data[offset], imageData.data[offset + 1], imageData.data[offset + 2]);
+      const enabled = Math.round(alpha * luminance / 255) >= threshold;
+      imageData.data[offset] = enabled ? 255 : 0;
+      imageData.data[offset + 1] = enabled ? 255 : 0;
+      imageData.data[offset + 2] = enabled ? 255 : 0;
+      imageData.data[offset + 3] = enabled ? 255 : 0;
+    }
+    for (const [index, entry] of plan.entries.entries()) {
+      if (entry.character === '　') continue;
+      const cellX = (index % 16) * 16;
+      const cellY = Math.floor(index / 16) * 16;
+      let ink = 0;
+      for (let y = 0; y < 16; y += 1) {
+        for (let x = 0; x < 16; x += 1) ink += imageData.data[((cellY + y) * canvas.width + cellX + x) * 4 + 3] ? 1 : 0;
+      }
+      if (!ink) throw new Error(`登録fontにglyphがありません: ${entry.character}`);
+    }
+    context.putImageData(imageData, 0, 0);
+    return canvas;
+  }
+
+  async function requestFontPlan() {
+    const result = await api.plugins.invokeHook(plugin.id, 'prepareMdNovelFontGeneration', {
+      sceneDocument: state.sceneDocument,
+      targetProfile: state.targetProfile,
+    });
+    if (!result?.entries) throw new Error(result?.error || 'Font generation planを作成できません');
+    state.fontPlan = result;
+    return result;
+  }
+
+  async function refreshFontPreview() {
+    const generation = ++state.fontPreviewGeneration;
+    try {
+      const plan = await requestFontPlan();
+      const atlasImage = plan.currentValid
+        ? await loadProjectImage(plan.outputPath, `font-output:${plan.font?.generation?.pngSha256 || plan.inputHash}`)
+        : await rasterizeFontPlan(plan);
+      const previewEntries = Array.isArray(plan.previewEntries) ? plan.previewEntries : [];
+      const previewPlan = {
+        ...plan,
+        entries: previewEntries,
+        width: 256,
+        height: Math.max(16, Math.ceil(previewEntries.length / 16) * 16),
+      };
+      const previewImage = await rasterizeFontPlan(previewPlan);
+      if (generation !== state.fontPreviewGeneration) return;
+      state.fontImage = atlasImage;
+      elements.fontGlyphCount.textContent = `${plan.entries.length} glyphs · ${plan.width}×${plan.height}`;
+      drawSubsetFontPreviews(elements.fontTextPreview, elements.fontAtlasPreview, plan.font.previewText, atlasImage, plan.entries, { previewImage, previewEntries });
+      fontGenerationStatus(plan.currentValid ? '生成済み' : `未保存preview: ${plan.validationError || '再生成が必要です'}`, plan.currentValid ? 'ok' : 'warn');
+    } catch (error) {
+      if (generation !== state.fontPreviewGeneration) return;
+      state.fontPlan = null;
+      state.fontImage = null;
+      elements.fontGlyphCount.textContent = '生成エラー';
+      fontGenerationStatus(error.message, 'error');
+    }
+  }
+
+  function scheduleFontPreview(delay = 120) {
+    clearTimeout(state.fontPreviewTimer);
+    state.fontPreviewTimer = window.setTimeout(() => { void refreshFontPreview(); }, delay);
+  }
+
   async function renderFont() {
-    const text = collectUsedText(state.sceneDocument);
-    const unique = [...new Set(Array.from(text).filter((character) => !['\r', '\n'].includes(character)))];
-    elements.fontSettings.innerHTML = fontSettingsHtml(state.targetProfile, state.pceFont, unique.length);
-    elements.fontGlyphCount.textContent = `${unique.length} glyphs`;
-    if (!state.fontImage) state.fontImage = await loadProjectImage('res/novel/font/misaki_gothic.png', 'font:misaki');
-    const previewText = String(state.pceFont?.previewText || text || 'MDノベルのフォント表示\n19文字x4行').slice(0, 512);
-    drawFontPreviews(elements.fontTextPreview, elements.fontAtlasPreview, previewText, state.fontImage, text);
+    elements.fontSettings.innerHTML = fontSettingsHtml(state.targetProfile, state.pceFont, state.fontPlan?.entries?.length || 0);
+    await refreshFontPreview();
+  }
+
+  async function ensureFontGenerated(options = {}) {
+    if (state.fontGenerating) {
+      setStatus('Font生成処理が完了するまで待ってください', 'warn');
+      return false;
+    }
+    state.fontGenerating = true;
+    try {
+      const plan = await requestFontPlan();
+      if (plan.currentValid) {
+        state.targetProfile.font = clone(plan.font);
+        if (options.refreshPreview) await refreshFontPreview();
+        return true;
+      }
+      setStatus('16×16 bitmap fontを生成中…');
+      let pngDataUrl = '';
+      if (plan.font.kind === 'project') {
+        const canvas = await rasterizeFontPlan(plan);
+        const imageData = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+        pngDataUrl = await api.imageDataToIndexedPng(imageData);
+      }
+      const result = await api.plugins.invokeHook(plugin.id, 'commitMdNovelFontGeneration', {
+        sceneDocument: state.sceneDocument,
+        targetProfile: state.targetProfile,
+        inputHash: plan.inputHash,
+        pngDataUrl,
+      });
+      if (!result?.generation) throw new Error(result?.error || 'Bitmap font生成に失敗しました');
+      state.targetProfile.font = { ...clone(result.font), generation: clone(result.generation) };
+      state.fontPlan = result;
+      state.fontImage = await loadProjectImage(result.outputPath, `font-output:${result.generation.pngSha256}`);
+      setDirty(true);
+      if (options.refreshPreview || state.tab === 'font') {
+        elements.fontSettings.innerHTML = fontSettingsHtml(state.targetProfile, state.pceFont, result.entries.length);
+        await refreshFontPreview();
+        fontGenerationStatus('生成済み', 'ok');
+      }
+      setStatus(`Bitmap font生成完了: ${result.entries.length} glyph`, 'ok');
+      return true;
+    } catch (error) {
+      setStatus(error.message, 'error');
+      fontGenerationStatus(error.message, 'error');
+      return false;
+    } finally {
+      state.fontGenerating = false;
+    }
+  }
+
+  function updateFontSetting(element) {
+    const field = element?.dataset?.fontField;
+    if (!field) return;
+    const font = { ...(state.targetProfile.font || {}), library: clone(state.targetProfile.font?.library || []) };
+    if (field === 'source') {
+      const source = String(element.value || 'bundled');
+      const entry = font.library.find((item) => item.file === source);
+      if (source === 'bundled' || !entry) {
+        font.kind = 'bundled';
+        font.source = 'font/misaki_gothic.png';
+        font.label = '同梱 Misaki Gothic';
+      } else {
+        font.kind = 'project';
+        font.source = entry.file;
+        font.label = entry.label;
+      }
+      font.generation = null;
+    } else if (field === 'previewText') {
+      font.previewText = String(element.value || '').slice(0, 512);
+    } else {
+      const ranges = { fontSize: [8, 32, 16], threshold: [1, 254, 32], xOffset: [-8, 8, 0], yOffset: [-8, 8, 0] };
+      const range = ranges[field];
+      if (!range) return;
+      font[field] = clamp(element.value, range[0], range[1], range[2]);
+      font.generation = null;
+    }
+    state.targetProfile.font = font;
+    state.fontPlan = null;
+    state.fontImage = null;
+    setDirty(true);
+    if (field === 'source') void renderFont();
+    else scheduleFontPreview(field === 'previewText' ? 40 : 160);
+  }
+
+  async function importFontFile() {
+    const picked = await api.electronAPI.pickFile({
+      title: 'Projectへ登録するfontを選択',
+      properties: ['openFile'],
+      filters: [{ name: 'Font', extensions: ['ttf', 'otf', 'ttc'] }],
+    });
+    if (picked?.canceled || !picked.sourcePath) return;
+    setStatus('Fontをprojectへ登録中…');
+    const result = await api.plugins.invokeHook(plugin.id, 'importMdNovelFont', { sourcePath: picked.sourcePath, label: picked.fileName?.replace(/\.[^.]+$/, '') });
+    if (!result?.entry) { setStatus(result?.error || 'Font登録に失敗しました', 'error'); return; }
+    const font = { ...(state.targetProfile.font || {}) };
+    const library = [...(font.library || []).filter((entry) => entry.file !== result.entry.file), result.entry];
+    state.targetProfile.font = { ...font, kind: 'project', source: result.entry.file, label: result.entry.label, library, generation: null };
+    state.fontPlan = null;
+    state.fontImage = null;
+    setDirty(true);
+    await renderFont();
+    setStatus(result.deduplicated ? '同一fontを再利用しました' : 'Fontを登録しました', 'ok');
+  }
+
+  async function deleteActiveFont() {
+    const font = state.targetProfile.font || {};
+    if (font.kind !== 'project' || !font.source) return;
+    const choice = await askDecision({ title: '登録fontを削除', message: `${font.label || font.source} をprojectから削除します。同梱Misakiへ切り替えて再生成します。`, confirmLabel: '削除', danger: true });
+    if (choice !== 'confirm') return;
+    const previous = clone(state.targetProfile.font);
+    state.targetProfile.font = { ...font, kind: 'bundled', source: 'font/misaki_gothic.png', label: '同梱 Misaki Gothic', library: (font.library || []).filter((entry) => entry.file !== font.source), generation: null };
+    state.fontPlan = null;
+    state.fontImage = null;
+    setDirty(true);
+    if (!await ensureFontGenerated({ refreshPreview: true }) || !await saveCurrent()) {
+      state.targetProfile.font = previous;
+      setDirty(true);
+      await renderFont();
+      return;
+    }
+    const result = await api.plugins.invokeHook(plugin.id, 'deleteMdNovelFont', { relativePath: font.source });
+    if (!result?.ok) { setStatus(result?.error || 'Font削除に失敗しました', 'error'); return; }
+    await loadFromDisk();
+    state.tab = 'font';
+    render();
+    setStatus('登録fontを削除し、同梱Misakiへ切り替えました', 'ok');
   }
 
   function renderAssets() { elements.assetList.innerHTML = assetsHtml(state.bindings); }
@@ -441,7 +724,10 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     state.selectedSceneId = state.sceneDocument?.scenes?.some((scene) => scene.id === selectedId) ? selectedId : state.sceneDocument?.scenes?.[0]?.id || '';
     state.selectedCommandIndex = Math.max(0, Math.min(selectedIndex, Math.max(0, (selectedScene(state)?.commands?.length || 1) - 1)));
     state.imageCache.clear();
+    state.fontPlan = null;
     state.fontImage = null;
+    state.fontPreviewGeneration += 1;
+    releaseFontFace();
     state.sceneJsonDirty = false;
     if (options.resetHistory !== false) { state.history = []; state.future = []; }
     setDirty(false);
@@ -479,11 +765,24 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     try {
       const parsed = JSON.parse(elements.sceneJson.value || '{}');
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Scene JSONはobjectである必要があります');
+      const parsedId = typeof parsed.id === 'string' ? parsed.id.trim() : '';
+      if (!parsedId || parsedId.length > 32 || !/^[A-Za-z0-9_-]+$/.test(parsedId)) throw new Error('idは32文字以内の英数字、_、-で指定してください');
+      if (!Array.isArray(parsed.commands)) throw new Error('commandsは配列である必要があります');
+      if (parsed.commands.length > 255) throw new Error('commandsは最大255件です');
+      parsed.commands.forEach((command, commandIndex) => {
+        if (!command || typeof command !== 'object' || Array.isArray(command) || typeof command.type !== 'string' || !command.type.trim()) {
+          throw new Error(`commands[${commandIndex}]はtypeを持つobjectである必要があります`);
+        }
+      });
       const index = state.sceneDocument.scenes.findIndex((scene) => scene.id === state.selectedSceneId);
       if (index < 0) return true;
+      if (state.sceneDocument.scenes.some((scene, sceneIndex) => sceneIndex !== index && scene.id === parsedId)) throw new Error(`Scene IDが重複しています: ${parsedId}`);
       remember();
+      const previousId = state.sceneDocument.scenes[index].id;
+      parsed.id = parsedId;
       state.sceneDocument.scenes[index] = parsed;
-      state.selectedSceneId = String(parsed.id || state.selectedSceneId);
+      if (previousId !== parsedId) renameSceneReferences(state.sceneDocument, previousId, parsedId);
+      state.selectedSceneId = parsedId;
       state.sceneJsonDirty = false;
       setDirty(true);
       elements.scriptError.textContent = '';
@@ -495,9 +794,27 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     }
   }
 
+  async function guardSceneJson(reason) {
+    if (state.editorMode !== 'json' || !state.sceneJsonDirty) return true;
+    const choice = await askDecision({
+      title: '未適用のScene JSON',
+      message: `${reason}の前に、編集中のScene JSONを適用しますか？`,
+      allowSave: true,
+      saveLabel: '適用',
+      confirmLabel: '破棄',
+    });
+    if (choice === 'cancel') return false;
+    if (choice === 'save') return applySceneJson();
+    updateSceneJsonText(true);
+    elements.scriptError.textContent = '';
+    setDirty(documentsDifferFromSnapshot());
+    return true;
+  }
+
   async function saveCurrent() {
     if (!state.snapshot || state.loading) return false;
-    if (!applySceneJson()) return false;
+    if (!await guardSceneJson('保存')) return false;
+    if (!await ensureFontGenerated()) return false;
     if (!state.dirty) return true;
     finishFormEdit();
     setStatus('保存中…');
@@ -550,13 +867,14 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     setStatus(result.ok ? '検証成功' : '検証エラーがあります', result.ok ? 'ok' : 'error');
   }
 
-  function selectScene(sceneId) {
-    if (!applySceneJson()) return;
+  async function selectScene(sceneId) {
+    if (!await guardSceneJson('Scene切替')) return false;
     finishFormEdit();
     state.selectedSceneId = sceneId;
     state.selectedCommandIndex = 0;
     state.sceneJsonDirty = false;
     render();
+    return true;
   }
 
   function selectCommand(index) {
@@ -568,8 +886,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     void refreshCommandPreview();
   }
 
-  function addScene() {
-    if (!applySceneJson()) return;
+  async function addScene() {
+    if (!await guardSceneJson('Scene追加')) return;
     mutate(() => {
       const scenes = state.sceneDocument.scenes;
       const id = uniqueSceneId(`scene_${scenes.length + 1}`, scenes);
@@ -785,7 +1103,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   }
 
   async function openFullPreview() {
-    if (!applySceneJson()) return;
+    if (!await guardSceneJson('Preview')) return;
     state.previewWindow?.close();
     try {
       state.previewWindow = openNovelPreview({
@@ -828,9 +1146,17 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const button = event.target.closest('button');
     if (!button || !root.contains(button)) return;
     if (button.dataset.tab) {
-      if (!applySceneJson()) return;
+      if (!await guardSceneJson('タブ切替')) return;
       state.tab = button.dataset.tab;
       render();
+      return;
+    }
+    if (button.dataset.scriptMode) {
+      const nextMode = button.dataset.scriptMode === 'json' ? 'json' : 'gui';
+      if (nextMode === state.editorMode) return;
+      if (nextMode === 'gui' && !await guardSceneJson('GUI切替')) return;
+      state.editorMode = nextMode;
+      renderCommands();
       return;
     }
     const action = button.dataset.action;
@@ -841,14 +1167,12 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     else if (action === 'validate') await validateProject();
     else if (action === 'undo') undo();
     else if (action === 'redo') redo();
-    else if (action === 'toggle-left') { state.leftCollapsed = !state.leftCollapsed; applyWorkspaceLayout(); }
-    else if (action === 'toggle-right') { state.rightCollapsed = !state.rightCollapsed; applyWorkspaceLayout(); }
     else if (action === 'toggle-command-library') { state.commandLibraryCollapsed = !state.commandLibraryCollapsed; writeStoredJson('commandLibraryCollapsed', state.commandLibraryCollapsed); renderPalette(); }
     else if (action === 'toggle-scene-group') { const path = button.dataset.groupPath; if (state.collapsedGroups.has(path)) state.collapsedGroups.delete(path); else state.collapsedGroups.add(path); writeStoredJson('collapsedSceneGroups', [...state.collapsedGroups]); renderScenes(); }
-    else if (action === 'select-scene') selectScene(button.dataset.sceneId);
+    else if (action === 'select-scene') await selectScene(button.dataset.sceneId);
     else if (action === 'set-start-scene') mutate(() => { state.sceneDocument.startScene = button.dataset.sceneId; });
     else if (action === 'delete-scene') await deleteScene(button.dataset.sceneId);
-    else if (action === 'add-scene') addScene();
+    else if (action === 'add-scene') await addScene();
     else if (action === 'select-command') selectCommand(button.dataset.commandIndex);
     else if (action === 'add-command') addCommand(button.dataset.commandType);
     else if (action === 'delete-command') deleteCommand(Number(button.dataset.commandIndex));
@@ -863,13 +1187,16 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     else if (action === 'remove-switch') { updateKnownCommand({ rerenderCommands: false }); const command = selectedCommand(state); if (command.cases.length > 1) { beginFormEdit(); command.cases.splice(Number(button.dataset.index), 1); setDirty(true); renderDetail(); renderCommands(); } }
     else if (action === 'open-preview') await openFullPreview();
     else if (action === 'preview-audio') { try { await playAudioCommand(selectedCommand(state)); } catch (error) { setStatus(error.message, 'error'); } }
-    else if (action === 'show-diagnostics') { state.tab = 'diagnostics'; render(); }
+    else if (action === 'font-import') await importFontFile();
+    else if (action === 'font-delete') await deleteActiveFont();
+    else if (action === 'font-generate') await ensureFontGenerated({ refreshPreview: true });
   }
 
   function onInput(event) {
     if (event.target === elements.commandSearch) { state.commandSearch = event.target.value; renderPalette(); return; }
     if (event.target === elements.commandListSearch) { state.commandListSearch = event.target.value; renderCommands(); return; }
     if (event.target === elements.sceneJson) { state.sceneJsonDirty = true; setDirty(true); return; }
+    if (elements.fontSettings.contains(event.target) && event.target.dataset.fontField && event.target.tagName !== 'SELECT') { updateFontSetting(event.target); return; }
     if (event.target === elements.sceneName) {
       const scene = selectedScene(state); if (!scene) return;
       beginFormEdit(); scene.name = String(event.target.value || '').slice(0, 96); setDirty(true); elements.sceneTitle.textContent = scene.name || scene.id; renderScenes(); return;
@@ -878,6 +1205,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   }
 
   async function onChange(event) {
+    if (elements.fontSettings.contains(event.target) && event.target.dataset.fontField) { updateFontSetting(event.target); return; }
     if (event.target === elements.sceneId) { renameScene(event.target.value); return; }
     if (event.target === elements.sceneName) { const scene = selectedScene(state); if (!scene) return; beginFormEdit(); scene.name = normalizedSceneName(event.target.value); event.target.value = scene.name || ''; setDirty(true); finishFormEdit(); renderScenes(); return; }
     if (event.target === elements.sceneFullBg) { mutate(() => { selectedScene(state).fullScreenBg = event.target.checked; }); return; }
@@ -990,7 +1318,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     refresh: reloadWithGuard,
     requestSave: saveCurrent,
     getDirtyState: () => ({ dirty: state.dirty, sceneId: state.selectedSceneId, commandIndex: state.selectedCommandIndex }),
-    openScene(sceneId, commandIndex = 0) { selectScene(sceneId); selectCommand(commandIndex); return true; },
+    async openScene(sceneId, commandIndex = 0) { if (!await selectScene(sceneId)) return false; selectCommand(commandIndex); return true; },
   });
 
   void loadFromDisk();
@@ -999,6 +1327,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     beforeProjectSwitch() { return flush('project switch'); },
     deactivate() {
       observer.disconnect();
+      clearTimeout(state.fontPreviewTimer);
+      state.fontPreviewGeneration += 1;
+      releaseFontFace();
       state.previewGeneration += 1;
       state.previewWindow?.close();
       stopAudioPreview();

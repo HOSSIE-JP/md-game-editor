@@ -215,6 +215,16 @@ function setProjectDir(projectDir) {
 function ensureDirSync(p) {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
 }
+function writeFileIfChangedSync(filePath, value, encoding = 'utf-8') {
+  const next = Buffer.isBuffer(value) ? value : Buffer.from(String(value), encoding);
+  if (fs.existsSync(filePath)) {
+    const current = fs.readFileSync(filePath);
+    if (current.length === next.length && current.equals(next)) return false;
+  }
+  fs.writeFileSync(filePath, next);
+  return true;
+}
+
 
 function ensureProjectsRootDir() {
   const root = getProjectsRootDir();
@@ -306,7 +316,7 @@ function ensureProjectStructure(projectDir, config = {}, options = {}) {
   const romHeadPath = path.join(projectDir, 'src', 'boot', 'rom_head.c');
 
   if (options.overwriteSource || !fs.existsSync(srcPath)) {
-    fs.writeFileSync(srcPath, options.sourceCode || getSampleSourceCode(), 'utf-8');
+    writeFileIfChangedSync(srcPath, options.sourceCode || getSampleSourceCode());
   }
 
   if (!fs.existsSync(resPath)) {
@@ -314,7 +324,7 @@ function ensureProjectStructure(projectDir, config = {}, options = {}) {
   }
 
   if (options.overwriteRomHeader || !fs.existsSync(romHeadPath)) {
-    fs.writeFileSync(romHeadPath, buildRomHeaderSource(config), 'utf-8');
+    writeFileIfChangedSync(romHeadPath, buildRomHeaderSource(config));
   }
 
   const meta = {
@@ -323,7 +333,7 @@ function ensureProjectStructure(projectDir, config = {}, options = {}) {
     author: config.author || 'AUTHOR',
     serial: config.serial || 'GM 00000000-00',
     region: config.region || 'JUE',
-    generatedAt: new Date().toISOString(),
+    generatedAt: config.generatedAt || loadProjectConfigFromDir(projectDir).generatedAt || new Date().toISOString(),
   };
   if (config.pluginRoles && typeof config.pluginRoles === 'object') {
     meta.pluginRoles = { ...config.pluginRoles };
@@ -342,7 +352,7 @@ function ensureProjectStructure(projectDir, config = {}, options = {}) {
       }
     }
     const merged = normalizeProjectConfigForSave(Object.assign({}, existing, meta));
-    fs.writeFileSync(cfgPath, JSON.stringify(merged, null, 2), 'utf-8');
+    writeFileIfChangedSync(cfgPath, JSON.stringify(merged, null, 2));
   }
 
   return { projectDir, srcPath, resPath, romHeadPath, configPath: cfgPath };
@@ -1049,7 +1059,7 @@ function writeProjectRomHeader(projectDir, config = {}) {
   const resolved = path.resolve(projectDir);
   ensureDirSync(path.join(resolved, 'src', 'boot'));
   const romHeadPath = path.join(resolved, 'src', 'boot', 'rom_head.c');
-  fs.writeFileSync(romHeadPath, buildRomHeaderSource(config), 'utf-8');
+  writeFileIfChangedSync(romHeadPath, buildRomHeaderSource(config));
   return romHeadPath;
 }
 
@@ -1066,7 +1076,7 @@ function saveProjectConfig(patch) {
   const cfgPath = path.join(projectDir, 'project.json');
   const current = loadProjectConfig();
   const merged = normalizeProjectConfigForSave(Object.assign({}, current, patch));
-  fs.writeFileSync(cfgPath, JSON.stringify(merged, null, 2), 'utf-8');
+  writeFileIfChangedSync(cfgPath, JSON.stringify(merged, null, 2));
   writeProjectRomHeader(projectDir, merged);
   return merged;
 }
@@ -1096,6 +1106,7 @@ function setPluginRole(roleId, id) {
 }
 
 module.exports = {
+  writeFileIfChangedSync,
   getDefaultProjectDir,
   getTemplatesRootDir,
   getProjectStartupState,

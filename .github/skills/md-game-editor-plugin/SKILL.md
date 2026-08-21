@@ -151,7 +151,7 @@ export function activatePlugin({ plugin, root, pageRoot, hostRoot, api, logger, 
 ### `onBuildStart(payload, context)`
 
 ```ts
-payload: { projectDir: string }
+payload: { projectDir: string, toolchainPath?: string, skipClean?: boolean }
 context: { logger: Logger, projectDir: string }
 return:  {
   ok: boolean,
@@ -164,6 +164,8 @@ return:  {
 ```
 
 `onBuildStart`が`{ ok: false, error }`を返す、throwする、またはPromise rejectした場合、MD/PCEともtoolchainを開始しない。hostは`onBuildError`を1回呼び、失敗した`build-end`を通知する。hook専用builderは`generator: false`にし、重いpreflight/codegenを`onBuildStart`へ一本化する。
+
+MDの`payload.skipClean`は差分ビルドの要求にすぎない。builderは前回成功manifest、ROM/object/生成物、toolchainとbuild契約を検証してから戻り値の`skipClean: true`を返し、検証不能時は`false`へ戻す。
 
 ### `onBuildLog(payload)`
 
@@ -376,7 +378,8 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 - script正本は`assets/pce-vn-scenes.json`。未知fieldを保持し、MD物理設定を`data/md-novel/target-profile.json`、asset対応を`asset-bindings.json`へ分離する
 - `md-novel-editor`のUI/import/previewはplugin renderer内に置き、main処理はmanifestの`hooks`と`mainApi.hooks`を一致させてserviceへ委譲する
 - 保存はrevision照合、project root/realpath検査、atomic replace、transaction hashを使う。`beforeBuild` / `beforeProjectSwitch`は保存完了までawaitし、失敗時にvetoする
-- `md-novel-builder`は`generator: false`のhook-only builder。canonical dataを読取専用にし、staging一式をhash検証後にcommitしてから明示`SRC_C`を返す
+- `md-novel-builder`は`generator: false`のhook-only builder。canonical dataを読取専用にし、staging一式をhash検証後にcommitしてから明示`SRC_C`を返す。通常Buildはclean、Test Playは検証済みcacheだけ差分buildにする
+- fontはproject-local TTF/OTF/TTCまたは同梱Misakiから固定16x16の使用glyph subsetを生成し、Shift-JIS round-trip、font cmap、atlas hashをbuild時にhard validationする
 - H40 320x224、PAL0 system、PAL1 background、PAL2/PAL3 portraitを既定とし、背景・立ち絵のscene持続を含むVRAM/80 sprite/scanline/4MiB予算をbuild errorで検査する
 - PCE CDDA/ADPCM/voiceはJSONを保持してwarning+NOP、PSG song/SFXは参照された`(assetId, channel)`だけXGM2/VGMまたはWAVへ変換する
 - 詳細契約、入力対応、検証手順は`docs/NOVEL.md`を実装と同時に更新する

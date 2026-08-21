@@ -27,10 +27,29 @@
     "portraitB": 3
   },
   "font": {
-    "renderer": "misaki-gothic-scaled-16x16",
+    "renderer": "subset-16x16-v1",
     "glyphWidth": 16,
     "glyphHeight": 16,
-    "source": "font/misaki_gothic.png"
+    "source": "font/misaki_gothic.png",
+    "kind": "bundled",
+    "label": "同梱 Misaki Gothic",
+    "fontSize": 16,
+    "threshold": 32,
+    "xOffset": 0,
+    "yOffset": 0,
+    "previewText": "MDノベルのフォント表示\n19文字x4行",
+    "library": [],
+    "generation": {
+      "formatVersion": 1,
+      "renderer": "subset-16x16-v1",
+      "inputHash": "06e7d50acc0cc84a8480498aca9dbaa9e0585c8586886270d714ac11bbd0f0c8",
+      "sourceHash": "a273dd232907e1c98aa008fa63b050c693a06336cfdfcfe575021a95aaf2769c",
+      "outputPath": "res/novel/font/generated.png",
+      "pngSha256": "e6b74dd505fda9e3e3c7e9ab4f6415da8be7e3d5e49e2c2bda4ea964d087da97",
+      "glyphCount": 27,
+      "width": 256,
+      "height": 32
+    }
   },
   "audio": {
     "driver": "XGM2",

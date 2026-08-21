@@ -597,6 +597,9 @@ function getMimeForPath(filePath) {
   const ext = path.extname(filePath || '').toLowerCase();
   if (ext === '.png') return 'image/png';
   if (ext === '.bmp') return 'image/bmp';
+  if (ext === '.ttf') return 'font/ttf';
+  if (ext === '.otf') return 'font/otf';
+  if (ext === '.ttc') return 'font/collection';
   if (ext === '.wav') return 'audio/wav';
   if (ext === '.mp3') return 'audio/mpeg';
   if (ext === '.ogg') return 'audio/ogg';
@@ -2307,6 +2310,7 @@ async function runBuildFull(options = {}) {
       const buildStartResult = await invokePluginHookSafe(builderPluginId, 'onBuildStart', {
         projectDir,
         toolchainPath,
+        skipClean: buildOptions.skipClean,
       }, {
         ...pluginContext,
         coreId: buildSystem.getActiveCoreId(),

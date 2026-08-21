@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "transactionId": "fd2a485c-468c-4dee-87d5-baefb00ac1fa",
-  "committedAt": "2026-08-20T05:45:35.252Z",
+  "transactionId": "4790d460-71c2-4967-bca6-4e7f6552a1e4",
+  "committedAt": "2026-08-20T16:34:16.466Z",
   "sourceSceneRevision": "29f0c97b6e49d6d7f02b7b175d7a38390bed18eb63d09880806cd226d3fed442",
   "documents": {
     "assets/images/bg_sample.png": "20252c9b68a4bc64e98ff16c68ccd9920ebd7ef8779fefda03c0e6f636b704d2",
@@ -10,10 +10,12 @@
     "assets/pce-vn-scenes.json": "c201c685924ff63b19393c9af49a8465021b22b6bdd8777dc63c54c14c92a782",
     "assets/sprites/sp_hero.png": "08cad28ac516efdc5d91b10517340604c88e47deaeb6a69a03430879e4e370a0",
     "data/md-novel/asset-bindings.json": "313b3a0b881d74b375d9f8c1aaf577535a80f306a84b71387b67f258a52bbfff",
-    "data/md-novel/target-profile.json": "3fe44f8afb8089ef64f0940192e25c93e9542596accc4e942f149353c7a264e9",
+    "data/md-novel/target-profile.json": "4c44dffe454d1bb4287e9793de351d4c372e9fc47a49d7f9a616d436e8f7ca55",
     "res/novel/backgrounds/nov_bg_bg_sample_7d16a41f.png": "61bec7f07ce849cb0a8e21f5467a179e4c7923a86d35233748eb8e7798fef3c4",
     "res/novel/music/nov_bgm_sample_bgm_ch0_2f696355.vgm": "95f0374dd2983392c24a43e914d4800796500d0e2c07357285f513e3f7714f8b",
     "res/novel/sfx/nov_sfx_sample_sfx_ch0_aa319e7c.wav": "37de81bb985b99b444f5f844c69a8596a0b0d7a2dffe8e3d45b80373b9527b08",
-    "res/novel/sprites/nov_spr_sp_hero_b74c1708.png": "a6b7645cdbd6b086ecaa20cfc96faf3a2526e5e54b479c66aa0d29d50acccafe"
+    "res/novel/sprites/nov_spr_sp_hero_b74c1708.png": "a6b7645cdbd6b086ecaa20cfc96faf3a2526e5e54b479c66aa0d29d50acccafe",
+    "res/novel/font/generated.png": "e6b74dd505fda9e3e3c7e9ab4f6415da8be7e3d5e49e2c2bda4ea964d087da97",
+    "res/novel/font/misaki_gothic.png": "a273dd232907e1c98aa008fa63b050c693a06336cfdfcfe575021a95aaf2769c"
   }
 }

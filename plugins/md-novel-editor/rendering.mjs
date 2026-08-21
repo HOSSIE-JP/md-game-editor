@@ -174,3 +174,64 @@ export function drawFontPreviews(textCanvas, atlasCanvas, text, atlasImage, atla
   }
   return used;
 }
+
+function fullWidthPreviewText(value) {
+  return Array.from(String(value || '')).map((character) => {
+    const code = character.codePointAt(0);
+    if (code === 0x20) return '　';
+    if (code >= 0x21 && code <= 0x7e) return String.fromCodePoint(code + 0xfee0);
+    return character;
+  }).join('');
+}
+
+export function drawSubsetFontPreviews(textCanvas, atlasCanvas, text, atlasImage, entries = [], options = {}) {
+  const previewEntries = Array.isArray(options.previewEntries) ? options.previewEntries : entries;
+  const previewImage = options.previewImage || atlasImage;
+  const entryByCharacter = new Map(previewEntries.map((entry, index) => [entry.character, { ...entry, index }]));
+  const drawGlyph = (context, character, x, y, size = 16) => {
+    const entry = entryByCharacter.get(character);
+    if (entry && atlasImage) {
+      const sourceX = (entry.index % 16) * 16;
+      const sourceY = Math.floor(entry.index / 16) * 16;
+      context.imageSmoothingEnabled = false;
+      context.drawImage(previewImage, sourceX, sourceY, 16, 16, x, y, size, size);
+      return true;
+    }
+    if (character !== '　') {
+      context.strokeStyle = '#ff5f6d';
+      context.strokeRect(x + .5, y + .5, size - 1, size - 1);
+      context.beginPath();
+      context.moveTo(x + 3, y + 3);
+      context.lineTo(x + size - 3, y + size - 3);
+      context.moveTo(x + size - 3, y + 3);
+      context.lineTo(x + 3, y + size - 3);
+      context.stroke();
+    }
+    return false;
+  };
+  const textContext = textCanvas?.getContext?.('2d');
+  if (textContext) {
+    textContext.fillStyle = '#000';
+    textContext.fillRect(0, 0, textCanvas.width, textCanvas.height);
+    let column = 0;
+    let row = 0;
+    for (const character of Array.from(fullWidthPreviewText(text))) {
+      if (character === '\r') continue;
+      if (character === '\n') { column = 0; row += 1; if (row >= 4) break; continue; }
+      if (column >= 19) { column = 0; row += 1; }
+      if (row >= 4) break;
+      drawGlyph(textContext, character, column * 16, 8 + row * 16);
+      column += 1;
+    }
+  }
+  const atlasContext = atlasCanvas?.getContext?.('2d');
+  if (atlasContext) {
+    const sourceHeight = Math.max(16, Math.ceil(entries.length / 16) * 16);
+    atlasCanvas.width = 512;
+    atlasCanvas.height = Math.max(128, sourceHeight * 2);
+    atlasContext.fillStyle = '#050b10';
+    atlasContext.fillRect(0, 0, atlasCanvas.width, atlasCanvas.height);
+    atlasContext.imageSmoothingEnabled = false;
+    if (atlasImage) atlasContext.drawImage(atlasImage, 0, 0, 256, sourceHeight, 0, 0, 512, sourceHeight * 2);
+  }
+}

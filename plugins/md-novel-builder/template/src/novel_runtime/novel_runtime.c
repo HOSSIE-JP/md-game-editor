@@ -2,6 +2,9 @@
 #include "novel.h"
 #include "generated/novel_data.h"
 #include "novel_runtime/novel_runtime.h"
+extern const u16 nov_font_codes[];
+extern const u16 nov_font_glyph_count;
+
 
 #define NOVEL_PLANE_WIDTH          64
 #define NOVEL_WINDOW_TOP           16
@@ -256,12 +259,29 @@ static void showWindow(void)
     windowVisible = TRUE;
 }
 
+static u16 findFontGlyph(u16 code)
+{
+    u16 low = 0;
+    u16 high = nov_font_glyph_count;
+    while (low < high)
+    {
+        u16 middle = low + ((high - low) >> 1);
+        u16 candidate = nov_font_codes[middle];
+        if (candidate < code)
+            low = middle + 1;
+        else
+            high = middle;
+    }
+    if ((low < nov_font_glyph_count) && (nov_font_codes[low] == code))
+        return low;
+    return 0;
+}
+
 static bool sjisGlyph(const u8 *text, u16 *position, u16 *atlas, bool *newline)
 {
     u8 first;
     u8 second;
-    u16 row;
-    u16 column;
+    u16 code;
     *newline = FALSE;
     first = text[*position];
     if (first == 0)
@@ -272,35 +292,34 @@ static bool sjisGlyph(const u8 *text, u16 *position, u16 *atlas, bool *newline)
         *newline = TRUE;
         return TRUE;
     }
-    if (!(((first >= 0x81) && (first <= 0x9F)) || ((first >= 0xE0) && (first <= 0xEF))))
-        return TRUE;
-    second = text[*position];
-    if (second == 0)
-        return FALSE;
-    (*position)++;
-    if ((second < 0x40) || (second > 0xFC) || (second == 0x7F))
-        return TRUE;
-    if (second < 0x9F)
+    code = first;
+    if (((first >= 0x81) && (first <= 0x9F)) || ((first >= 0xE0) && (first <= 0xEF)))
     {
-        row = (first <= 0x9F) ? (u16)((first - 0x81) * 2) : (u16)((first - 0xE0) * 2 + 62);
-        column = (second <= 0x7E) ? (u16)(second - 0x40) : (u16)(second - 0x41);
+        second = text[*position];
+        if (second == 0)
+            return FALSE;
+        (*position)++;
+        if ((second < 0x40) || (second > 0xFC) || (second == 0x7F))
+        {
+            *atlas = 0;
+            return TRUE;
+        }
+        code = ((u16)first << 8) | second;
     }
-    else
-    {
-        row = (first <= 0x9F) ? (u16)((first - 0x81) * 2 + 1) : (u16)((first - 0xE0) * 2 + 63);
-        column = (u16)(second - 0x9F);
-    }
-    if ((row >= 94) || (column >= 94))
-        return TRUE;
-    *atlas = row * 94 + column;
+    *atlas = findFontGlyph(code);
     return TRUE;
 }
 
 static u8 fontPixel(u16 atlas, u8 x, u8 y)
 {
-    const u8 *source = (const u8 *)&novel_sjis_font.tiles[(u32)atlas * 8];
-    u8 packed = source[y * 4 + (x >> 1)];
-    return (x & 1) ? (packed & 0x0F) : (packed >> 4);
+    u16 glyphColumn = atlas & 15;
+    u16 glyphRow = atlas >> 4;
+    u16 tile = glyphRow * 64 + (u16)(y >> 3) * 32 + glyphColumn * 2 + (x >> 3);
+    u8 localX = x & 7;
+    u8 localY = y & 7;
+    const u8 *source = (const u8 *)&novel_font_subset.tiles[(u32)tile * 8];
+    u8 packed = source[localY * 4 + (localX >> 1)];
+    return (localX & 1) ? (packed & 0x0F) : (packed >> 4);
 }
 
 static void setPackedPixel(u8 *target, u8 x, u8 y, u8 value)
@@ -329,7 +348,7 @@ static void loadGlyph16(u16 atlas, u16 tile)
             u8 localX = x & 7;
             u8 localY = y & 7;
             u8 *tileData = target + (tileY * 2 + tileX) * 32;
-            if (fontPixel(atlas, x >> 1, y >> 1) != 0)
+            if (fontPixel(atlas, x, y) != 0)
                 setPackedPixel(tileData, localX, localY, 1);
         }
     }
@@ -627,7 +646,7 @@ static void renderSpriteTexts(void)
             }
             for (pixelY = 0; pixelY < 16; pixelY++)
                 for (pixelX = 0; pixelX < 16; pixelX++)
-                    if (fontPixel(atlas, pixelX >> 1, pixelY >> 1) != 0)
+                    if (fontPixel(atlas, pixelX, pixelY) != 0)
                         overlaySetPixel(x + pixelX, y + pixelY, slot + 1);
             x += 16;
             glyph++;

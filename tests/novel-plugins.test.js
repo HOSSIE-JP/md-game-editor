@@ -8,6 +8,7 @@ const test = require('node:test');
 
 const schema = require('../plugins/md-novel-editor/novel-schema');
 const image = require('../plugins/md-novel-editor/novel-image');
+const font = require('../plugins/md-novel-editor/novel-font');
 const convert = require('../plugins/md-novel-editor/novel-convert');
 const service = require('../plugins/md-novel-editor/novel-service');
 const plugin = require('../plugins/md-novel-editor');
@@ -30,6 +31,36 @@ function solidPng(width, height, palette, pattern = 0) {
     for (let x = 0; x < width; x += 1) indices[y * width + x] = (x + y + pattern) % palette.length;
   }
   return image.encodeIndexedPng(width, height, indices, palette);
+}
+
+function minimalUnicodeFont(codePoints) {
+  const points = [...new Set(codePoints)].sort((left, right) => left - right);
+  const cmapOffset = 28;
+  const cmapLength = 28 + points.length * 12;
+  const buffer = Buffer.alloc(cmapOffset + cmapLength);
+  buffer.writeUInt32BE(0x00010000, 0);
+  buffer.writeUInt16BE(1, 4);
+  buffer.write('cmap', 12, 4, 'ascii');
+  buffer.writeUInt32BE(cmapOffset, 20);
+  buffer.writeUInt32BE(cmapLength, 24);
+  buffer.writeUInt16BE(0, cmapOffset);
+  buffer.writeUInt16BE(1, cmapOffset + 2);
+  buffer.writeUInt16BE(3, cmapOffset + 4);
+  buffer.writeUInt16BE(10, cmapOffset + 6);
+  buffer.writeUInt32BE(12, cmapOffset + 8);
+  const subtable = cmapOffset + 12;
+  buffer.writeUInt16BE(12, subtable);
+  buffer.writeUInt16BE(0, subtable + 2);
+  buffer.writeUInt32BE(16 + points.length * 12, subtable + 4);
+  buffer.writeUInt32BE(0, subtable + 8);
+  buffer.writeUInt32BE(points.length, subtable + 12);
+  points.forEach((codePoint, index) => {
+    const group = subtable + 16 + index * 12;
+    buffer.writeUInt32BE(codePoint, group);
+    buffer.writeUInt32BE(codePoint, group + 4);
+    buffer.writeUInt32BE(index + 1, group + 8);
+  });
+  return buffer;
 }
 
 function fixtureDocuments() {
@@ -130,6 +161,94 @@ test('PSG conversion creates valid VGM and mono PCM WAV containers', () => {
   assert.equal(wav.subarray(0, 4).toString('ascii'), 'RIFF');
   assert.equal(wav.readUInt16LE(22), 1);
   assert.equal(wav.readUInt32LE(24), 6650);
+});
+
+test('subset font plan generates indexed 16x16 glyphs and rejects unsupported text', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'md-novel-builder', 'template', 'res', 'novel', 'font', 'misaki_gothic.png'));
+  const sceneDocument = {
+    scenes: [{
+      id: 'font',
+      commands: [
+        { type: 'message', speaker: 'A', text: '日本語' },
+        { type: 'choice', choices: [{ label: 'OK' }] },
+        { type: 'spritetext', text: '表示' },
+      ],
+    }],
+  };
+  const plan = font.createFontPlan(sceneDocument, font.normalizeFontSettings(), source);
+  const png = font.generateBundledAtlas(plan, source);
+  const metadata = font.generationMetadata(plan, png);
+  assert.equal(font.validateGeneration(plan, metadata, png), true);
+  const decoded = image.decodePng(png);
+  assert.equal(decoded.width, 256);
+  assert.equal(decoded.height % 16, 0);
+  assert.equal(plan.entries.some((entry) => entry.character === 'Ａ'), true);
+  assert.equal(plan.previewEntries.some((entry) => entry.character === 'Ｍ'), true);
+  assert.equal(plan.entries.some((entry) => entry.character === 'Ｍ'), false);
+  assert.equal(plan.entries.some((entry) => entry.character === '▼'), true);
+  const custom = minimalUnicodeFont(['日', '本'].map((character) => character.codePointAt(0)));
+  assert.equal(font.validateProjectFontCoverage(custom, [{ character: '日' }, { character: '本' }]), true);
+  assert.throws(() => font.validateProjectFontCoverage(custom, [{ character: '語' }]), /glyph/);
+  assert.throws(() => font.createFontPlan({ scenes: [{ commands: [{ type: 'message', text: '😀' }] }] }, {}, source), /Shift-JIS/);
+});
+
+test('project font import deduplicates, generates a validated subset, and deletes safely', async (t) => {
+  const source = temporaryDirectory(t, 'md-novel-font-source-');
+  const target = temporaryDirectory(t, 'md-novel-font-target-');
+  createSourceFixture(source);
+  fs.writeFileSync(path.join(target, 'project.json'), JSON.stringify({ coreId: 'mega-drive' }, null, 2));
+  const imported = await service.importPceProject(target, { sourceProjectDir: source, portraitPaletteGroups: { PAL2: ['mu'], PAL3: [] } });
+  const entries = font.collectFontEntries(imported.sceneDocument);
+  const fontPath = path.join(source, 'fixture.ttf');
+  fs.writeFileSync(fontPath, minimalUnicodeFont(entries.map((entry) => entry.character.codePointAt(0))));
+  const first = await service.importFont(target, { sourcePath: fontPath, label: 'Fixture' });
+  const second = await service.importFont(target, { sourcePath: fontPath, label: 'Fixture duplicate' });
+  assert.equal(first.deduplicated, false);
+  assert.equal(second.deduplicated, true);
+  assert.equal(first.entry.file, second.entry.file);
+
+  const profile = structuredClone(imported.targetProfile);
+  profile.font = {
+    ...profile.font,
+    kind: 'project',
+    source: first.entry.file,
+    label: first.entry.label,
+    library: [first.entry],
+    generation: null,
+  };
+  const plan = await service.prepareFontGeneration(target, { sceneDocument: imported.sceneDocument, targetProfile: profile });
+  assert.equal(plan.currentValid, false);
+  const indices = new Uint8Array(plan.width * plan.height);
+  plan.entries.forEach((entry, index) => {
+    if (entry.character !== '　') indices[Math.floor(index / 16) * 16 * plan.width + (index % 16) * 16] = 1;
+  });
+  const png = image.encodeIndexedPng(plan.width, plan.height, indices, [[0, 0, 0, 0], [255, 255, 255, 255]]);
+  const committed = await service.commitFontGeneration(target, {
+    sceneDocument: imported.sceneDocument,
+    targetProfile: profile,
+    inputHash: plan.inputHash,
+    pngDataUrl: `data:image/png;base64,${png.toString('base64')}`,
+  });
+  profile.font.generation = committed.generation;
+  const saved = await service.saveProject(target, {
+    sceneDocument: imported.sceneDocument,
+    targetProfile: profile,
+    bindings: imported.bindings,
+    baseRevisions: imported.revisions,
+  });
+  assert.equal((await service.validateFontProject(target, saved.sceneDocument, saved.targetProfile)).plan.entries.length, entries.length);
+
+  const fallbackProfile = structuredClone(saved.targetProfile);
+  fallbackProfile.font = { ...fallbackProfile.font, kind: 'bundled', source: 'font/misaki_gothic.png', library: [], generation: null };
+  const fallback = await service.saveProject(target, {
+    sceneDocument: saved.sceneDocument,
+    targetProfile: fallbackProfile,
+    bindings: saved.bindings,
+    baseRevisions: saved.revisions,
+  });
+  assert.equal(fallback.targetProfile.font.kind, 'bundled');
+  await service.deleteFont(target, { relativePath: first.entry.file });
+  assert.equal(fs.existsSync(path.join(target, first.entry.file)), false);
 });
 
 test('import, optimistic save, transaction retention, and raw unknown-field round-trip', async (t) => {
@@ -254,10 +373,13 @@ test('codegen preserves control flow, variables, input mapping, animation, and 7
   ];
   const bindings = structuredClone(imported.bindings);
   bindings.sourceSceneRevision = schema.hashDocument(sceneDocument);
+  const fontSource = await service.readFontSource(target, imported.targetProfile.font);
+  const fontPlan = font.createFontPlan(sceneDocument, imported.targetProfile.font, fontSource.buffer);
   const generated = codegen.generateProject({
     sceneDocument,
     catalog: imported.catalog,
     targetProfile: imported.targetProfile,
+    fontPlan: { entries: fontPlan.entries },
     bindings,
   });
   const c = generated.files['src/generated/novel_data.c'];
@@ -276,6 +398,10 @@ test('codegen preserves control flow, variables, input mapping, animation, and 7
   assert.equal(generated.report.switches, 2);
   assert.equal(generated.report.messages, 1);
   assert.match(generated.files['res/novel.res'], /SPRITE nov_spr_/);
+  assert.match(c, /const u16 nov_font_codes\[\]/);
+  assert.match(generated.files['res/novel.res'], /TILESET novel_font_subset "novel\/font\/generated\.png"/);
+  assert.equal(generated.report.glyphs, fontPlan.entries.length);
+  assert.equal(fontPlan.entries.some((entry) => entry.character === 'Ａ'), true);
 });
 
 test('preflight rejects aggregate VRAM and scanline sprite overflow', () => {
@@ -342,4 +468,55 @@ test('onBuildStart commits a complete generated set and removes build staging', 
   const staging = path.join(target, 'data', 'md-novel', '.staging');
   assert.equal(!fs.existsSync(staging) || fs.readdirSync(staging).length === 0, true);
   assert.equal(logs.some((line) => /sprite VRAM/.test(line)), true);
+});
+
+test('Test Play cache reuses unchanged objects and forces clean after generated cache corruption', async (t) => {
+  const source = temporaryDirectory(t, 'md-novel-incremental-source-');
+  const target = temporaryDirectory(t, 'md-novel-incremental-target-');
+  const toolchain = temporaryDirectory(t, 'md-novel-toolchain-');
+  createSourceFixture(source);
+  fs.writeFileSync(path.join(target, 'project.json'), JSON.stringify({ coreId: 'mega-drive' }, null, 2));
+  await service.importPceProject(target, { sourceProjectDir: source, portraitPaletteGroups: { PAL2: ['mu'], PAL3: [] } });
+  fs.writeFileSync(path.join(toolchain, 'makefile.gen'), '# fixture\n');
+  const logs = [];
+  const context = { projectDir: target, logger: { info: (line) => logs.push(line), warn: (line) => logs.push(line), error: (line) => logs.push(line) } };
+  const first = await builder.onBuildStart({ projectDir: target, toolchainPath: toolchain, skipClean: true }, context);
+  assert.equal(first.ok, true);
+  assert.equal(first.skipClean, false);
+  const mainPath = path.join(target, 'src', 'main.c');
+  const firstMtime = fs.statSync(mainPath).mtimeMs;
+  fs.mkdirSync(path.join(target, 'out', 'src'), { recursive: true });
+  fs.writeFileSync(path.join(target, 'out', 'rom.bin'), Buffer.alloc(1024));
+  fs.writeFileSync(path.join(target, 'out', 'src', 'main.o'), Buffer.from('object'));
+  const completed = await builder.onBuildEnd({ projectDir: target, romPath: path.join(target, 'out', 'rom.bin') }, context);
+  assert.equal(completed.ok, true);
+
+  const second = await builder.onBuildStart({ projectDir: target, toolchainPath: toolchain, skipClean: true }, context);
+  assert.equal(second.ok, true);
+  assert.equal(second.skipClean, true);
+  assert.equal(fs.statSync(mainPath).mtimeMs, firstMtime);
+  let manifest = JSON.parse(fs.readFileSync(path.join(target, 'data', 'md-novel', 'generated-manifest.json'), 'utf8'));
+  assert.equal(manifest.fileStats.changed, 0);
+  assert.equal(manifest.fileStats.unchanged > 0, true);
+  assert.equal(logs.some((line) => /input unchanged\/object reused/.test(line)), true);
+
+  const objectPath = path.join(target, 'out', 'src', 'main.o');
+  fs.unlinkSync(objectPath);
+  const missingObject = await builder.onBuildStart({ projectDir: target, toolchainPath: toolchain, skipClean: true }, context);
+  assert.equal(missingObject.ok, true);
+  assert.equal(missingObject.skipClean, false);
+  assert.equal(logs.some((line) => /previous object is missing/.test(line)), true);
+  fs.writeFileSync(objectPath, Buffer.from('rebuilt-object'));
+  assert.equal((await builder.onBuildEnd({ projectDir: target, romPath: path.join(target, 'out', 'rom.bin') }, context)).ok, true);
+  const recovered = await builder.onBuildStart({ projectDir: target, toolchainPath: toolchain, skipClean: true }, context);
+  assert.equal(recovered.skipClean, true);
+
+  const generatedSource = path.join(target, 'src', 'generated', 'novel_data.c');
+  fs.appendFileSync(generatedSource, '\n/* corrupt */\n');
+  const third = await builder.onBuildStart({ projectDir: target, toolchainPath: toolchain, skipClean: true }, context);
+  assert.equal(third.ok, true);
+  assert.equal(third.skipClean, false);
+  manifest = JSON.parse(fs.readFileSync(path.join(target, 'data', 'md-novel', 'generated-manifest.json'), 'utf8'));
+  assert.equal(manifest.lastBuildSuccess, false);
+  assert.equal(logs.some((line) => /cache mismatch/.test(line)), true);
 });

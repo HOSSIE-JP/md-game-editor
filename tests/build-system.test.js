@@ -374,6 +374,17 @@ test('saveProjectConfig persists project settings and rewrites the ROM header', 
   assert.match(header, /"JUE\s+"/);
   assert.doesNotMatch(header, /Before Title/);
   assert.doesNotMatch(header, /GM OLD-01/);
+  const headerPath = path.join(projectDir, 'src', 'boot', 'rom_head.c');
+  const configPath = path.join(projectDir, 'project.json');
+  const headerMtime = fs.statSync(headerPath).mtimeMs;
+  const configMtime = fs.statSync(configPath).mtimeMs;
+  const generatedAt = config.generatedAt;
+  buildSystem.saveProjectConfig({ title: 'Saved Header', author: 'NEWAUTHOR', serial: 'GM SAVE-02', region: 'JUE' });
+  buildSystem.generateProjectStructureOnly(config);
+  assert.equal(fs.statSync(headerPath).mtimeMs, headerMtime);
+  assert.equal(fs.statSync(configPath).mtimeMs, configMtime);
+  assert.equal(JSON.parse(fs.readFileSync(configPath, 'utf8')).generatedAt, generatedAt);
+  assert.equal(buildSystem.writeFileIfChangedSync(headerPath, fs.readFileSync(headerPath)), false);
 });
 
 test('buildProject fails fast when the toolchain path is missing', async () => {

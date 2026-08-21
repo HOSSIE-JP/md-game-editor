@@ -57,12 +57,14 @@ test('packaging source contains the MD novel plugins and clean starter template'
   const requiredFiles = [
     'plugins/md-novel-editor/manifest.json',
     'plugins/md-novel-editor/renderer-app.mjs',
+    'plugins/md-novel-editor/novel-font.js',
     'plugins/md-novel-builder/manifest.json',
     'plugins/md-novel-builder/template/src/novel_runtime/novel_runtime.c',
     'template/template_md_novel/project.json',
     'template/template_md_novel/assets/pce-vn-scenes.json',
     'template/template_md_novel/data/md-novel/asset-bindings.json',
     'template/template_md_novel/data/md-novel/target-profile.json',
+    'template/template_md_novel/res/novel/font/generated.png',
   ];
   for (const relativePath of requiredFiles) {
     assert.equal(fs.existsSync(path.join(root, relativePath)), true, relativePath);

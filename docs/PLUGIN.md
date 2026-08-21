@@ -164,7 +164,7 @@ core plugin は `types: ["core"]` と `core` metadata を持つ manifest で宣�
 
 ```ts
 // payload
-{ projectDir: string }
+{ projectDir: string, toolchainPath?: string, skipClean?: boolean }
 
 // context
 { logger: Logger }
@@ -175,6 +175,8 @@ core plugin は `types: ["core"]` と `core` metadata を持つ manifest で宣�
 ```
 
 `{ ok: false }`、throw、rejectは同じhard failureです。hostはSGDK/PCE toolchainを開始せず、`onBuildError`と失敗`build-end`を1回だけ通知してBuild/Test Playを中止します。missing hookはskipとして通常続行します。
+
+MDでは`payload.skipClean`は呼出側の差分ビルド要求です。builderは前回成功artifactとtoolchain/build契約を検証した場合だけ、戻り値の`skipClean: true`でclean省略を承認してください。要求をblindに反映してはいけません。通常Buildは`false`、Test Playは`true`を要求します。
 
 ### `onBuildLog`
 
@@ -1073,10 +1075,10 @@ Priority用のstatic/fwd/turnデシジョンテーブルはテクスチャ非依
 | 対応 core | `mega-drive` |
 | バージョン | 1.0.0 |
 | 依存 | `md-novel-builder`, `asset-manager`, `image-resize-converter`, `image-quantize-converter`, `audio-converter` |
-| main hook | `loadMdNovelProject`, `saveMdNovelProject`, `importPceNovelProject`, `validateMdNovelProject` |
+| main hook | `loadMdNovelProject`, `saveMdNovelProject`, `importPceNovelProject`, `validateMdNovelProject`, `prepareMdNovelFontGeneration`, `commitMdNovelFontGeneration`, `importMdNovelFont`, `deleteMdNovelFont` |
 | renderer capability | `page`, `md-novel-editor` |
 
-PCE VN JSON v2を非破壊で読み書きし、PCE project import、Script/System/Font/Assets/診断、revision/transaction付きatomic saveを提供します。Script rendererはPCE型のScene階層 + 18種Commandパレット / 色分けカード + 320x224 preview / 型別GUIの3列構成です。GUI/JSON切替、Scene/Command drag & drop、Skip、同project clipboard、100段Undo/Redo、未知field round-trip、別windowの分岐対応Full Previewをplugin module内で実装します。MD固有の表示・palette・音声設定は`data/md-novel/` sidecarへ分離します。
+PCE VN JSON v2を非破壊で読み書きし、PCE project import、Script/System/Font/Assets/診断、revision/transaction付きatomic saveを提供します。Script rendererはPCE型のScene階層 + 18種Commandパレット / 色分けカード + 320x224 preview / 型別GUIの常時3列構成です。狭いviewportは横scrollし、GUI/Scene JSONの明示適用guard、Scene/Command drag & drop、Skip、同project clipboard、100段Undo/Redo、未知field round-trip、別windowの分岐対応Full Previewをplugin module内で実装します。Font tabはproject-local TTF/OTF/TTC登録、cmap/glyph検査、16x16 subset indexed atlas生成を提供します。MD固有の表示・palette・音声・font設定は`data/md-novel/` sidecarへ分離します。
 
 ### `md-novel-builder` — MDノベルビルダー
 
@@ -1090,7 +1092,7 @@ PCE VN JSON v2を非破壊で読み書きし、PCE project import、Script/Syste
 | ロール | `builder` |
 | ジェネレータ | hook-only (`generator: false`) |
 
-PCE command意味論をSGDK runtimeへ変換し、ResComp/C source、XGM2/PCM binding、scene別palette/VRAM/sprite/scanline budgetを生成します。CD-DA/ADPCM/voice/cacheはcommand順を維持したwarning付きNOPです。`template_md_novel`はbuilderとstandard WASM roleを選択済みです。詳細は[NOVEL.md](NOVEL.md)を参照してください。
+PCE command意味論をSGDK runtimeへ変換し、ResComp/C source、XGM2/PCM binding、scene別palette/VRAM/sprite/scanline budgetを生成します。CD-DA/ADPCM/voice/cacheはcommand順を維持したwarning付きNOPです。Test Playでは検証済みmanifest/ROM/object/生成物/build契約だけを差分buildへ再利用し、通常Buildはcleanを維持します。`template_md_novel`はbuilderとstandard WASM roleを選択済みです。詳細は[NOVEL.md](NOVEL.md)を参照してください。
 
 ---
 

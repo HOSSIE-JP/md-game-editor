@@ -37,6 +37,10 @@ const loadMdNovelProject = guarded((root) => service.loadProject(root));
 const saveMdNovelProject = guarded((root, payload) => service.saveProject(root, payload));
 const importPceNovelProject = guarded((root, payload, context) => service.importPceProject(root, payload, context));
 const validateMdNovelProject = guarded((root) => service.loadProject(root));
+const prepareMdNovelFontGeneration = guarded((root, payload) => service.prepareFontGeneration(root, payload));
+const commitMdNovelFontGeneration = guarded((root, payload) => service.commitFontGeneration(root, payload));
+const importMdNovelFont = guarded((root, payload) => service.importFont(root, payload));
+const deleteMdNovelFont = guarded((root, payload) => service.deleteFont(root, payload));
 
 module.exports = {
   manifest,
@@ -47,4 +51,8 @@ module.exports = {
   saveMdNovelProject,
   importPceNovelProject,
   validateMdNovelProject,
+  prepareMdNovelFontGeneration,
+  commitMdNovelFontGeneration,
+  importMdNovelFont,
+  deleteMdNovelFont,
 };

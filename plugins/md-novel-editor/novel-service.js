@@ -20,9 +20,23 @@ const {
   generatePsgSfxWav,
 } = require('./novel-convert');
 const { analyzeNovelBudget } = require('./novel-budget');
+const {
+  FONT_OUTPUT_PATH,
+  BUNDLED_FONT_SOURCE,
+  normalizeFontSettings,
+  createFontPlan,
+  generateBundledAtlas,
+  canonicalizeGeneratedAtlas,
+  generationMetadata,
+  validateGeneration,
+  validateProjectFontCoverage,
+} = require('./novel-font');
 
 const fsp = fs.promises;
 const MAX_JSON_BYTES = 32 * 1024 * 1024;
+const MAX_FONT_BYTES = 32 * 1024 * 1024;
+const FONT_EXTENSION = /\.(?:ttf|otf|ttc)$/i;
+const BUNDLED_FONT_PATH = path.join(__dirname, '..', 'md-novel-builder', 'template', 'res', 'novel', 'font', 'misaki_gothic.png');
 const RELATIVE_PATHS = Object.freeze({
   scene: 'assets/pce-vn-scenes.json',
   catalog: 'assets/pce-assets.json',
@@ -179,12 +193,24 @@ async function writeAtomic(projectRoot, target, data) {
   }
 }
 
+async function writeAtomicIfChanged(projectRoot, target, data) {
+  const payload = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  if (await exists(target)) {
+    const current = await fsp.readFile(target);
+    if (current.length === payload.length && current.equals(payload)) return false;
+  }
+  await writeAtomic(projectRoot, target, payload);
+  return true;
+}
+
 async function commitDocuments(projectDir, documents, metadata = {}) {
   const root = await ensureProjectRoot(projectDir);
   let previousDocuments = {};
+  let previousSourceSceneRevision = null;
   try {
     const previous = await readOptionalJson(root, RELATIVE_PATHS.transaction);
     if (previous?.documents && typeof previous.documents === 'object') previousDocuments = previous.documents;
+    previousSourceSceneRevision = previous?.sourceSceneRevision || null;
   } catch (_error) {
     previousDocuments = {};
   }
@@ -197,13 +223,13 @@ async function commitDocuments(projectDir, documents, metadata = {}) {
   prepared.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
   for (const entry of prepared) {
     const target = await resolveProjectPath(root, entry.relativePath);
-    await writeAtomic(root, target, entry.data);
+    await writeAtomicIfChanged(root, target, entry.data);
   }
   const transaction = {
     schemaVersion: SCHEMA_VERSION,
     transactionId: crypto.randomUUID(),
     committedAt: new Date().toISOString(),
-    sourceSceneRevision: metadata.sourceSceneRevision || null,
+    sourceSceneRevision: metadata.sourceSceneRevision ?? previousSourceSceneRevision,
     documents: {
       ...previousDocuments,
       ...Object.fromEntries(prepared.map((entry) => [entry.relativePath, entry.hash])),
@@ -275,6 +301,186 @@ function validateBindings(sceneDocument, catalog, bindings) {
   return diagnostics;
 }
 
+function validateFontSignature(buffer, extension) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) throw new Error('Font file is empty or truncated');
+  const tag = buffer.subarray(0, 4).toString('ascii');
+  const scalar = buffer.readUInt32BE(0);
+  const valid = extension === '.ttc'
+    ? tag === 'ttcf'
+    : extension === '.otf'
+      ? tag === 'OTTO'
+      : scalar === 0x00010000 || tag === 'true' || tag === 'typ1';
+  if (!valid) throw new Error(`Font file signature does not match ${extension}`);
+}
+
+async function readFontSource(projectDir, profileFont) {
+  const font = normalizeFontSettings(profileFont);
+  if (font.kind === 'bundled') {
+    const buffer = await fsp.readFile(BUNDLED_FONT_PATH);
+    return { font, buffer, relativePath: `res/novel/${BUNDLED_FONT_SOURCE}` };
+  }
+  if (!/^assets\/fonts\/[A-Za-z0-9._-]+\.(?:ttf|otf|ttc)$/i.test(font.source)) {
+    throw new Error(`Unsafe project font path: ${font.source}`);
+  }
+  const target = await resolveProjectPath(projectDir, font.source, { mustExist: true });
+  const stat = await fsp.stat(target);
+  if (stat.size > MAX_FONT_BYTES) throw new Error('Font file is too large');
+  const buffer = await fsp.readFile(target);
+  validateFontSignature(buffer, path.extname(target).toLowerCase());
+  return { font, buffer, relativePath: font.source };
+}
+
+async function buildFontPlan(projectDir, sceneDocument, targetProfile) {
+  assertSafeJson(sceneDocument);
+  assertSafeJson(targetProfile);
+  const source = await readFontSource(projectDir, targetProfile?.font);
+  const plan = {
+    ...createFontPlan(sceneDocument, source.font, source.buffer),
+    sourceBuffer: source.buffer,
+    sourceRelativePath: source.relativePath,
+  };
+  if (source.font.kind === 'project') validateProjectFontCoverage(source.buffer, plan.entries);
+  return plan;
+}
+
+function publicFontPlan(plan, currentValid = false, validationError = '') {
+  return {
+    font: deepClone(plan.font),
+    entries: plan.entries.map((entry) => ({ character: entry.character, code: entry.code, bytes: entry.bytes })),
+    previewEntries: plan.previewEntries.map((entry) => ({ character: entry.character, code: entry.code, bytes: entry.bytes })),
+    width: plan.width,
+    height: plan.height,
+    sourceHash: plan.sourceHash,
+    inputHash: plan.inputHash,
+    outputPath: plan.outputPath,
+    sourceRelativePath: plan.sourceRelativePath,
+    currentValid,
+    validationError,
+  };
+}
+
+function fontBufferFromDataUrl(value) {
+  const text = String(value || '');
+  const match = text.match(/^data:image\/png;base64,([A-Za-z0-9+/=\r\n]+)$/);
+  if (!match || match[1].length > 48 * 1024 * 1024) throw new Error('Generated font PNG data is invalid or too large');
+  return Buffer.from(match[1].replace(/\s+/g, ''), 'base64');
+}
+
+async function prepareFontGeneration(projectDir, payload = {}) {
+  const current = await readProjectDocuments(projectDir);
+  const sceneDocument = deepClone(payload.sceneDocument ?? current.sceneDocument);
+  const targetProfile = deepClone(payload.targetProfile ?? current.targetProfile);
+  targetProfile.font = normalizeFontSettings(targetProfile.font);
+  const plan = await buildFontPlan(projectDir, sceneDocument, targetProfile);
+  let currentValid = false;
+  let validationError = '';
+  try {
+    const output = await resolveProjectPath(projectDir, FONT_OUTPUT_PATH, { mustExist: true });
+    const png = await fsp.readFile(output);
+    validateGeneration(plan, targetProfile.font.generation, png);
+    currentValid = true;
+  } catch (error) {
+    validationError = String(error?.message || error);
+  }
+  return { ok: true, ...publicFontPlan(plan, currentValid, validationError) };
+}
+
+async function commitFontGeneration(projectDir, payload = {}) {
+  const current = await readProjectDocuments(projectDir);
+  const sceneDocument = deepClone(payload.sceneDocument ?? current.sceneDocument);
+  const targetProfile = deepClone(payload.targetProfile ?? current.targetProfile);
+  targetProfile.font = normalizeFontSettings(targetProfile.font);
+  const plan = await buildFontPlan(projectDir, sceneDocument, targetProfile);
+  if (payload.inputHash !== plan.inputHash) throw new Error('Font generation plan changed; regenerate the preview');
+  const png = plan.font.kind === 'bundled'
+    ? generateBundledAtlas(plan, plan.sourceBuffer)
+    : canonicalizeGeneratedAtlas(plan, fontBufferFromDataUrl(payload.pngDataUrl));
+  const generation = generationMetadata(plan, png);
+  const changed = Boolean((await commitDocuments(projectDir, { [FONT_OUTPUT_PATH]: png }))?.documents?.[FONT_OUTPUT_PATH]);
+  return { ok: true, generation, changed, ...publicFontPlan(plan, true, '') };
+}
+
+async function ensureFontDocuments(projectDir, sceneDocument, targetProfile, documents) {
+  targetProfile.font = normalizeFontSettings(targetProfile.font);
+  const plan = await buildFontPlan(projectDir, sceneDocument, targetProfile);
+  let png;
+  if (plan.font.kind === 'bundled') {
+    png = generateBundledAtlas(plan, plan.sourceBuffer);
+    targetProfile.font.generation = generationMetadata(plan, png);
+    documents[plan.sourceRelativePath] = plan.sourceBuffer;
+  } else {
+    const output = await resolveProjectPath(projectDir, FONT_OUTPUT_PATH, { mustExist: true });
+    png = await fsp.readFile(output);
+    validateGeneration(plan, targetProfile.font.generation, png);
+  }
+  documents[FONT_OUTPUT_PATH] = png;
+  return plan;
+}
+
+async function validateFontProject(projectDir, sceneDocument, targetProfile) {
+  const plan = await buildFontPlan(projectDir, sceneDocument, targetProfile);
+  const output = await resolveProjectPath(projectDir, FONT_OUTPUT_PATH, { mustExist: true });
+  const png = await fsp.readFile(output);
+  validateGeneration(plan, normalizeFontSettings(targetProfile?.font).generation, png);
+  return { plan, png };
+}
+
+async function fontDiagnostics(projectDir, sceneDocument, targetProfile) {
+  try {
+    await validateFontProject(projectDir, sceneDocument, targetProfile);
+    return [];
+  } catch (error) {
+    const message = String(error?.message || error);
+    const missingSource = /project font path|Expected file|Font file|signature/i.test(message);
+    return [{
+      severity: missingSource ? 'error' : 'warning',
+      code: missingSource ? 'font-source-invalid' : 'font-generation-stale',
+      path: 'font',
+      message,
+    }];
+  }
+}
+
+async function importFont(projectDir, payload = {}) {
+  const sourcePath = path.resolve(String(payload.sourcePath || ''));
+  const extension = path.extname(sourcePath).toLowerCase();
+  if (!FONT_EXTENSION.test(extension)) throw new Error('TTF / OTF / TTC fontを選択してください');
+  const stat = await fsp.lstat(sourcePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Font source must be a regular file');
+  if (stat.size > MAX_FONT_BYTES) throw new Error('Font file is too large');
+  const buffer = await fsp.readFile(sourcePath);
+  validateFontSignature(buffer, extension);
+  validateProjectFontCoverage(buffer);
+  const digest = hashBuffer(buffer);
+  const relativePath = `assets/fonts/${digest.slice(0, 20)}${extension}`;
+  const label = String(payload.label || path.basename(sourcePath, extension)).slice(0, 120) || path.basename(relativePath);
+  const target = await resolveProjectPath(projectDir, relativePath);
+  const deduplicated = await exists(target);
+  await commitDocuments(projectDir, { [relativePath]: buffer });
+  return { ok: true, entry: { file: relativePath, label }, sha256: digest, deduplicated };
+}
+
+async function deleteFont(projectDir, payload = {}) {
+  const relativePath = String(payload.relativePath || '').replace(/\\/g, '/');
+  if (!/^assets\/fonts\/[A-Za-z0-9._-]+\.(?:ttf|otf|ttc)$/i.test(relativePath)) throw new Error('Unsafe project font path');
+  const current = await readProjectDocuments(projectDir);
+  const active = normalizeFontSettings(current.targetProfile?.font);
+  if (active.kind === 'project' && active.source.toLowerCase() === relativePath.toLowerCase()) {
+    throw new Error('Active font must be changed and saved before deletion');
+  }
+  const target = await resolveProjectPath(projectDir, relativePath);
+  const transaction = current.transaction ? deepClone(current.transaction) : null;
+  if (transaction?.documents) {
+    delete transaction.documents[relativePath];
+    transaction.transactionId = crypto.randomUUID();
+    transaction.committedAt = new Date().toISOString();
+    const manifestPath = await resolveProjectPath(projectDir, RELATIVE_PATHS.transaction);
+    await writeAtomic(await ensureProjectRoot(projectDir), manifestPath, jsonBuffer(transaction));
+  }
+  if (await exists(target)) await fsp.unlink(target);
+  return { ok: true, relativePath };
+}
+
 async function readProjectDocuments(projectDir) {
   const scenePath = await resolveProjectPath(projectDir, RELATIVE_PATHS.scene, { mustExist: true });
   const catalogPath = await resolveProjectPath(projectDir, RELATIVE_PATHS.catalog, { mustExist: true });
@@ -291,6 +497,10 @@ async function readProjectDocuments(projectDir) {
 
 async function loadProject(projectDir) {
   const documents = await readProjectDocuments(projectDir);
+  const persistedProfileRevision = hashDocument(documents.targetProfile);
+  if (documents.targetProfile && typeof documents.targetProfile === 'object') {
+    documents.targetProfile = { ...documents.targetProfile, font: normalizeFontSettings(documents.targetProfile.font) };
+  }
   const validation = validateSceneDocument(documents.sceneDocument, documents.catalog, { includeDocuments: false });
   const budget = analyzeNovelBudget(documents.sceneDocument, documents.bindings);
   const diagnostics = [
@@ -298,6 +508,7 @@ async function loadProject(projectDir) {
     ...validateProfile(documents.targetProfile),
     ...validateBindings(documents.sceneDocument, documents.catalog, documents.bindings),
     ...await validateTransaction(projectDir, documents.transaction),
+    ...await fontDiagnostics(projectDir, documents.sceneDocument, documents.targetProfile),
     ...budget.diagnostics,
   ];
   return {
@@ -309,7 +520,7 @@ async function loadProject(projectDir) {
       scene: hashDocument(documents.sceneDocument),
       catalog: hashDocument(documents.catalog),
       pceFont: hashDocument(documents.pceFont),
-      profile: hashDocument(documents.targetProfile),
+      profile: persistedProfileRevision,
       bindings: hashDocument(documents.bindings),
     },
   };
@@ -325,6 +536,7 @@ async function saveProject(projectDir, payload = {}) {
   }
   const sceneDocument = deepClone(payload.sceneDocument ?? current.sceneDocument);
   const targetProfile = deepClone(payload.targetProfile ?? current.targetProfile);
+  targetProfile.font = normalizeFontSettings(targetProfile.font);
   const bindings = deepClone(payload.bindings ?? current.bindings);
   assertSafeJson(sceneDocument);
   assertSafeJson(targetProfile);
@@ -334,11 +546,13 @@ async function saveProject(projectDir, payload = {}) {
   const diagnostics = [...validation.diagnostics, ...validateProfile(targetProfile), ...validateBindings(sceneDocument, current.catalog, bindings)];
   const errors = diagnostics.filter((entry) => entry.severity === 'error');
   if (errors.length) throw new Error(`Novel save validation failed: ${errors[0].message}`);
-  await commitDocuments(projectDir, {
+  const documents = {
     [RELATIVE_PATHS.scene]: sceneDocument,
     [RELATIVE_PATHS.profile]: targetProfile,
     [RELATIVE_PATHS.bindings]: bindings,
-  }, { sourceSceneRevision: bindings.sourceSceneRevision });
+  };
+  await ensureFontDocuments(projectDir, sceneDocument, targetProfile, documents);
+  await commitDocuments(projectDir, documents, { sourceSceneRevision: bindings.sourceSceneRevision });
   return loadProject(projectDir);
 }
 
@@ -434,6 +648,7 @@ async function importPceProject(projectDir, payload = {}, context = {}) {
     }
   }
   documents[RELATIVE_PATHS.bindings] = bindings;
+  await ensureFontDocuments(projectDir, sceneDocument, targetProfile, documents);
   await commitDocuments(projectDir, documents, { sourceSceneRevision: sceneRevision });
   const result = await loadProject(projectDir);
   result.importReport = {
@@ -459,7 +674,17 @@ module.exports = {
   readJsonFile,
   recoverAtomicTarget,
   writeAtomic,
+  writeAtomicIfChanged,
   commitDocuments,
+  readFontSource,
+  buildFontPlan,
+  prepareFontGeneration,
+  commitFontGeneration,
+  ensureFontDocuments,
+  validateFontProject,
+  fontDiagnostics,
+  importFont,
+  deleteFont,
   validateTransaction,
   validateProfile,
   validateBindings,

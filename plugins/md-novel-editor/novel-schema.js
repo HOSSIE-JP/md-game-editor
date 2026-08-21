@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { normalizeFontSettings } = require('./novel-font');
 
 const SCHEMA_VERSION = 1;
 const PCE_SCENE_VERSION = 2;
@@ -436,12 +437,7 @@ function defaultTargetProfile(options = {}) {
       portraitA: 2,
       portraitB: 3,
     },
-    font: {
-      renderer: 'misaki-gothic-scaled-16x16',
-      glyphWidth: 16,
-      glyphHeight: 16,
-      source: 'font/misaki_gothic.png',
-    },
+    font: normalizeFontSettings(),
     audio: {
       driver: 'XGM2',
       cdda: 'ignore',

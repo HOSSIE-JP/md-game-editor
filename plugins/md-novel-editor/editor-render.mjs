@@ -67,7 +67,36 @@ export function systemFormHtml(sceneDocument, profile) {
 
 export function fontSettingsHtml(profile, pceFont, glyphCount) {
   const font = profile?.font || {};
-  return `<h2>フォント</h2><p>MD runtimeは同梱Misaki Gothicを16×16へ拡大し、使用glyphだけをVRAMへ転送します。</p><section class="mn-settings-section"><h3>MD runtime font</h3><dl><dt>Renderer</dt><dd>${escapeHtml(font.renderer || 'misaki-gothic-scaled-16x16')}</dd><dt>Cell</dt><dd>${Number(font.glyphWidth || 16)} × ${Number(font.glyphHeight || 16)}</dd><dt>Source</dt><dd>${escapeHtml(font.source || 'font/misaki_gothic.png')}</dd><dt>使用glyph</dt><dd>${glyphCount}</dd></dl><p class="mn-hint">このversionではfontは固定です。効果のない編集欄は表示しません。</p></section><section class="mn-settings-section"><h3>PCE移植元情報（読取専用）</h3><textarea class="mn-json-editor mn-font-provenance" readonly>${escapeHtml(formatJson(pceFont || {}))}</textarea></section>`;
+  const active = font.kind === 'project' ? String(font.source || '') : 'bundled';
+  const library = Array.isArray(font.library) ? font.library : [];
+  const options = [
+    `<option value="bundled" ${active === 'bundled' ? 'selected' : ''}>同梱 Misaki Gothic</option>`,
+    ...library.map((entry) => `<option value="${escapeHtml(entry.file)}" ${active === entry.file ? 'selected' : ''}>${escapeHtml(entry.label || entry.file)}</option>`),
+  ].join('');
+  const generation = font.generation || {};
+  const generated = generation.inputHash
+    ? `${Number(generation.glyphCount || glyphCount)} glyph / ${Number(generation.width || 0)}×${Number(generation.height || 0)}`
+    : '未生成';
+  return `<h2>フォント</h2>
+    <p>任意のTTF / OTF / TTCを登録し、ゲームで使う文字だけを16×16 indexed bitmapへ生成します。</p>
+    <section class="mn-settings-section">
+      <h3>MD runtime font</h3>
+      <div class="mn-font-toolbar">
+        <button type="button" data-action="font-import">フォント登録</button>
+        <button type="button" data-action="font-delete" class="danger" ${active === 'bundled' ? 'disabled' : ''}>選択フォントを削除</button>
+      </div>
+      <div class="mn-settings-grid mn-font-control-grid">
+        <label class="mn-field mn-font-source-field"><span>使用フォント</span><select data-font-field="source">${options}</select><small>OSフォントへの直接参照は行わず、projectへコピーします。</small></label>
+        <label class="mn-field"><span>サイズ</span><input data-font-field="fontSize" type="number" min="8" max="32" value="${Number(font.fontSize || 16)}"></label>
+        <label class="mn-field"><span>しきい値</span><input data-font-field="threshold" type="number" min="1" max="254" value="${Number(font.threshold || 32)}"></label>
+        <label class="mn-field"><span>X offset</span><input data-font-field="xOffset" type="number" min="-8" max="8" value="${Number(font.xOffset || 0)}"></label>
+        <label class="mn-field"><span>Y offset</span><input data-font-field="yOffset" type="number" min="-8" max="8" value="${Number(font.yOffset || 0)}"></label>
+      </div>
+      <label class="mn-field"><span>Preview text</span><textarea data-font-field="previewText" rows="5" maxlength="512">${escapeHtml(font.previewText || '')}</textarea></label>
+      <div class="mn-font-generate-row"><button type="button" data-action="font-generate" class="primary">ビットマップフォント生成</button><span data-role="font-generation-status">${escapeHtml(generated)}</span></div>
+      <p class="mn-hint">固定cell 16×16 / 使用glyph subset / Shift-JIS。欠落glyphや未生成atlasは保存・ビルドを停止します。</p>
+    </section>
+    <section class="mn-settings-section"><h3>PCE移植元情報（読取専用）</h3><textarea class="mn-json-editor mn-font-provenance" readonly>${escapeHtml(formatJson(pceFont || {}))}</textarea></section>`;
 }
 
 export function assetsHtml(bindings = {}) {
