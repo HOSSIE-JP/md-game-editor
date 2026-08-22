@@ -874,6 +874,41 @@ test('shadow-safe sprite conversion never emits hardware H/S operator indices', 
   assert.equal(image.decodePng(pal3.png).sourceIndices.includes(15), false);
 });
 
+test('weighted palette splitting never emits empty black boxes for a dominant edge color', () => {
+  const colors = [
+    [36, 36, 73, 255],
+    [73, 182, 36, 255],
+    [0, 36, 36, 255],
+    [255, 255, 219, 255],
+    [73, 146, 36, 255],
+    [36, 109, 36, 255],
+    [36, 109, 0, 255],
+    [219, 219, 182, 255],
+    [109, 109, 73, 255],
+    [182, 182, 182, 255],
+    [146, 146, 109, 255],
+    [73, 73, 73, 255],
+    [219, 146, 109, 255],
+    [109, 219, 73, 255],
+  ];
+  const palette = [[255, 0, 255, 0], ...colors];
+  const indices = new Uint8Array(256 * 64);
+  indices.fill(1);
+  let cursor = 12000;
+  for (let paletteIndex = 2; paletteIndex < palette.length; paletteIndex += 1) {
+    for (let count = 0; count < 100; count += 1) indices[cursor++] = paletteIndex;
+  }
+  while (cursor < indices.length) indices[cursor++] = 0;
+  const entry = {
+    asset: { id: 'dominant', type: 'sprite', options: { transparentIndex: 0, spriteEditor: { frameWidth: 8, frameHeight: 8 } } },
+    buffer: image.encodeIndexedPng(256, 64, indices, palette),
+  };
+  const converted = convert.convertVisualGroup([entry], { paletteProfile: 'shadow-safe-pal3', reserveTransparent: true }).get('dominant');
+  const dynamic = converted.palette.slice(1, 14);
+  assert.equal(dynamic.filter((color) => color.slice(0, 3).some(Boolean)).length, 13);
+  assert.equal(converted.metadata.quality.p95DeltaE < 20, true);
+});
+
 test('message hardware budget uses 377 tiles, 2-character chunks, and adaptive top separation', () => {
   const message = { type: 'message', speaker: 'A'.repeat(16), text: 'A'.repeat(75) };
   const plain = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [message] }] }, { assets: {} });
@@ -975,6 +1010,11 @@ test('runtime uses one y=128 H interrupt, high-priority manual-VRAM message spri
   assert.match(runtime, /setAllColorsSafe\(effectPalette\)/);
   assert.match(runtime, /setHorizontalScrollSafe\(offset, -offset\)/);
   assert.match(runtime, /VDP_loadTileData\([^;]+DMA_QUEUE_COPY\)/);
+  assert.match(runtime, /PAL_setPalette\(palette, colors, DMA_QUEUE_COPY\)/);
+  assert.match(runtime, /PAL_setPalette\(PAL0, currentPalette, DMA_QUEUE_COPY\)/);
+  assert.match(runtime, /PAL_setColors\(0, colors, 64, DMA_QUEUE_COPY\)/);
+  const disarm = runtime.slice(runtime.indexOf('static void disarmMessageShadow'), runtime.indexOf('static void hideWindow'));
+  assert.doesNotMatch(disarm, /VDP_setHInterrupt|VDP_setHilightShadow/);
   assert.doesNotMatch(runtime, /VDP_setTextPlane\(WINDOW\)/);
   assert.match(header, /NOV_MSG_SEPARATE_TOP\s+0x01/);
   assert.match(header, /NOV_CHOICE_LOWERED\s+0x01/);

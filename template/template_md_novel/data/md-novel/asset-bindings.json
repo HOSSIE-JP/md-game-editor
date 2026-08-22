@@ -13,10 +13,10 @@
       "sourcePath": "novel/backgrounds/nov_bg_bg_sample_7d16a41f.png",
       "originalSource": "assets/images/bg_sample.png",
       "conversion": {
-        "converterVersion": 4,
+        "converterVersion": 5,
         "coordinateMode": "pce-legacy-256",
         "paletteProfile": "pal0-reserved",
-        "inputHash": "83af1267e5b4c48fba1f53cc3dbb723e6f25010d1f1512a038e89678dd244fa2",
+        "inputHash": "5bd4570b9efcfa35f5e368e557e4a7dba7250fc1c22ab4535a0cb97083ecbf9e",
         "reserveTransparent": false
       },
       "metadata": {
@@ -139,10 +139,10 @@
       "sourcePath": "novel/sprites/nov_spr_sp_hero_b74c1708.png",
       "originalSource": "assets/sprites/sp_hero.png",
       "conversion": {
-        "converterVersion": 4,
+        "converterVersion": 5,
         "coordinateMode": "pce-legacy-256",
         "paletteProfile": "shadow-safe-pal012",
-        "inputHash": "0e10f5e0eee1c78dea8dfd35e01bb880308122722b9e115468b0b2ea45ce8c31",
+        "inputHash": "4642f544d2bd11126655bed1d8846d1ec495b31670daf2805b964694e0852435",
         "reserveTransparent": true
       },
       "metadata": {

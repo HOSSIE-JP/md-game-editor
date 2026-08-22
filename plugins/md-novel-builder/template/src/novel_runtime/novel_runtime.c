@@ -100,7 +100,7 @@ static u8 actorPalettes[NOVEL_SPRITE_SLOTS];
 static u16 backgroundTileCount;
 static u16 workTileBase;
 static bool windowVisible;
-static bool shadowArmed;
+static volatile bool shadowArmed;
 static Sprite *messageSprites[NOVEL_MESSAGE_SPRITES];
 static u8 messageSpriteAllocated;
 static u8 messageSpriteActive;
@@ -251,9 +251,7 @@ static void loadPhysicalPalette(u16 palette, const u16 *colors, u16 paletteId)
     copyPalette(palette, colors);
     if (loadedPaletteIds[palette] == paletteId)
         return;
-    SYS_disableInts();
-    PAL_setPalette(palette, colors, DMA);
-    SYS_enableInts();
+    PAL_setPalette(palette, colors, DMA_QUEUE_COPY);
     loadedPaletteIds[palette] = paletteId;
 }
 
@@ -272,9 +270,7 @@ static void claimPaletteOwner(u8 palette)
 static void setMessageColor(u16 color)
 {
     currentPalette[1] = color;
-    SYS_disableInts();
-    PAL_setColor(1, color);
-    SYS_enableInts();
+    PAL_setPalette(PAL0, currentPalette, DMA_QUEUE_COPY);
 }
 
 static void restoreMessageColor(void)
@@ -284,9 +280,7 @@ static void restoreMessageColor(void)
 
 static void setAllColorsSafe(const u16 *colors)
 {
-    SYS_disableInts();
-    PAL_setColors(0, colors, 64, DMA);
-    SYS_enableInts();
+    PAL_setColors(0, colors, 64, DMA_QUEUE_COPY);
 }
 
 static void startFadeInSafe(u16 frames)
@@ -622,11 +616,7 @@ static void renderChoiceSprites(void)
 
 static void disarmMessageShadow(void)
 {
-    SYS_disableInts();
     shadowArmed = FALSE;
-    VDP_setHInterrupt(FALSE);
-    VDP_setHilightShadow(FALSE);
-    SYS_enableInts();
 }
 
 static void hideWindow(void)

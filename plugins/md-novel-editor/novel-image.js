@@ -381,6 +381,10 @@ function splitColorBoxes(histogram, maxColors) {
       cumulative += box[splitAt - 1].count;
       if (cumulative >= total / 2) break;
     }
+    // A dominant color at the high end of the selected channel can leave the
+    // weighted median at box.length. Never create an empty color box: its
+    // zero weight would otherwise turn into a black palette entry.
+    splitAt = Math.min(splitAt, box.length - 1);
     boxes.splice(candidate, 1, box.slice(0, splitAt), box.slice(splitAt));
   }
 
