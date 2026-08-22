@@ -1078,7 +1078,7 @@ Priority用のstatic/fwd/turnデシジョンテーブルはテクスチャ非依
 | main hook | `loadMdNovelProject`, `saveMdNovelProject`, `importPceNovelProject`, `validateMdNovelProject`, font hooks, `quantizeMdNovelPaletteGroup`, `readMdNovelIndexedAssets` |
 | renderer capability | `page`, `md-novel-editor` |
 
-PCE VN JSON v2を非破壊で読み書きし、PCE project import、Script/System/Font/Assets/診断、revision/transaction付きatomic saveを提供します。Script rendererはPCE型のScene階層 + 18種Commandパレット / 色分けカード + 320x224 preview / 型別GUIの常時3列構成です。狭いviewportは横scrollし、GUI/Scene JSONの明示適用guard、Scene/Command drag & drop、Skip、同project clipboard、100段Undo/Redo、未知field round-trip、別windowの分岐対応Full Previewをplugin module内で実装します。Font tabは既定の同梱`JF-Dot-Shinonome16.ttf`（size 16 / threshold 190）とproject-local TTF/OTF/TTC登録、cmap/glyph検査、16x16 subset indexed atlas生成を提供します。BG/Spriteのscriptには任意の`palette: PAL0..PAL3`を追加し、物理palette/fingerprint/quality/groupは`data/md-novel/` sidecarへ分離します。Assets tabはindexed変換結果、使用PAL、CIEDE2000品質を表示し、明示的な共同減色を実行します。
+PCE VN JSON v2を非破壊で読み書きし、PCE project import、Script/System/Font/Assets/診断、revision/transaction付きatomic saveを提供します。PCE取込前のplugin modalでBGとSLOT0～SLOT3を個別にPAL0～PAL3へ割り当て、選択profileで元画像を再減色します。Script rendererはPCE型のScene階層 + 18種Commandパレット / 色分けカード + 320x224 preview / 型別GUIの常時3列構成です。狭いviewportは横scrollし、GUI/Scene JSONの明示適用guard、Scene/Command drag & drop、Skip、同project clipboard、100段Undo/Redo、未知field round-trip、別windowの分岐対応Full Previewをplugin module内で実装します。Full PreviewはBG fade、message typewriter/page cursor/AUTO、choice、WAIT、sync/async INPUT割込、Sprite Move、SpriteText blink、sprite animationを60fpsで再現します。Font tabは既定の同梱`JF-Dot-Shinonome16.ttf`（size 16 / threshold 190）とproject-local TTF/OTF/TTC登録、cmap/glyph検査、16x16 subset indexed atlas生成を提供し、Command/Full Previewも同じatlasを使います。BG/Spriteのscriptには任意の`palette: PAL0..PAL3`を追加し、物理palette/fingerprint/quality/groupは`data/md-novel/` sidecarへ分離します。Assets tabはindexed変換結果、使用PAL、CIEDE2000品質を表示し、明示的な共同減色を実行します。
 
 ### `md-novel-builder` — MDノベルビルダー
 
@@ -1092,7 +1092,7 @@ PCE VN JSON v2を非破壊で読み書きし、PCE project import、Script/Syste
 | ロール | `builder` |
 | ジェネレータ | hook-only (`generator: false`) |
 
-PCE command意味論をSGDK runtimeへ変換し、ResComp/C source、XGM2/PCM binding、scene別palette/VRAM/sprite/scanline budgetを生成します。BG/Sprite表示時はcommand指定PALへordered RGB333 paletteをloadし、同じfingerprintのDMAを省略します。同一PALへ同時表示する異なるfingerprintとstale変換はBuild errorです。PAL0 index 1と非白messageが競合する場合は画像を変色させず、そのmessageだけ白へfallbackしてwarningを出します。CD-DA/ADPCM/voice/cacheはcommand順を維持したwarning付きNOPです。Test Playでは検証済みmanifest/ROM/object/生成物/build契約だけを差分buildへ再利用し、通常Buildはcleanを維持します。`template_md_novel`はbuilderとstandard WASM roleを選択済みです。詳細は[NOVEL.md](NOVEL.md)を参照してください。
+PCE command意味論をSGDK runtimeへ変換し、ResComp/C source、XGM2/PCM binding、scene別palette/VRAM/sprite/scanline budgetを生成します。BG/Sprite表示時はcommand指定PALへordered RGB333 paletteをloadし、同じfingerprintのDMAを省略します。fullScreen sceneでは旧actorの非表示SATをVBlankへ反映してから新BGを転送します。messageの手動page待ちは点滅`▼`、AUTO中は`◆`をWINDOW右下へ表示します。sync/async INPUTの空button maskは検証errorとし、旧データもzero-timeで継続します。同一PALへ同時表示する異なるfingerprintとstale変換はBuild errorです。PAL0 index 1と非白messageが競合する場合は画像を変色させず、そのmessageだけ白へfallbackしてwarningを出します。CD-DA/ADPCM/voice/cacheはcommand順を維持したwarning付きNOPです。Test Playでは検証済みmanifest/ROM/object/生成物/build契約だけを差分buildへ再利用し、通常Buildはcleanを維持します。`template_md_novel`はbuilderとstandard WASM roleを選択済みです。詳細は[NOVEL.md](NOVEL.md)を参照してください。
 
 ---
 

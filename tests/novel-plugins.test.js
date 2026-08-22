@@ -201,6 +201,17 @@ test('palette schema rejects invalid IDs and preserves ignored SpriteText color'
   assert.equal(schema.newCommandPalette('background'), 'PAL0');
   assert.deepEqual([0, 1, 2, 3].map((slot) => schema.newCommandPalette('sprite', slot)), ['PAL1', 'PAL2', 'PAL3', 'PAL3']);
 });
+test('input schema rejects an empty sync or async button mask', () => {
+
+  const inputDocument = { version: 2, startScene: 'input', scenes: [{ id: 'input', commands: [
+    { type: 'inputcheck', mode: 'sync', buttons: [] },
+    { type: 'inputcheck', mode: 'cancel', buttons: [] },
+  ] }] };
+  const inputValidation = schema.validateSceneDocument(inputDocument, { assets: [] });
+  assert.equal(inputValidation.diagnostics.some((entry) => entry.code === 'input-buttons-empty' && entry.severity === 'error'), true);
+  assert.equal(inputValidation.diagnostics.filter((entry) => entry.code === 'input-buttons-empty').length, 1);
+});
+
 
 test('binding validation forbids one asset across PAL0 and general profiles', () => {
   const sceneDocument = { version: 2, startScene: 's', scenes: [{ id: 's', commands: [
@@ -386,6 +397,19 @@ test('import, explicit PCE palettes, joint quantization, optimistic save, and un
   assert.equal(imported.sceneDocument.scenes[0].commands[0].palette, 'PAL0');
   assert.equal(imported.sceneDocument.scenes[0].commands[1].palette, 'PAL1');
   assert.equal(imported.sceneDocument.scenes[0].commands[2].palette, 'PAL2');
+  const customAssignments = { background: 'PAL2', slots: ['PAL3', 'PAL1', 'PAL0', 'PAL2'] };
+  const customScene = service.injectPcePalettes(fixture.sceneDocument, customAssignments);
+  assert.equal(customScene.scenes[0].commands[0].palette, 'PAL2');
+  assert.equal(customScene.scenes[0].commands[1].palette, 'PAL3');
+  assert.equal(customScene.scenes[0].commands[2].palette, 'PAL1');
+  assert.deepEqual(service.normalizePcePaletteAssignments(customAssignments), customAssignments);
+  assert.throws(() => service.normalizePcePaletteAssignments({
+    background: 'PAL4',
+    slots: ['PAL1', 'PAL2', 'PAL3', 'PAL0'],
+  }), /PAL0, PAL1, PAL2, or PAL3/);
+  assert.deepEqual(imported.importReport.paletteAssignments, {
+    background: 'PAL0', slots: ['PAL1', 'PAL2', 'PAL3', 'PAL3'],
+  });
   assert.equal(imported.bindings.audioVariants['song@0'].status, 'ready');
   assert.equal(imported.bindings.audioVariants['sfx@1'].status, 'ready');
   assert.equal(fs.existsSync(path.join(target, 'res', imported.bindings.audioVariants['song@0'].sourcePath)), true);
@@ -505,6 +529,15 @@ test('md-novel-builder is hook-only and exports explicit source files without bo
   assert.match(runtime, /loadedPaletteIds\[palette\] == paletteId/);
   assert.match(runtime, /overlaySetPixel\(x \+ pixelX, y \+ pixelY, 1\)/);
   assert.match(runtime, /restoreMessageColor\(\);/);
+  assert.match(runtime, /messageDownTile/);
+  assert.match(runtime, /messageAutoTile/);
+  assert.match(runtime, /setMessageCursor\(messageCursorTimer < 30 \? 1 : 0\)/);
+  assert.match(runtime, /else if \(mask == 0\)[\s\S]*?break;/);
+  const backgroundLoader = runtime.slice(runtime.indexOf('static void loadBackground'), runtime.indexOf('static void setActor'));
+  const flushIndex = backgroundLoader.indexOf('flushPendingActorClear();');
+  const clearIndex = backgroundLoader.indexOf('VDP_clearPlane(BG_B, TRUE);');
+  assert.ok(flushIndex >= 0 && clearIndex > flushIndex);
+  assert.match(runtime, /actorSceneClearPending = TRUE;/);
   assert.doesNotMatch(runtime, /novelDataSpritePalette\(/);
 });
 

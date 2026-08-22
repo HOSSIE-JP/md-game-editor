@@ -166,6 +166,12 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     html: `<div class="settings-form compact-form mn-confirm-dialog"><h3 data-decision-title>確認</h3><p data-decision-message></p><pre data-decision-details hidden></pre><div class="mn-confirm-actions"><button type="button" data-decision="save" class="primary" hidden>保存</button><button type="button" data-decision="confirm">実行</button><button type="button" data-decision="cancel">キャンセル</button></div></div>`,
   });
   let decisionResolve = null;
+  const pcePaletteModal = api.createModal({
+    id: `${plugin.id}-pce-palette-import`,
+    html: `<div class="settings-form compact-form mn-pce-palette-dialog"><h3>PCE取込パレット割り当て</h3><p>変換後のBGと各Sprite SLOTが使用するMDパレットを指定します。同じパレットを複数に割り当てて共有できます。</p><div class="mn-pce-palette-grid"><label><span>BG</span><select data-pce-palette="background"></select></label><label><span>SLOT0</span><select data-pce-palette="slot0"></select></label><label><span>SLOT1</span><select data-pce-palette="slot1"></select></label><label><span>SLOT2</span><select data-pce-palette="slot2"></select></label><label><span>SLOT3</span><select data-pce-palette="slot3"></select></label></div><p class="hint">PAL0 index 0は背景色、index 1はメッセージ文字色として予約されます。</p><div class="mn-confirm-actions"><button type="button" class="primary" data-pce-palette-action="confirm">この割り当てで取込</button><button type="button" data-pce-palette-action="cancel">キャンセル</button></div></div>`,
+  });
+  let pcePaletteResolve = null;
+
 
   function askDecision(options = {}) {
     if (decisionResolve) decisionResolve('cancel');
@@ -190,6 +196,38 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     decisionResolve = null;
     decision.close();
     resolve?.(choice);
+  }
+
+  function askPcePaletteAssignments() {
+    if (pcePaletteResolve) pcePaletteResolve(null);
+    const defaults = { background: 'PAL0', slot0: 'PAL1', slot1: 'PAL2', slot2: 'PAL3', slot3: 'PAL3' };
+    for (const select of pcePaletteModal.panel.querySelectorAll('[data-pce-palette]')) {
+      select.innerHTML = ['PAL0', 'PAL1', 'PAL2', 'PAL3'].map((palette) => `<option value="${palette}">${palette}</option>`).join('');
+      select.value = defaults[select.dataset.pcePalette];
+    }
+    pcePaletteModal.open();
+    return new Promise((resolve) => { pcePaletteResolve = resolve; });
+  }
+
+  function finishPcePaletteAssignments(confirmed) {
+    const resolve = pcePaletteResolve;
+    pcePaletteResolve = null;
+    pcePaletteModal.close();
+    if (!confirmed) {
+      resolve?.(null);
+      return;
+    }
+    const value = (key) => pcePaletteModal.panel.querySelector(`[data-pce-palette="${key}"]`)?.value || 'PAL0';
+    resolve?.({
+      background: value('background'),
+      slots: [value('slot0'), value('slot1'), value('slot2'), value('slot3')],
+    });
+  }
+
+  function onPcePaletteClick(event) {
+    const button = event.target.closest('[data-pce-palette-action]');
+    if (!button) return;
+    finishPcePaletteAssignments(button.dataset.pcePaletteAction === 'confirm');
   }
 
   function setStatus(message, tone = '') {
@@ -441,12 +479,26 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const visual = scene ? simulateScene(scene, state.selectedCommandIndex, { columns: 19, rows: 4 }) : {};
     visual.choiceIndex = visual.choice?.defaultIndex || 0;
     visual.autoEnabled = state.sceneDocument?.settings?.messageAdvanceMode === 'auto';
-    drawNovelFrame(elements.commandPreview, visual, { coordinateMode: state.targetProfile?.coordinateMode, bindings: state.bindings, imageForAsset, indexedForAsset, paletteCanvasCache: state.paletteCanvasCache });
+    const draw = () => drawNovelFrame(elements.commandPreview, visual, {
+      coordinateMode: state.targetProfile?.coordinateMode,
+      bindings: state.bindings,
+      catalog: state.catalog,
+      imageForAsset,
+      indexedForAsset,
+      paletteCanvasCache: state.paletteCanvasCache,
+      fontImage: state.fontImage,
+      fontEntries: state.fontPlan?.entries,
+    });
+    draw();
     elements.previewLabel.textContent = scene && command ? `${scene.id} · #${state.selectedCommandIndex + 1}` : '';
     updateAudioPreviewState(command);
-    await Promise.all([ensureAssetImages(collectVisualAssetIds(visual)), ensureIndexedAssets(collectVisualAssetIds(visual))]);
+    await Promise.all([
+      ensureAssetImages(collectVisualAssetIds(visual)),
+      ensureIndexedAssets(collectVisualAssetIds(visual)),
+      ensurePreviewFont(),
+    ]);
     if (generation !== state.previewGeneration) return;
-    drawNovelFrame(elements.commandPreview, visual, { coordinateMode: state.targetProfile?.coordinateMode, bindings: state.bindings, imageForAsset, indexedForAsset, paletteCanvasCache: state.paletteCanvasCache });
+    draw();
   }
 
   function fontGenerationStatus(message, tone = '') {
@@ -535,6 +587,16 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (!result?.entries) throw new Error(result?.error || 'Font generation planを作成できません');
     state.fontPlan = result;
     return result;
+  }
+
+  async function ensurePreviewFont() {
+    const plan = await requestFontPlan();
+    const atlasImage = plan.currentValid
+      ? await loadProjectImage(plan.outputPath, `font-output:${plan.font?.generation?.pngSha256 || plan.inputHash}`)
+      : await rasterizeFontPlan(plan);
+    state.fontPlan = plan;
+    state.fontImage = atlasImage;
+    return plan;
   }
 
   async function refreshFontPreview() {
@@ -901,9 +963,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const picked = await api.electronAPI.pickFile({ title: 'PCE project.jsonを選択', properties: ['openFile'], filters: [{ name: 'PCE Game Editor project', extensions: ['json'] }] });
     if (picked?.canceled || !picked.sourcePath) return;
     if (!/[/\\]project\.json$/i.test(picked.sourcePath)) { setStatus('PCE project.jsonを選択してください', 'error'); return; }
+    const paletteAssignments = await askPcePaletteAssignments();
+    if (!paletteAssignments) return;
     setStatus('PCEノベルをMD向けに変換中…');
     try {
-      const result = await api.plugins.invokeHook(plugin.id, 'importPceNovelProject', { sourceProjectDir: sourceDirectory(picked.sourcePath) });
+      const result = await api.plugins.invokeHook(plugin.id, 'importPceNovelProject', { sourceProjectDir: sourceDirectory(picked.sourcePath), paletteAssignments });
       if (!result?.sceneDocument) throw new Error(result?.error || 'PCE importに失敗しました');
       adoptSnapshot(result, { resetHistory: true });
       render();
@@ -1166,6 +1230,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (!await guardSceneJson('Preview')) return;
     state.previewWindow?.close();
     try {
+      await ensurePreviewFont();
       state.previewWindow = openNovelPreview({
         sceneDocument: state.sceneDocument,
         startSceneId: state.selectedSceneId,
@@ -1178,6 +1243,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
         ensureAssetImages,
         ensureIndexedAssets,
         paletteCanvasCache: state.paletteCanvasCache,
+        fontImage: state.fontImage,
+        fontEntries: state.fontPlan?.entries,
         onAudioEvent(event) { void playAudioCommand(event.command).catch((error) => logger.warn(error.message)); },
         onClose() { state.previewWindow = null; stopAudioPreview(); },
       });
@@ -1368,6 +1435,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   root.addEventListener('drop', onDrop);
   root.addEventListener('dragend', onDragEnd);
   root.addEventListener('pointerdown', startResize);
+  pcePaletteModal.panel.addEventListener('click', onPcePaletteClick);
   window.addEventListener('keydown', onKeyDown);
 
   const observer = new MutationObserver(() => {
@@ -1408,6 +1476,8 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       root.removeEventListener('pointerdown', startResize);
       window.removeEventListener('keydown', onKeyDown);
       decision.panel.removeEventListener('click', onDecisionClick);
+      pcePaletteModal.panel.removeEventListener('click', onPcePaletteClick);
+      pcePaletteModal.destroy();
       decision.destroy();
       if (style.owned) style.element.remove();
       root.innerHTML = '';

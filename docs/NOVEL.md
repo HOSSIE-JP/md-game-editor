@@ -25,7 +25,7 @@ builder は hook-only です。`manifest.json` の `generator` は `false` で�
 - Undo/Redoは100段、Command clipboardは同じproject内で利用できます。`Ctrl+S`で保存、`Ctrl+Z`でUndo、`Ctrl+Y`または`Ctrl+Shift+Z`でRedoします。
 - `System`はPCE互換のmessage速度・AUTO初期値・auto waitとMD target設定を分離して表示します。`Font`は既定の同梱`JF-Dot-Shinonome16.ttf`（size 16、threshold 190）またはprojectへ登録したTTF/OTF/TTCを選択し、size 8..32、threshold 1..254、x/y offset -8..8、preview textを調整して、固定16x16のindexed bitmapを生成します。使用glyphはspeaker、本文、choice、SpriteText、固定記号のsubsetです。`Assets`はbinding、使用PAL、ordered RGB333 swatch、palette品質、tile/sprite/audio容量を表示し、同じprofileの画像を明示的なpalette groupとして「共同減色して保存」できます。`診断`tabはpath付きwarning/errorを表示します。
 
-右側のCommand Previewは選択Commandまでを評価した表示です。`Preview`は選択Sceneの先頭から動く別ウィンドウを開き、message、choice、変数、label分岐、scene遷移、待機、入力、AUTO、Sprite Move、PSG previewを同じscript interpreterで再生します。`最初から`、早送り、runtime/変数/sprite/budget Debugを備え、100,000 commandを超える無限ループは停止して診断します。入力は方向key、Z=I/B、X=II/C、Enter=RUN/START、A=SELECT/AUTOです。
+右側のCommand Previewは選択Commandまでを評価した表示です。`Preview`は選択Sceneの先頭から動く別ウィンドウを開き、MD runtimeと同じ60fpsの状態遷移でBG fadeOut/転送/fadeIn、1glyph単位のmessage送り、手動page待ち、AUTO、choice、変数、label分岐、scene遷移、WAIT、sync/async INPUT、補間中のSprite Move、SpriteText blink、sprite animation、PSG previewを再生します。文字・選択肢・SpriteTextは生成対象の16x16 subset font atlasで描画します。`最初から`、早送り、runtime/変数/sprite/budget Debugを備え、100,000 commandを超える無限ループは停止して診断します。入力は方向key、Z=I/B、X=II/C、Enter=RUN/START、A=SELECT/AUTOです。
 
 CD-DA、ADPCM、message voiceはフォームとJSONに残りますが、MDでは無音のため再生操作を無効化して理由を表示します。PSG songはpattern preview、変換済みPSG SFXはWAV previewを行います。再読込、Build、Test Play、project切替では未保存内容を保存または確認し、revision競合や保存失敗時は操作を中止します。
 
@@ -57,10 +57,11 @@ scene JSON は parsed object を丸ごと保持し、既知fieldだけをUIで�
 1. Mega Drive projectを`template_md_novel`から作成します。
 2. `ノベル`ページで`PCEプロジェクト取込`を押します。
 3. 元projectの`project.json`を選択します。
-4. 取込後に`診断`と`Assets`を確認し、`保存`します。
-5. `Build`または`Test Play`を実行します。
+4. ダイアログでBGとSLOT0～SLOT3の変換先を、それぞれPAL0～PAL3から選びます。同じPALを共有する指定もできます。
+5. 取込後に`診断`と`Assets`を確認し、`保存`します。
+6. `Build`または`Test Play`を実行します。
 
-importは元projectのscene/catalogを先に検証し、参照中assetだけを変換します。既定fontは`JF-Dot-Shinonome16.ttf`、size 16、threshold 190で生成済みにするため、取込直後から画面操作なしでBuildできます。画像は元source PNGをMD RGB333 / indexed 16色へ再変換し、PCE generated 4bpp binaryは使用しません。PCE取込では既存のpalette fieldを固定規則で上書きし、BGをPAL0、sprite slot 0をPAL1、slot 1をPAL2、slot 2/3をPAL3へ割り当てます。各画像は独立に減色し、自動group化しません。同じPALへ同時表示してfingerprintが衝突するprojectも取込自体は完了して診断を表示しますが、Buildは停止します。必要な画像だけAssets tabで明示的に共同減色してください。PSGは実際に参照された`(assetId, channel)` variantだけを生成します。
+importは元projectのscene/catalogを先に検証し、参照中assetだけを変換します。既定fontは`JF-Dot-Shinonome16.ttf`、size 16、threshold 190で生成済みにするため、取込直後から画面操作なしでBuildできます。画像は元source PNGをMD RGB333 / indexed 16色へ再変換し、PCE generated 4bpp binaryは使用しません。PCE取込では既存のpalette fieldをダイアログの割り当てで上書きします。既定値はBG=PAL0、SLOT0=PAL1、SLOT1=PAL2、SLOT2/SLOT3=PAL3です。PAL0を選んだ画像はindex 0=黒、index 1=白を予約した14色profile、PAL1～PAL3はgeneral profileで再減色します。各画像は独立に減色し、自動group化しません。同じPALへ同時表示してfingerprintが衝突するprojectも取込自体は完了して診断を表示しますが、Buildは停止します。必要な画像だけAssets tabで明示的に共同減色してください。PSGは実際に参照された`(assetId, channel)` variantだけを生成します。
 
 再importは自動監視ではありません。外部変更を取り込む前に未保存編集を保存し、明示的に再importしてください。
 
@@ -73,7 +74,7 @@ top-levelは`version`、`settings`、`startScene`、`scenes`です。sceneは`id
 | `background` | BG_Bへ表示。任意の`palette`（PAL0～PAL3）を読込み、`transition: fade`はfadeOut/転送/fadeInを同期実行 |
 | `sprite` | 4 logical slotをSGDK Sprite Engineで保持。任意の`palette`（PAL0～PAL3）、表示、反転、animationを反映 |
 | `spritemove` | 0..65535 frame、sync/async、animation切替を反映 |
-| `message` | speaker 1行 + 本文19列×4行。1押下目で全文、2押下目で次page/command |
+| `message` | speaker 1行 + 本文19列×4行。1押下目で全文、2押下目で次page/command。手動page待ちは右下に点滅`▼`、AUTO中は入力中から`◆`を表示 |
 | `audio` | PSG songをXGM2、PSG SFXをXGM2 PCM CH2で再生。stop targetを保持 |
 | `cache` | command順を保つzero-time NOP。warningを表示 |
 | `variable` | signed 16-bit。define/set/add/sub/random、min/max、飽和add/sub、inclusive random |
@@ -81,7 +82,7 @@ top-levelは`version`、`settings`、`startScene`、`scenes`です。sceneは`id
 | `if` | eq/ne/lt/lte/gt/gteとtrue/else label |
 | `switch` | 最大16 caseとdefault label。0 caseもdefaultへfall through |
 | `label` / `goto` | 同scene内PCへ解決。duplicate labelは最初を使用しwarning |
-| `inputcheck` | sync/async/cancel。最大7 async watcher、後の重複button割当を優先 |
+| `inputcheck` | sync/async/cancel。最大7 async watcher、後の重複button割当を優先。sync/asyncの空button指定は検証error（旧データはzero-timeで継続） |
 | `jump` | scene遷移。変数と通常sprite/audio stateは維持し、move/message/choice/input watcherは解除 |
 | `wait` | 0..65535 frame。0は同tick継続 |
 | `effect` | fadeOut、fadeIn、blank、flash、shake |
@@ -89,7 +90,7 @@ top-levelは`version`、`settings`、`startScene`、`scenes`です。sceneは`id
 
 scene数は最大255、1 sceneのruntime commandは最大255、変数は予約変数を含め最大255です。予約変数`AUTO_ENABLE`と`MSG_SPEED`のindex/意味論を維持します。`settings.messageSpeedFrames`、`messageAdvanceMode`、`messageAutoWaitFrames`はglobal設定です。
 
-`fullScreenBg` sceneへ入るとactor slotを解放します。MD版では320x224全画面を使えるため、PCE版の「Full BG中はmessage/choice禁止」は適用しません。SpriteTextはscene切替時にclearします。
+`fullScreenBg` sceneへ入るとactor slotを解放します。次のBGを転送する前にSprite Engineの非表示SATをVBlankへ反映するため、新BGの上に旧spriteが1frame残りません。MD版では320x224全画面を使えるため、PCE版の「Full BG中はmessage/choice禁止」は適用しません。SpriteTextはscene切替時にclearします。
 
 ## MD表示profile
 
@@ -99,6 +100,7 @@ scene数は最大255、1 sceneのruntime commandは最大255、変数は予約�
 - BG_B=背景、BG_A=SpriteText overlay、WINDOW=会話/選択肢
 - WINDOWは下96px。16x16 glyph、speaker 1行、本文19列×4行、1page 75 cell
 - choice labelはJSON上24文字まで保持し、MD windowは先頭17文字を表示してwarning
+- manual messageのpage完了時はWINDOW右下に30frame周期で点滅する`▼`、AUTO時は本文表示中から常灯する`◆`を表示
 - PAL0～PAL3はBG/Sprite Commandごとに選択可能。PAL0だけindex 0=黒、index 1=白をsystem色として予約し、WINDOW/font/BG_A文字も共有
 - 新規CommandはBG=PAL0、sprite slot 0=PAL1、slot 1=PAL2、slot 2/3=PAL3。palette未指定の既存JSONはAutoとして従来binding/fallback（BG=PAL1、Sprite=PAL2）を維持
 - Unicode JSONを正本にし、build時にShift-JISへround-trip検査変換。既定の同梱`JF-Dot-Shinonome16.ttf`（16px、threshold 190）または登録fontを16x16 cellへrasterizeし、使用glyphだけVRAMへ転送
@@ -112,7 +114,7 @@ SpriteTextはPCEの1文字1hardware spriteを再現しません。H40 scanline�
 
 同じ物理PALへ同時表示する画像はordered palette fingerprintが完全一致しなければBuild errorです。scene遷移など時間的に重ならない画像は同じPALを再利用できます。同じassetをPAL0とPAL1～PAL3の両profileで使うことはできないため、別assetへ複製します。`paletteGroup`は同じprofileの画像だけを共同減色する明示操作で、PAL0-reservedとgeneralの混在は拒否します。profile変更後の単体画像は保存時に再変換しますが、groupの再変換は画質が連動するため「共同減色して保存」でだけ実行します。Buildは画像を変更せず、stale conversionをerrorにします。
 
-RuntimeはBG/Sprite表示時に対象resourceのpaletteを指定PALへ読み込み、同じfingerprintならDMAを省略します。hide/replace時は論理ownerを解放し、Sprite Move中は割当を維持します。Previewもindexed pixelと物理PALの最終loadを使って再着色し、同時衝突を赤枠で表示します。
+RuntimeはBG/Sprite表示時に対象resourceのpaletteを指定PALへ読み込み、同じfingerprintならDMAを省略します。hide/replace時は論理ownerを解放し、Sprite Move中は割当を維持します。fullScreen sceneのactor解放はBGのclear/drawより先にVBlankへcommitします。Previewもindexed pixelと物理PALの最終loadを使って再着色し、同時衝突を赤枠で表示します。
 
 PAL0のmessage/choice/SpriteTextはindex 1を共有します。通常は白へ復元し、`message.textColor`指定中だけindex 1を書き換え、message終了時に白へ戻します。非白messageがPAL0画像のindex 1または可視SpriteTextと重なる場合は、画像やSpriteTextを変色させないため、そのmessageだけ白で描画してwarningを出します。元の`message.textColor`はJSONに保持されます。`spritetext.color`もJSON互換のため保持しますがMD runtimeでは無視し、PAL0 index 1を使うwarningを出します。
 

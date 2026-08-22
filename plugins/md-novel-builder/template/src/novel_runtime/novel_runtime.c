@@ -86,6 +86,7 @@ static Sprite *actorSprites[NOVEL_SPRITE_SLOTS];
 static s16 actorResources[NOVEL_SPRITE_SLOTS];
 static s16 actorAnimations[NOVEL_SPRITE_SLOTS];
 static MoveState actorMoves[NOVEL_SPRITE_SLOTS];
+static bool actorSceneClearPending;
 
 static u8 inputWatcherCount;
 static u16 inputWatcherMasks[NOVEL_INPUT_WATCHERS];
@@ -111,6 +112,8 @@ static u16 messageLoaded;
 static u16 messageRevealed;
 static u16 messageTimer;
 static bool messageComplete;
+static u16 messageCursorTimer;
+static u8 messageCursorKind;
 
 static const NovelChoice *activeChoice;
 static u8 choiceIndex;
@@ -130,6 +133,10 @@ static u16 effectPalette[64];
 
 static u32 glyphBuffer[32];
 static u32 solidTileBuffer[8];
+static const u32 messageDownTile[8] = { 0, 0, 0x01111110, 0x00111100, 0x00011000, 0, 0, 0 };
+static const u32 messageAutoTile[8] = { 0x00011000, 0x00111100, 0x01111110, 0x11111111, 0x01111110, 0x00111100, 0x00011000, 0 };
+static const u32 choiceCursorTile[8] = { 0x01000000, 0x01100000, 0x01110000, 0x01111000, 0x01110000, 0x01100000, 0x01000000, 0 };
+
 
 static u16 windowTileBase(void)
 {
@@ -274,6 +281,43 @@ static void loadSolidTile(u16 tile, u8 color)
     VDP_loadTileData(solidTileBuffer, tile, 1, DMA);
 }
 
+static void setMessageCursor(u8 kind)
+{
+    u16 tile = windowTileBase() + 1;
+    if (messageCursorKind == kind)
+        return;
+    if (kind == 1)
+    {
+        VDP_loadTileData(messageDownTile, tile, 1, DMA);
+        VDP_setTileMapXY(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, tile), 38, NOVEL_WINDOW_TOP + 10);
+    }
+    else if (kind == 2)
+    {
+        VDP_loadTileData(messageAutoTile, tile, 1, DMA);
+        VDP_setTileMapXY(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, tile), 38, NOVEL_WINDOW_TOP + 10);
+    }
+    else
+    {
+        VDP_setTileMapXY(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, windowTileBase()), 38, NOVEL_WINDOW_TOP + 10);
+    }
+    messageCursorKind = kind;
+}
+
+static void updateMessageCursor(void)
+{
+    if (autoEnabled)
+    {
+        setMessageCursor(2);
+        return;
+    }
+    if (!messageComplete)
+    {
+        setMessageCursor(0);
+        return;
+    }
+    messageCursorTimer = (messageCursorTimer + 1) % 60;
+    setMessageCursor(messageCursorTimer < 30 ? 1 : 0);
+}
 static void hideWindow(void)
 {
     if (!windowVisible)
@@ -290,10 +334,11 @@ static void showWindow(void)
     currentPalette[0] = 0x0000;
     PAL_setColor(0, 0x0000);
     loadSolidTile(fillTile, 0);
-    loadSolidTile(cursorTile, 1);
+    loadSolidTile(cursorTile, 0);
     VDP_setWindowOnBottom(NOVEL_WINDOW_ROWS);
     VDP_fillTileMapRect(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, fillTile), 0, NOVEL_WINDOW_TOP, 40, NOVEL_WINDOW_ROWS);
     windowVisible = TRUE;
+    messageCursorKind = 0;
 }
 static u16 findFontGlyph(u16 code)
 {
@@ -444,6 +489,7 @@ static void prepareMessagePage(void)
     messageTimer = 0;
     messageComplete = FALSE;
     autoCounter = 0;
+    messageCursorTimer = 0;
     PAL_setColor(1, activeMessage->color);
     currentPalette[1] = activeMessage->color;
     showWindow();
@@ -469,6 +515,7 @@ static void revealAllMessage(void)
 static void updateMessagePrepare(void)
 {
     u16 count = 0;
+    updateMessageCursor();
     while ((messageLoaded < messageGlyphCount) && (count < NOVEL_MESSAGE_LOAD_BATCH))
     {
         loadGlyph16(messageGlyphs[messageLoaded].atlas, messageGlyphs[messageLoaded].tile);
@@ -493,16 +540,19 @@ static void finishMessage(void)
 {
     setMouthAnimation(activeMessage->mouthSlot, 0);
     restoreMessageColor();
+    setMessageCursor(0);
     activeMessage = NULL;
     runtimeMode = MODE_RUN;
 }
 static void updateMessage(void)
 {
+    updateMessageCursor();
     if (!messageComplete)
     {
         if (messageAdvancePressed())
         {
             revealAllMessage();
+            updateMessageCursor();
             return;
         }
         messageTimer++;
@@ -517,6 +567,7 @@ static void updateMessage(void)
             if (messageRevealed >= (messageGlyphCount - messageBodyStart))
                 revealAllMessage();
         }
+        updateMessageCursor();
         return;
     }
     if (autoEnabled)
@@ -567,6 +618,7 @@ static void drawImmediateText(const u8 *text, u8 startX, u8 startY, u16 *nextTil
 static void beginChoice(void)
 {
     showWindow();
+    VDP_loadTileData(choiceCursorTile, windowTileBase() + 1, 1, DMA);
     restoreMessageColor();
     choiceLoadIndex = 0;
     choiceNextTile = windowTileBase() + 2;
@@ -728,6 +780,15 @@ static void updateSpriteTextBlink(void)
         renderSpriteTexts();
 }
 
+static void flushPendingActorClear(void)
+{
+    if (!actorSceneClearPending)
+        return;
+    SPR_update();
+    SYS_doVBlankProcess();
+    actorSceneClearPending = FALSE;
+}
+
 static void loadBackground(const NovelCommand *command)
 {
     const Image *image = novelDataBackground((u16)command->target);
@@ -740,6 +801,7 @@ static void loadBackground(const NovelCommand *command)
     hideWindow();
     if (command->flags & NOV_FLAG_FADE)
         PAL_fadeOutAll(command->frames, FALSE);
+    flushPendingActorClear();
     VDP_clearPlane(BG_B, TRUE);
     if (backgroundPalette != NOVEL_PALETTE_NONE)
         releasePaletteOwner(backgroundPalette);
@@ -886,6 +948,7 @@ static void enterScene(s16 sceneIndex)
             actorResources[slot] = -1;
             actorAnimations[slot] = 0;
         }
+        actorSceneClearPending = TRUE;
     }
 }
 static void executeCommand(const NovelCommand *command)
@@ -945,11 +1008,14 @@ static void executeCommand(const NovelCommand *command)
             {
                 inputWatcherCount = 0;
             }
+            else if (mask == 0)
+            {
+                break;
+            }
             else if (command->flags & NOV_FLAG_ASYNC)
             {
                 u8 readIndex;
                 u8 writeIndex = 0;
-                if (mask == 0) break;
                 for (readIndex = 0; readIndex < inputWatcherCount; readIndex++)
                 {
                     u16 remaining = inputWatcherMasks[readIndex] & (u16)~mask;
@@ -1203,6 +1269,7 @@ void novelInit(const NovelProject *project)
     backgroundTileCount = 0;
     workTileBase = TILE_USER_INDEX;
     windowVisible = FALSE;
+    actorSceneClearPending = FALSE;
     previousOverlayCount = 0;
     overlayTileCount = 0;
     inputWatcherCount = 0;
@@ -1275,4 +1342,5 @@ void novelUpdate(void)
             break;
     }
     SPR_update();
+    actorSceneClearPending = FALSE;
 }

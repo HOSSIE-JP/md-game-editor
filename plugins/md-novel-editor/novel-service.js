@@ -285,20 +285,37 @@ function validateProfile(profile) {
   return diagnostics;
 }
 
-function pcePaletteForCommand(command) {
-  if (command?.type === 'background') return 'PAL0';
+const DEFAULT_PCE_PALETTE_ASSIGNMENTS = Object.freeze({
+  background: 'PAL0',
+  slots: Object.freeze(['PAL1', 'PAL2', 'PAL3', 'PAL3']),
+});
+
+function normalizePcePaletteAssignments(value = {}) {
+  const palettes = new Set(['PAL0', 'PAL1', 'PAL2', 'PAL3']);
+  const background = value.background ?? DEFAULT_PCE_PALETTE_ASSIGNMENTS.background;
+  const sourceSlots = Array.isArray(value.slots) ? value.slots : [];
+  const slots = DEFAULT_PCE_PALETTE_ASSIGNMENTS.slots.map((fallback, index) => sourceSlots[index] ?? fallback);
+  if (!palettes.has(background) || slots.some((palette) => !palettes.has(palette))) {
+    throw new Error('PCE palette assignments must use PAL0, PAL1, PAL2, or PAL3');
+  }
+  return { background, slots };
+}
+
+function pcePaletteForCommand(command, paletteAssignments = DEFAULT_PCE_PALETTE_ASSIGNMENTS) {
+  if (command?.type === 'background') return paletteAssignments.background;
   if (command?.type === 'sprite') {
     const slot = Math.max(0, Math.min(3, Number(command.slot) || 0));
-    return ['PAL1', 'PAL2', 'PAL3', 'PAL3'][slot];
+    return paletteAssignments.slots[slot];
   }
   return '';
 }
 
-function injectPcePalettes(sceneDocument) {
+function injectPcePalettes(sceneDocument, value = {}) {
+  const paletteAssignments = normalizePcePaletteAssignments(value);
   const result = deepClone(sceneDocument);
   for (const scene of result?.scenes || []) {
     for (const command of scene?.commands || []) {
-      const palette = pcePaletteForCommand(command);
+      const palette = pcePaletteForCommand(command, paletteAssignments);
       if (palette) command.palette = palette;
     }
   }
@@ -957,7 +974,8 @@ function sourceProjectId(projectConfig, sourceRoot) {
 async function importPceProject(projectDir, payload = {}, context = {}) {
   const sourceRoot = await ensureProjectRoot(payload.sourceProjectDir);
   const sourceSceneDocument = await readJsonFile(await resolveSourcePath(sourceRoot, RELATIVE_PATHS.scene));
-  const sceneDocument = injectPcePalettes(sourceSceneDocument);
+  const paletteAssignments = normalizePcePaletteAssignments(payload.paletteAssignments);
+  const sceneDocument = injectPcePalettes(sourceSceneDocument, paletteAssignments);
   const catalog = await readJsonFile(await resolveSourcePath(sourceRoot, RELATIVE_PATHS.catalog));
   const projectConfig = await readJsonFile(await resolveSourcePath(sourceRoot, 'project.json'));
   const pceFontPath = path.join(sourceRoot, RELATIVE_PATHS.pceFont.replace(/\//g, path.sep));
@@ -1043,6 +1061,7 @@ async function importPceProject(projectDir, payload = {}, context = {}) {
   const result = await loadProject(projectDir);
   result.importReport = {
     sourceProjectDir: sourceRoot,
+    paletteAssignments,
     sourceSceneRevision: sceneRevision,
     visualAssets: visualEntries.length,
     audioVariants: Object.keys(bindings.audioVariants).length,
@@ -1077,6 +1096,7 @@ module.exports = {
   deleteFont,
   validateTransaction,
   validateProfile,
+  normalizePcePaletteAssignments,
   validateBindings,
   injectPcePalettes,
   visualProfileRequirements,

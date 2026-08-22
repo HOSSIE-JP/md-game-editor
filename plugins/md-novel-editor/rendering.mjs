@@ -125,6 +125,7 @@ export function drawNovelFrame(canvas, visual = {}, options = {}) {
   const imageForAsset = options.imageForAsset || (() => null);
   const indexedForAsset = options.indexedForAsset || (() => null);
   const bindings = options.bindings || {};
+  const catalog = options.catalog || {};
   const physical = physicalPaletteFrame(visual, bindings, indexedForAsset);
   const width = canvas.width || 320;
   const height = canvas.height || 224;
@@ -135,12 +136,51 @@ export function drawNovelFrame(canvas, visual = {}, options = {}) {
     const record = indexedForAsset(assetId);
     return indexedSurface(canvas, assetId, physical.palettes[paletteName], record, type === 'sprite', options.paletteCanvasCache) || imageForAsset(assetId);
   };
+  const fontEntries = Array.isArray(options.fontEntries) ? options.fontEntries : [];
+  const fontByCharacter = new Map(fontEntries.map((entry, index) => [entry.character, index]));
+  const drawText = (value, x, y, maximum = Infinity) => {
+    const characters = Array.from(fullWidthPreviewText(value)).slice(0, maximum);
+    characters.forEach((character, index) => {
+      if (character === '　' || character === ' ') return;
+      const glyphIndex = fontByCharacter.get(character);
+      if (glyphIndex != null && options.fontImage) {
+        const sourceX = (glyphIndex % 16) * 16;
+        const sourceY = Math.floor(glyphIndex / 16) * 16;
+        context.drawImage(options.fontImage, sourceX, sourceY, 16, 16, x + index * 16, y, 16, 16);
+      } else {
+        context.font = '14px monospace';
+        context.textBaseline = 'top';
+        context.fillText(character, x + index * 16, y);
+      }
+    });
+  };
+  const animationFrame = (sprite, image) => {
+    const asset = (catalog.assets || []).find((entry) => entry.id === sprite.assetId) || {};
+    const animations = Array.isArray(asset.options?.animations) ? asset.options.animations : [];
+    const animation = animations.find((entry) => String(entry.id || '') === String(sprite.animationId || '')) || animations[0] || {};
+    const metadata = bindings.assets?.[sprite.assetId]?.metadata || {};
+    const imageWidth = image.naturalWidth || image.width;
+    const imageHeight = image.naturalHeight || image.height;
+    const frameWidth = Math.max(1, number(animation.frameWidth ?? metadata.frameWidth, imageWidth));
+    const frameHeight = Math.max(1, number(animation.frameHeight ?? metadata.frameHeight, imageHeight));
+    const frameCount = Math.max(1, Math.floor(number(animation.frameCount, 1)));
+    const delays = Array.from({ length: frameCount }, (_unused, index) => Math.max(1, Math.floor(number(animation.frameDelays?.[index] ?? animation.frameDelay, 8))));
+    const cycle = delays.reduce((sum, delay) => sum + delay, 0);
+    let tick = Math.max(0, Math.floor(number(visual.frame))) % Math.max(1, cycle);
+    let frame = 0;
+    while (frame + 1 < frameCount && tick >= delays[frame]) { tick -= delays[frame]; frame += 1; }
+    const cellWidth = Math.max(1, Math.floor(number(asset.options?.cellWidth, frameWidth)));
+    const cellHeight = Math.max(1, Math.floor(number(asset.options?.cellHeight, frameHeight)));
+    const cellsAcross = Math.max(1, Math.floor(imageWidth / cellWidth));
+    const cell = Math.max(0, Math.floor(number(animation.firstCell))) + frame * Math.max(1, Math.floor(number(animation.frameStrideCells, 1)));
+    return { sx: (cell % cellsAcross) * cellWidth, sy: Math.floor(cell / cellsAcross) * cellHeight, frameWidth, frameHeight };
+  };
   context.save();
   context.imageSmoothingEnabled = false;
   context.fillStyle = '#000';
   context.fillRect(0, 0, width, height);
   const shake = visual.effect?.effect === 'shake' ? Math.max(0, Math.min(8, number(visual.effect.intensity, 4))) : 0;
-  if (shake) context.translate((Math.floor(number(options.time) / 60) % 2 ? shake : -shake), 0);
+  if (shake) context.translate((Math.floor(number(visual.frame)) % 2 ? shake : -shake), 0);
   if (visual.background) {
     const image = sourceFor(visual.background, 'background');
     if (image) {
@@ -153,48 +193,58 @@ export function drawNovelFrame(canvas, visual = {}, options = {}) {
     if (!sprite || sprite.visible === false) continue;
     const image = sourceFor(sprite, 'sprite');
     if (!image) continue;
-    const metadata = bindings.assets?.[sprite.assetId]?.metadata || {};
-    const frameWidth = Math.max(1, number(metadata.frameWidth, image.naturalWidth || image.width));
-    const frameHeight = Math.max(1, number(metadata.frameHeight, image.naturalHeight || image.height));
+    const frame = animationFrame(sprite, image);
     const x = effectiveX('sprite', sprite.x, coordinateMode);
     const y = number(sprite.y);
     context.save();
-    context.translate(x + (sprite.flipX ? frameWidth : 0), y + (sprite.flipY ? frameHeight : 0));
+    context.translate(x + (sprite.flipX ? frame.frameWidth : 0), y + (sprite.flipY ? frame.frameHeight : 0));
     context.scale(sprite.flipX ? -1 : 1, sprite.flipY ? -1 : 1);
-    context.drawImage(image, 0, 0, frameWidth, frameHeight, 0, 0, frameWidth, frameHeight);
+    context.drawImage(image, frame.sx, frame.sy, frame.frameWidth, frame.frameHeight, 0, 0, frame.frameWidth, frame.frameHeight);
     context.restore();
   }
   context.textBaseline = 'top';
-  context.font = '16px monospace';
   context.fillStyle = `rgb(${physical.palettes.PAL0[1].join(',')})`;
   for (const entry of visual.spriteTexts || []) {
-    if (!entry || entry.visible === false) continue;
+    if (!entry || entry.visible === false || entry.blinkOn === false) continue;
     const x = effectiveX('spritetext', entry.x, coordinateMode);
     const lines = String(entry.text || '').split('\n');
-    lines.forEach((line, row) => context.fillText(Array.from(line).slice(0, 32).join(''), x, number(entry.y) + row * 16));
+    lines.forEach((line, row) => drawText(Array.from(line).slice(0, 32).join(''), x, number(entry.y) + row * 16));
+  }
+  if (number(visual.fadeAlpha) > 0) {
+    context.globalAlpha = Math.max(0, Math.min(1, number(visual.fadeAlpha)));
+    context.fillStyle = '#000';
+    context.fillRect(0, 0, width, height);
+    context.globalAlpha = 1;
   }
   if (visual.message || visual.choice) {
     context.fillStyle = '#000';
     context.fillRect(0, 128, 320, 96);
-    context.font = '14px sans-serif';
     if (visual.message) {
       context.fillStyle = `rgb(${physical.palettes.PAL0[1].join(',')})`;
-      context.fillText(String(visual.message.speaker || ''), 8, 140);
+      drawText(String(visual.message.speaker || ''), 8, 136);
       const page = visual.message.pages?.[visual.message.pageIndex || 0] || [];
-      page.forEach((line, row) => context.fillText(line, 8, 160 + row * 16));
-      context.fillText(visual.autoEnabled ? '◆' : '▼', 300, 205);
+      let remaining = visual.message.revealedGlyphs ?? Infinity;
+      page.forEach((line, row) => {
+        const glyphs = Array.from(String(line || ''));
+        drawText(glyphs.slice(0, Math.max(0, remaining)).join(''), 8, 152 + row * 16);
+        remaining -= glyphs.length;
+      });
+      const cursorVisible = visual.autoEnabled || (visual.message.complete && Math.floor(number(visual.frame) / 30) % 2 === 0);
+      if (cursorVisible) drawText(visual.autoEnabled ? '◆' : '▼', 304, 208);
     } else {
       context.fillStyle = '#fff';
       (visual.choice.choices || []).slice(0, 4).forEach((choice, index) => {
         const selected = index === number(visual.choiceIndex, visual.choice.defaultIndex || 0);
-        context.fillText(`${selected ? '▶' : ' '} ${Array.from(String(choice.label || '')).slice(0, 17).join('')}`, 8, 143 + index * 19);
+        if (selected) drawText('▶', 8, 136 + index * 16);
+        drawText(Array.from(String(choice.label || '')).slice(0, 17).join(''), 40, 136 + index * 16);
       });
     }
   }
   if (visual.effect && visual.effect.effect !== 'shake') {
     const effect = visual.effect.effect;
-    if (effect === 'blank' || effect === 'fadeOut' || effect === 'flash') {
-      context.globalAlpha = effect === 'flash' ? .65 : effect === 'fadeOut' ? .72 : 1;
+    if (effect === 'blank' || effect === 'fadeOut' || effect === 'fadeIn' || effect === 'flash') {
+      const progress = visual.effect.frames ? 1 - number(visual.effect.remaining) / Math.max(1, number(visual.effect.frames)) : 1;
+      context.globalAlpha = effect === 'flash' ? .65 : effect === 'fadeIn' ? 1 - progress : effect === 'fadeOut' ? progress : 1;
       context.fillStyle = safeColor(visual.effect.color, effect === 'flash' ? '#ffffff' : '#000000');
       context.fillRect(0, 0, width, height);
       context.globalAlpha = 1;

@@ -181,6 +181,97 @@ test('full preview interpreterは分岐、Scene遷移、sprite持続、入力待
   assert.equal(snapshot.message.text, 'ready');
 });
 
+test('full preview interpreterは文字送り、BG fade、WAIT割込、Move、SpriteText点滅をフレーム再現する', async () => {
+  const { createScriptRuntime } = await importEditorModule('preview-runtime.mjs');
+  const messageRuntime = createScriptRuntime({
+    settings: { messageSpeedFrames: 2, messageAdvanceMode: 'button' },
+    startScene: 'message',
+    scenes: [{ id: 'message', commands: [
+      { type: 'message', speaker: 'A', text: 'AB' },
+      { type: 'wait', frames: 3 },
+      { type: 'variable', variableName: 'done', operation: 'set', value: 1 },
+      { type: 'message', text: 'end' },
+    ] }],
+  });
+  let snapshot = messageRuntime.restart();
+  assert.equal(snapshot.message.revealedGlyphs, 0);
+  assert.equal(snapshot.message.complete, false);
+  assert.equal(messageRuntime.elapseFrames(1).message.revealedGlyphs, 0);
+  snapshot = messageRuntime.elapseFrames(1);
+  assert.equal(snapshot.message.revealedGlyphs, 1);
+  snapshot = messageRuntime.press('i');
+  assert.equal(snapshot.message.revealedGlyphs, 2);
+  assert.equal(snapshot.message.complete, true);
+  snapshot = messageRuntime.press('i');
+  assert.equal(snapshot.waiting.kind, 'wait');
+  assert.equal(messageRuntime.elapseFrames(2).variables.done, undefined);
+  snapshot = messageRuntime.elapseFrames(1);
+  assert.equal(snapshot.variables.done, 1);
+  assert.equal(snapshot.message.text, 'end');
+
+  const fadeRuntime = createScriptRuntime({
+    startScene: 'fade',
+    scenes: [{ id: 'fade', commands: [
+      { type: 'background', assetId: 'old', transition: 'none' },
+      { type: 'background', assetId: 'new', transition: 'fade', fadeOutFrames: 2, fadeInFrames: 2 },
+      { type: 'message', text: 'ready' },
+    ] }],
+  });
+  snapshot = fadeRuntime.restart();
+  assert.equal(snapshot.background.assetId, 'old');
+  assert.equal(snapshot.waiting.kind, 'background');
+  snapshot = fadeRuntime.elapseFrames(2);
+  assert.equal(snapshot.background.assetId, 'new');
+  assert.equal(snapshot.backgroundTransition.phase, 'in');
+  assert.equal(snapshot.fadeAlpha, 1);
+  snapshot = fadeRuntime.elapseFrames(2);
+  assert.equal(snapshot.backgroundTransition, null);
+  assert.equal(snapshot.fadeAlpha, 0);
+  assert.equal(snapshot.message.text, 'ready');
+
+  const interruptRuntime = createScriptRuntime({
+    startScene: 'input',
+    scenes: [{ id: 'input', commands: [
+      { type: 'inputcheck', mode: 'async', buttons: ['i'], targetLabel: 'done' },
+      { type: 'wait', frames: 120 },
+      { type: 'variable', variableName: 'wrong', operation: 'set', value: 1 },
+      { type: 'label', name: 'done' },
+      { type: 'variable', variableName: 'ok', operation: 'set', value: 1 },
+      { type: 'message', text: 'interrupted' },
+    ] }],
+  });
+  snapshot = interruptRuntime.restart();
+  assert.equal(snapshot.waiting.kind, 'wait');
+  assert.equal(interruptRuntime.elapseFrames(10).waiting.frames, 110);
+  snapshot = interruptRuntime.press('i');
+  assert.equal(snapshot.variables.wrong, undefined);
+  assert.equal(snapshot.variables.ok, 1);
+  assert.equal(snapshot.message.text, 'interrupted');
+
+  const animationRuntime = createScriptRuntime({
+    startScene: 'animation',
+    scenes: [{ id: 'animation', commands: [
+      { type: 'sprite', slot: 0, assetId: 'actor', x: 0, y: 0 },
+      { type: 'spritemove', slot: 0, x: 10, y: 20, frames: 10, async: true },
+      { type: 'spritetext', slot: 0, text: 'PRESS', x: 0, y: 180, blinkFrames: 2, visible: true },
+      { type: 'wait', frames: 10 },
+      { type: 'message', text: 'moved' },
+    ] }],
+  });
+  snapshot = animationRuntime.restart();
+  assert.equal(snapshot.waiting.kind, 'wait');
+  snapshot = animationRuntime.elapseFrames(1);
+  assert.equal(snapshot.sprites[0].x, 1);
+  assert.equal(snapshot.spriteTexts[0].blinkOn, true);
+  snapshot = animationRuntime.elapseFrames(1);
+  assert.equal(snapshot.sprites[0].x, 2);
+  assert.equal(snapshot.spriteTexts[0].blinkOn, false);
+  snapshot = animationRuntime.elapseFrames(8);
+  assert.equal(snapshot.sprites[0].x, 10);
+  assert.equal(snapshot.sprites[0].y, 20);
+  assert.equal(snapshot.message.text, 'moved');
+});
+
 test('full preview interpreterはrunawayと未解決Sceneを停止診断する', async () => {
   const { createScriptRuntime } = await importEditorModule('preview-runtime.mjs');
   const runaway = createScriptRuntime({
@@ -232,6 +323,11 @@ test('renderer entryはPCE型3ペインv2 UIを有効化する', () => {
   assert.match(app, /applySceneJson/);
   assert.match(app, /guardSceneJson/);
   assert.match(app, /importMdNovelFont/);
+  assert.match(app, /data-pce-palette="background"/);
+  assert.match(app, /data-pce-palette="slot3"/);
+  assert.match(app, /paletteAssignments/);
+  assert.match(app, /ensurePreviewFont/);
+  assert.match(app, /fontEntries: state\.fontPlan\?\.entries/);
   assert.match(app, /commitMdNovelFontGeneration/);
   assert.match(fontUi, /ビットマップフォント生成/);
   assert.match(fontUi, /JF-Dot-Shinonome16\.ttf/);
@@ -241,5 +337,6 @@ test('renderer entryはPCE型3ペインv2 UIを有効化する', () => {
   assert.match(css, /mn-command-actions button \{ flex:0 0 28px; width:28px; height:28px/);
   assert.match(css, /mn-command-actions button \{[^}]*display:grid; place-items:center/);
   assert.match(css, /mn-command-text small \{ color:#000; opacity:1;/);
+  assert.match(css, /mn-pce-palette-grid/);
   assert.match(app, /beforeProjectSwitch\(\)/);
 });

@@ -355,7 +355,9 @@ function validateSceneDocument(sceneDocument, catalog = null, options = {}) {
         const mode = stringValue(command.mode || 'sync').toLowerCase();
         if (!['sync', 'async', 'cancel'].includes(mode)) push('error', 'input-mode-unknown', `${path}.mode`, `unknown input mode: ${mode}`);
         const allowed = new Set(['up', 'down', 'left', 'right', 'run', 'i', 'ii']);
-        for (const [buttonIndex, button] of (Array.isArray(command.buttons) ? command.buttons : []).entries()) {
+        const buttons = Array.isArray(command.buttons) ? command.buttons : [];
+        if (mode !== 'cancel' && buttons.length === 0) push('error', 'input-buttons-empty', `${path}.buttons`, 'sync/async input requires at least one button');
+        for (const [buttonIndex, button] of buttons.entries()) {
           if (!allowed.has(stringValue(button).toLowerCase())) {
             push('error', 'input-button-unknown', `${path}.buttons[${buttonIndex}]`, `unknown input button: ${button}`);
           }

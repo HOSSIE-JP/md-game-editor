@@ -36,7 +36,6 @@ export function openNovelPreview(options = {}) {
   const fast = popup.document.querySelector('#fast');
   const debugToggle = popup.document.querySelector('#debug-toggle');
   let closed = false;
-  let messageFrames = 0;
   let lastTimestamp = performance.now();
   let frameRemainder = 0;
 
@@ -66,9 +65,8 @@ export function openNovelPreview(options = {}) {
     ]);
     if (!closed && !popup.closed) render();
   }
-  function renderChoices(snapshot) {
-    if (!snapshot.choice) { choices.innerHTML = ''; return; }
-    choices.innerHTML = (snapshot.choice.choices || []).slice(0, 4).map((entry, index) => `<button type="button" data-choice="${index}" class="${index === snapshot.choiceIndex ? 'active' : ''}">${index === snapshot.choiceIndex ? '▶ ' : '  '}${escapeHtml(entry.label || '')}</button>`).join('');
+  function renderChoices() {
+    choices.innerHTML = '';
   }
 
   function renderDebug(snapshot) {
@@ -77,7 +75,7 @@ export function openNovelPreview(options = {}) {
     const variables = Object.entries(snapshot.variables || {}).sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => `<div>${escapeHtml(name)} = ${value}</div>`).join('') || '<div>変数なし</div>';
     const sprites = (snapshot.sprites || []).map((entry, index) => `<div>slot${index}: ${entry ? `${escapeHtml(entry.assetId)} (${entry.x},${entry.y})` : '-'}</div>`).join('');
     const budget = options.budget || {};
-    debug.innerHTML = `<h3>Runtime</h3><div>Scene: ${escapeHtml(snapshot.sceneId)}</div><div>Command: #${snapshot.pc + 1}</div><div>Executed: ${snapshot.executed}</div><div>Wait: ${escapeHtml(snapshot.waiting?.kind || '-')} ${snapshot.waiting?.frames ?? ''}</div><div>AUTO: ${snapshot.variables?.AUTO_ENABLE ? 'ON' : 'OFF'}</div><div>BGM: ${escapeHtml(snapshot.audio?.bgm?.assetId || '-')}</div><div>SFX: ${escapeHtml(snapshot.audio?.sfx?.assetId || '-')}</div><h3>Sprites</h3>${sprites}<h3>Variables</h3>${variables}<h3>MD Budget</h3><div>states ${budget.states ?? '-'}</div><div>VRAM ${budget.maxBudget ?? '-'} / 1424</div><div>overlay ${budget.maxOverlayTiles ?? '-'} / 192</div><div>pieces ${budget.maxSpritePieces ?? '-'} / 80</div>`;
+    debug.innerHTML = `<h3>Runtime</h3><div>Scene: ${escapeHtml(snapshot.sceneId)}</div><div>Command: #${snapshot.pc + 1}</div><div>Frame: ${snapshot.frame}</div><div>Executed: ${snapshot.executed}</div><div>Wait: ${escapeHtml(snapshot.waiting?.kind || '-')} ${snapshot.waiting?.frames ?? ''}</div><div>BG fade: ${escapeHtml(snapshot.backgroundTransition?.phase || '-')} ${Math.round((snapshot.fadeAlpha || 0) * 100)}%</div><div>Message: ${snapshot.message ? `${snapshot.message.revealedGlyphs}/${snapshot.message.totalGlyphs}` : '-'}</div><div>AUTO: ${snapshot.autoEnabled ? 'ON' : 'OFF'}</div><div>BGM: ${escapeHtml(snapshot.audio?.bgm?.assetId || '-')}</div><div>SFX: ${escapeHtml(snapshot.audio?.sfx?.assetId || '-')}</div><h3>Sprites</h3>${sprites}<h3>Variables</h3>${variables}<h3>MD Budget</h3><div>states ${budget.states ?? '-'}</div><div>VRAM ${budget.maxBudget ?? '-'} / 1424</div><div>overlay ${budget.maxOverlayTiles ?? '-'} / 192</div><div>pieces ${budget.maxSpritePieces ?? '-'} / 80</div>`;
   }
 
   function handleEvents() {
@@ -85,26 +83,27 @@ export function openNovelPreview(options = {}) {
     for (const event of events) {
       if (event.type === 'audio') options.onAudioEvent?.(event);
       if (event.type === 'runaway' || event.type === 'error') status.textContent = event.message || event.type;
-      if (event.type === 'message' || event.type === 'message-page') messageFrames = 0;
     }
   }
 
   function render() {
     if (closed || popup.closed) return;
     const snapshot = runtime.snapshot();
-    snapshot.autoEnabled = Boolean(snapshot.variables?.AUTO_ENABLE);
     drawNovelFrame(canvas, snapshot, {
       coordinateMode: options.coordinateMode,
       bindings: options.bindings,
+      catalog: options.catalog,
       imageForAsset: options.imageForAsset,
       indexedForAsset: options.indexedForAsset,
       paletteCanvasCache: options.paletteCanvasCache,
+      fontImage: options.fontImage,
+      fontEntries: options.fontEntries,
       time: performance.now(),
     });
     renderChoices(snapshot);
     renderDebug(snapshot);
     sceneLabel.textContent = `${snapshot.sceneId} · #${snapshot.pc + 1}`;
-    if (!snapshot.error) status.textContent = snapshot.waiting?.kind === 'input' ? `入力待ち: ${(snapshot.waiting.buttons || []).join(' / ')}` : '';
+    if (!snapshot.error) status.textContent = snapshot.waiting?.kind === 'input' ? `入力待ち: ${(snapshot.waiting.buttons || []).join(' / ')}` : snapshot.waiting ? `${snapshot.waiting.kind}待機中` : '';
     void refreshAssets(snapshot);
   }
 
@@ -123,16 +122,12 @@ export function openNovelPreview(options = {}) {
     frameRemainder += elapsed / (1000 / 60);
     const frames = Math.floor(frameRemainder);
     frameRemainder -= frames;
-    const snapshot = runtime.snapshot();
-    if (frames > 0 && snapshot.waiting && snapshot.waiting.kind !== 'input') apply(() => runtime.elapseFrames(frames));
-    else if (snapshot.message) {
-      messageFrames += frames;
-      const speed = Number(options.sceneDocument?.settings?.messageSpeedFrames) || 0;
-      const autoWait = Number(options.sceneDocument?.settings?.messageAutoWaitFrames) || 60;
-      const threshold = fast.checked ? 4 : snapshot.variables?.AUTO_ENABLE ? Math.max(1, speed * Math.max(1, String(snapshot.message.text || '').length)) + autoWait : Infinity;
-      if (messageFrames >= threshold) { messageFrames = 0; apply(() => runtime.advanceMessage()); }
-      else render();
-    } else render();
+    if (frames > 0) {
+      const multiplier = fast.checked ? 8 : 1;
+      apply(() => runtime.elapseFrames(frames * multiplier));
+    } else {
+      render();
+    }
     popup.requestAnimationFrame(tick);
   }
 
@@ -150,8 +145,7 @@ export function openNovelPreview(options = {}) {
   }
 
   function onCanvasClick() {
-    const snapshot = runtime.snapshot();
-    if (!snapshot.choice) press('i');
+    press('i');
   }
 
   function onBeforeUnload() {

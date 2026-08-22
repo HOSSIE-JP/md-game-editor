@@ -167,9 +167,9 @@ npm test
 
 ### MDノベル
 
-`md-novel-editor` / `md-novel-builder` と `template_md_novel` を同梱しています。エディターはPCE版のScene階層、18種Commandパレット、色分けカード、明示適用式GUI/JSON編集、320x224 Command Preview、分岐を実行できるFull Preview、System/Font/Assets/診断を常時3列UIへ移植しています。Font tabでは同梱Misakiまたはproject-local TTF/OTF/TTCから使用glyphだけの16x16 indexed atlasを生成できます。PCE Game Editorの`assets/pce-vn-scenes.json` v2を正本として未知fieldとscript意味論を保持し、BG/Spriteへ任意の`palette: PAL0..PAL3`を追加して、320x224 H40、物理palette load、SGDK SPRITE、XGM2 BGM/PCM SFXへ変換します。PAL0はindex 0=黒/index 1=白をsystem予約し、Assets tabでは使用PAL、swatch、減色品質、palette groupを確認・共同減色できます。CD-DA/ADPCM/message voiceはJSONに保持してwarningを出し、MD runtimeでは無音NOPとして扱います。
+`md-novel-editor` / `md-novel-builder` と `template_md_novel` を同梱しています。エディターはPCE版のScene階層、18種Commandパレット、色分けカード、明示適用式GUI/JSON編集、320x224 Command Preview、BG fade・typewriter・WAIT/INPUT・Sprite Move・SpriteText blinkを実行できるFull Preview、System/Font/Assets/診断を常時3列UIへ移植しています。Font tabでは同梱`JF-Dot-Shinonome16.ttf`（既定size 16 / threshold 190）またはproject-local TTF/OTF/TTCから使用glyphだけの16x16 indexed atlasを生成でき、Previewも同じatlasを使用します。PCE Game Editorの`assets/pce-vn-scenes.json` v2を正本として未知fieldとscript意味論を保持し、BG/Spriteへ任意の`palette: PAL0..PAL3`を追加して、320x224 H40、物理palette load、SGDK SPRITE、XGM2 BGM/PCM SFXへ変換します。PAL0はindex 0=黒/index 1=白をsystem予約し、Assets tabでは使用PAL、swatch、減色品質、palette groupを確認・共同減色できます。CD-DA/ADPCM/message voiceはJSONに保持してwarningを出し、MD runtimeでは無音NOPとして扱います。
 
-テンプレートはbuilder roleに`md-novel-builder`、testplay roleに`standard-emulator`を選択済みです。`ノベル`ページの`PCEプロジェクト取込`で元projectの`project.json`を選ぶと、参照中画像とPSG `(assetId, channel)` variantをproject-local resourceへ変換します。通常Buildはclean、Test Playは前回成功artifactとbuild契約をhash検証してから差分buildします。互換境界、全command、palette/VRAM/audio制約、保存・Build契約、WASM検証は[`docs/NOVEL.md`](docs/NOVEL.md)を参照してください。
+テンプレートはbuilder roleに`md-novel-builder`、testplay roleに`standard-emulator`を選択済みです。`ノベル`ページの`PCEプロジェクト取込`で元projectの`project.json`を選び、続くダイアログでBG/SLOT0～3の変換先PALを個別指定すると、参照中画像とPSG `(assetId, channel)` variantをproject-local resourceへ変換します。通常Buildはclean、Test Playは前回成功artifactとbuild契約をhash検証してから差分buildします。互換境界、全command、palette/VRAM/audio制約、保存・Build契約、WASM検証は[`docs/NOVEL.md`](docs/NOVEL.md)を参照してください。
 
 ### 横スクロールSTG
 
