@@ -37,6 +37,9 @@ typedef enum
 
 #define NOV_FLAG_INPUT_CANCEL   0x01
 
+#define NOV_MSG_SEPARATE_TOP    0x01
+#define NOV_CHOICE_LOWERED      0x01
+
 #define NOV_VAR_DEFINE          0
 #define NOV_VAR_SET             1
 #define NOV_VAR_ADD             2
@@ -63,6 +66,7 @@ typedef struct
     u8 pageCount;
     s8 mouthSlot;
     u16 color;
+    u8 layoutFlags;
 } NovelMessage;
 
 typedef struct
@@ -83,6 +87,7 @@ typedef struct
 {
     u8 count;
     u8 defaultIndex;
+    u8 layoutFlags;
     s16 variableIndex;
     NovelChoiceOption options[4];
 } NovelChoice;

@@ -196,7 +196,8 @@ function visualMetadata(asset, image, converted, options = {}) {
 }
 
 function convertVisualGroup(entries, options = {}) {
-  const paletteProfile = options.paletteProfile === 'pal0-reserved' ? 'pal0-reserved' : 'general';
+  const requestedProfile = String(options.paletteProfile || 'general');
+  const paletteProfile = ['pal0-reserved', 'shadow-safe-pal012', 'shadow-safe-pal3'].includes(requestedProfile) ? requestedProfile : 'general';
   const reserveTransparent = Boolean(options.reserveTransparent);
   const decoded = entries.map((entry) => ({
     ...decodePng(entry.buffer),
@@ -207,9 +208,11 @@ function convertVisualGroup(entries, options = {}) {
   const result = quantizeImages(decoded, {
     reserveTransparent,
     transparentIndex: options.transparentIndex,
-    fixedPalette: paletteProfile === 'pal0-reserved'
+    fixedPalette: ['pal0-reserved', 'shadow-safe-pal012'].includes(paletteProfile)
       ? [[0, 0, 0, 255], [255, 255, 255, 255]]
       : [],
+    forbiddenPaletteIndices: paletteProfile === 'shadow-safe-pal3' ? [14, 15]
+      : paletteProfile === 'shadow-safe-pal012' ? [14] : [],
   });
   const physicalPalette = result.palette.map((color) => color.slice(0, 3));
   const paletteFingerprint = hashBuffer(Buffer.from(JSON.stringify(physicalPalette), 'utf8'));

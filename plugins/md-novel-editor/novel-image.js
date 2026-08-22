@@ -420,11 +420,16 @@ function nearestPaletteIndex(color, palette, startIndex = 0, paletteLab = null, 
 
 function quantizeImages(images, options = {}) {
   const reserveTransparent = Boolean(options.reserveTransparent);
+  const forbiddenPaletteIndices = [...new Set((options.forbiddenPaletteIndices || [])
+    .map(Number).filter((index) => Number.isInteger(index) && index >= 0 && index < 16))].sort((a, b) => a - b);
   const fixedPalette = (Array.isArray(options.fixedPalette) ? options.fixedPalette : [])
     .map((color) => snapRgb333(color?.[0], color?.[1], color?.[2]));
   if (fixedPalette.length > 16) throw new Error('Fixed palette exceeds 16 colors');
   const reservedSlots = fixedPalette.length || (reserveTransparent ? 1 : 0);
-  const maxColors = 16 - reservedSlots;
+  if (forbiddenPaletteIndices.some((index) => index < reservedSlots)) throw new Error('Forbidden palette index conflicts with a fixed palette slot');
+  const dynamicIndices = Array.from({ length: 16 }, (_, index) => index)
+    .filter((index) => index >= reservedSlots && !forbiddenPaletteIndices.includes(index));
+  const maxColors = dynamicIndices.length;
   const histogram = collectHistogram(images, options);
   const fixedKeys = new Set(fixedPalette.map(colorKey));
   const blackKey = colorKey([0, 0, 0]);
@@ -436,11 +441,18 @@ function quantizeImages(images, options = {}) {
     histogram.set(substituteKey, (histogram.get(substituteKey) || 0) + visibleBlackCount);
   }
   const colors = splitColorBoxes(histogram, maxColors);
-  const palette = fixedPalette.length
+  let palette = fixedPalette.length
     ? [...fixedPalette, ...colors]
     : reserveTransparent
       ? [[0, 0, 0, 0], ...colors]
       : colors;
+  if (forbiddenPaletteIndices.length) {
+    const indexed = Array.from({ length: 16 }, () => [0, 0, 0, 255]);
+    fixedPalette.forEach((color, index) => { indexed[index] = color; });
+    if (reserveTransparent && !fixedPalette.length) indexed[0] = [0, 0, 0, 0];
+    colors.forEach((color, index) => { indexed[dynamicIndices[index]] = color; });
+    palette = indexed;
+  }
   if (reserveTransparent) palette[0] = [palette[0]?.[0] || 0, palette[0]?.[1] || 0, palette[0]?.[2] || 0, 0];
   if (!palette.length) palette.push([0, 0, 0, 255]);
   const paddingColor = needsVisibleBlackSubstitute ? snapRgb333(36, 36, 36) : [0, 0, 0, 255];
@@ -467,7 +479,21 @@ function quantizeImages(images, options = {}) {
         image.rgba[pixel * 4 + 1],
         image.rgba[pixel * 4 + 2],
       );
-      indices[pixel] = nearestPaletteIndex(snapped, palette, imageUsesTransparency ? 1 : 0, paletteLab, nearestCache);
+      if (forbiddenPaletteIndices.length) {
+        const sourceLab = rgbToLab(snapped);
+        let best = dynamicIndices[0];
+        let bestDistance = Number.POSITIVE_INFINITY;
+        for (const paletteIndex of dynamicIndices) {
+          const distance = ciede2000(sourceLab, paletteLab[paletteIndex]);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            best = paletteIndex;
+          }
+        }
+        indices[pixel] = best;
+      } else {
+        indices[pixel] = nearestPaletteIndex(snapped, palette, imageUsesTransparency ? 1 : 0, paletteLab, nearestCache);
+      }
     }
     const errors = [];
     for (let pixel = 0; pixel < indices.length; pixel += 1) {

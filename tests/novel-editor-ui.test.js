@@ -51,7 +51,7 @@ test('PCE型Script UIは18 command、階層Scene、参照renameを提供する',
   assert.deepEqual(document.futureRootField, { retained: true });
 });
 
-test('inline previewはSkip aliasとFull BGのmessage/choice禁止を維持する', async () => {
+test('inline previewはSkip aliasを維持しFull BGでもmessage/choiceを表示する', async () => {
   const { simulateScene } = await importEditorModule('preview-core.mjs');
   const state = simulateScene({
     fullScreenBg: true,
@@ -64,7 +64,33 @@ test('inline previewはSkip aliasとFull BGのmessage/choice禁止を維持す�
   }, 3);
   assert.equal(state.background.assetId, 'bg');
   assert.equal(state.message, null);
-  assert.equal(state.choice, null);
+  assert.equal(state.choice.choices[0].label, 'hidden');
+  const messageState = simulateScene({
+    fullScreenBg: true,
+    commands: [
+      { type: 'background', assetId: 'bg' },
+      { type: 'message', speaker: 'A', text: 'visible' },
+    ],
+  }, 1);
+  assert.equal(messageState.message.text, 'visible');
+});
+
+test('adaptive choice preview uses the compiled lowered layout across skipped commands', async () => {
+  const rendering = await importEditorModule('rendering.mjs');
+  const { createScriptRuntime } = await importEditorModule('preview-runtime.mjs');
+  assert.equal(rendering.choiceTopY({}), 136);
+  assert.equal(rendering.choiceTopY({ _layoutLowered: true }), 152);
+
+  const runtime = createScriptRuntime({
+    startScene: 's',
+    scenes: [{ id: 's', commands: [
+      { type: 'comment', text: 'not emitted' },
+      { type: 'wait', frames: 1, skip: true },
+      { type: 'choice', choices: [{ label: '進む' }] },
+    ] }],
+  }, { choiceLowered: ['s:0'] });
+  const snapshot = runtime.restart();
+  assert.equal(snapshot.choice._layoutLowered, true);
 });
 
 test('physical palette preview applies last-loaded colors and reports conflicts', async () => {
@@ -339,4 +365,11 @@ test('renderer entryはPCE型3ペインv2 UIを有効化する', () => {
   assert.match(css, /mn-command-text small \{ color:#000; opacity:1;/);
   assert.match(css, /mn-pce-palette-grid/);
   assert.match(app, /beforeProjectSwitch\(\)/);
+});
+
+test('preview shadow follows the Mega Drive RGB333 shadow table', async () => {
+  const { mdShadowRgb333 } = await importEditorModule('rendering.mjs');
+  assert.deepEqual(mdShadowRgb333([255, 128, 36]), [119, 68, 17]);
+  assert.deepEqual(mdShadowRgb333([0, 255, 119]), [0, 119, 51]);
+  assert.deepEqual(mdShadowRgb333([NaN, -1, 999]), [0, 0, 119]);
 });

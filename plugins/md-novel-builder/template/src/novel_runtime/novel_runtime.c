@@ -7,10 +7,15 @@ extern const u16 nov_font_glyph_count;
 
 
 #define NOVEL_PLANE_WIDTH          64
-#define NOVEL_WINDOW_TOP           16
-#define NOVEL_WINDOW_ROWS          12
-#define NOVEL_MESSAGE_MAX_GLYPHS   96
-#define NOVEL_MESSAGE_LOAD_BATCH   48
+#define NOVEL_MESSAGE_ROWS         5
+#define NOVEL_MESSAGE_COLUMNS      19
+#define NOVEL_MESSAGE_SPRITES      38
+#define NOVEL_MESSAGE_TOP_Y        136
+#define NOVEL_MESSAGE_VRAM_TILES   377
+#define NOVEL_MESSAGE_TOP_TILES    0
+#define NOVEL_MESSAGE_MIDDLE_TILES 152
+#define NOVEL_MESSAGE_BOTTOM_TILES 304
+#define NOVEL_MESSAGE_CURSOR_TILE  376
 #define NOVEL_OVERLAY_MAX_TILES    192
 #define NOVEL_SPRITE_TEXT_SLOTS    4
 #define NOVEL_SPRITE_SLOTS         4
@@ -43,14 +48,6 @@ typedef struct
     u16 elapsed;
 } MoveState;
 
-typedef struct
-{
-    u16 atlas;
-    u16 tile;
-    u8 x;
-    u8 y;
-    bool body;
-} GlyphPlacement;
 
 typedef struct
 {
@@ -103,12 +100,17 @@ static u8 actorPalettes[NOVEL_SPRITE_SLOTS];
 static u16 backgroundTileCount;
 static u16 workTileBase;
 static bool windowVisible;
+static bool shadowArmed;
+static Sprite *messageSprites[NOVEL_MESSAGE_SPRITES];
+static u8 messageSpriteAllocated;
+static u8 messageSpriteActive;
+static u16 messageRows[NOVEL_MESSAGE_ROWS][NOVEL_MESSAGE_COLUMNS];
+static u8 messageRowLengths[NOVEL_MESSAGE_ROWS];
+static bool messageBandMerged[2];
+static u8 messagePrepareStage;
+static u8 messageRevealStage;
 static const NovelMessage *activeMessage;
 static u8 activeMessagePage;
-static GlyphPlacement messageGlyphs[NOVEL_MESSAGE_MAX_GLYPHS];
-static u16 messageGlyphCount;
-static u16 messageBodyStart;
-static u16 messageLoaded;
 static u16 messageRevealed;
 static u16 messageTimer;
 static bool messageComplete;
@@ -117,8 +119,6 @@ static u8 messageCursorKind;
 
 static const NovelChoice *activeChoice;
 static u8 choiceIndex;
-static u8 choiceLoadIndex;
-static u16 choiceNextTile;
 
 static SpriteTextState spriteTexts[NOVEL_SPRITE_TEXT_SLOTS];
 static OverlayTile overlayTiles[NOVEL_OVERLAY_MAX_TILES];
@@ -131,16 +131,33 @@ static s16 effectIntensity;
 static u8 effectType;
 static u16 effectPalette[64];
 
-static u32 glyphBuffer[32];
-static u32 solidTileBuffer[8];
+static u32 glyphBuffer[128];
 static const u32 messageDownTile[8] = { 0, 0, 0x01111110, 0x00111100, 0x00011000, 0, 0, 0 };
 static const u32 messageAutoTile[8] = { 0x00011000, 0x00111100, 0x01111110, 0x11111111, 0x01111110, 0x00111100, 0x00011000, 0 };
 static const u32 choiceCursorTile[8] = { 0x01000000, 0x01100000, 0x01110000, 0x01111000, 0x01110000, 0x01100000, 0x01000000, 0 };
 
 
-static u16 windowTileBase(void)
+static u16 messageTileBase(void)
 {
     return workTileBase + runtimeProject->overlayVramTiles;
+}
+
+static HINTERRUPT_CALLBACK novelHInt(void)
+{
+    VDP_setHilightShadow(TRUE);
+    VDP_setHInterrupt(FALSE);
+}
+
+static void novelVInt(void)
+{
+    VDP_setHilightShadow(FALSE);
+    if (shadowArmed)
+    {
+        VDP_setHIntCounter(127);
+        VDP_setHInterrupt(TRUE);
+    }
+    else
+        VDP_setHInterrupt(FALSE);
 }
 
 static s16 effectiveX(s16 value)
@@ -234,7 +251,9 @@ static void loadPhysicalPalette(u16 palette, const u16 *colors, u16 paletteId)
     copyPalette(palette, colors);
     if (loadedPaletteIds[palette] == paletteId)
         return;
+    SYS_disableInts();
     PAL_setPalette(palette, colors, DMA);
+    SYS_enableInts();
     loadedPaletteIds[palette] = paletteId;
 }
 
@@ -250,10 +269,46 @@ static void claimPaletteOwner(u8 palette)
         paletteOwnerCounts[palette]++;
 }
 
+static void setMessageColor(u16 color)
+{
+    currentPalette[1] = color;
+    SYS_disableInts();
+    PAL_setColor(1, color);
+    SYS_enableInts();
+}
+
 static void restoreMessageColor(void)
 {
-    currentPalette[1] = 0x0EEE;
-    PAL_setColor(1, 0x0EEE);
+    setMessageColor(0x0EEE);
+}
+
+static void setAllColorsSafe(const u16 *colors)
+{
+    SYS_disableInts();
+    PAL_setColors(0, colors, 64, DMA);
+    SYS_enableInts();
+}
+
+static void startFadeInSafe(u16 frames)
+{
+    SYS_disableInts();
+    PAL_fadeInAll(currentPalette, frames, TRUE);
+    SYS_enableInts();
+}
+
+static void startFadeToSafe(const u16 *colors, u16 frames)
+{
+    SYS_disableInts();
+    PAL_fadeToAll(colors, frames, TRUE);
+    SYS_enableInts();
+}
+
+static void setHorizontalScrollSafe(s16 planeA, s16 planeB)
+{
+    SYS_disableInts();
+    VDP_setHorizontalScroll(BG_A, planeA);
+    VDP_setHorizontalScroll(BG_B, planeB);
+    SYS_enableInts();
 }
 
 static void initializeSystemPalette(void)
@@ -270,75 +325,6 @@ static void initializeSystemPalette(void)
     }
     backgroundPalette = NOVEL_PALETTE_NONE;
     PAL_setColors(0, currentPalette, 64, CPU);
-}
-static void loadSolidTile(u16 tile, u8 color)
-{
-    u16 index;
-    u32 row = ((u32)color << 28) | ((u32)color << 24) | ((u32)color << 20) | ((u32)color << 16) |
-              ((u32)color << 12) | ((u32)color << 8) | ((u32)color << 4) | color;
-    for (index = 0; index < 8; index++)
-        solidTileBuffer[index] = row;
-    VDP_loadTileData(solidTileBuffer, tile, 1, DMA);
-}
-
-static void setMessageCursor(u8 kind)
-{
-    u16 tile = windowTileBase() + 1;
-    if (messageCursorKind == kind)
-        return;
-    if (kind == 1)
-    {
-        VDP_loadTileData(messageDownTile, tile, 1, DMA);
-        VDP_setTileMapXY(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, tile), 38, NOVEL_WINDOW_TOP + 10);
-    }
-    else if (kind == 2)
-    {
-        VDP_loadTileData(messageAutoTile, tile, 1, DMA);
-        VDP_setTileMapXY(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, tile), 38, NOVEL_WINDOW_TOP + 10);
-    }
-    else
-    {
-        VDP_setTileMapXY(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, windowTileBase()), 38, NOVEL_WINDOW_TOP + 10);
-    }
-    messageCursorKind = kind;
-}
-
-static void updateMessageCursor(void)
-{
-    if (autoEnabled)
-    {
-        setMessageCursor(2);
-        return;
-    }
-    if (!messageComplete)
-    {
-        setMessageCursor(0);
-        return;
-    }
-    messageCursorTimer = (messageCursorTimer + 1) % 60;
-    setMessageCursor(messageCursorTimer < 30 ? 1 : 0);
-}
-static void hideWindow(void)
-{
-    if (!windowVisible)
-        return;
-    VDP_setWindowOnBottom(0);
-    VDP_clearPlane(WINDOW, TRUE);
-    windowVisible = FALSE;
-}
-
-static void showWindow(void)
-{
-    u16 fillTile = windowTileBase();
-    u16 cursorTile = fillTile + 1;
-    currentPalette[0] = 0x0000;
-    PAL_setColor(0, 0x0000);
-    loadSolidTile(fillTile, 0);
-    loadSolidTile(cursorTile, 0);
-    VDP_setWindowOnBottom(NOVEL_WINDOW_ROWS);
-    VDP_fillTileMapRect(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, fillTile), 0, NOVEL_WINDOW_TOP, 40, NOVEL_WINDOW_ROWS);
-    windowVisible = TRUE;
-    messageCursorKind = 0;
 }
 static u16 findFontGlyph(u16 code)
 {
@@ -412,123 +398,396 @@ static void setPackedPixel(u8 *target, u8 x, u8 y, u8 value)
         target[index] = (target[index] & 0x0F) | ((value & 0x0F) << 4);
 }
 
-static void loadGlyph16(u16 atlas, u16 tile)
+static void clearGlyphBuffer(u16 tiles)
 {
-    u8 *target = (u8 *)glyphBuffer;
     u16 index;
+    u8 *target = (u8 *)glyphBuffer;
+    for (index = 0; index < tiles * 32; index++) target[index] = 0;
+}
+
+static void packGlyph(u16 atlas, u8 originX, u8 originY, u8 widthTiles, u8 heightTiles)
+{
     u8 x;
     u8 y;
-    for (index = 0; index < 128; index++)
-        target[index] = 0x00;
+    u8 *target = (u8 *)glyphBuffer;
+    (void)widthTiles;
     for (y = 0; y < 16; y++)
     {
         for (x = 0; x < 16; x++)
         {
-            u8 tileX = x >> 3;
-            u8 tileY = y >> 3;
-            u8 localX = x & 7;
-            u8 localY = y & 7;
-            u8 *tileData = target + (tileY * 2 + tileX) * 32;
-            if (fontPixel(atlas, x, y) != 0)
-                setPackedPixel(tileData, localX, localY, 1);
+            u8 pixel = fontPixel(atlas, x, y);
+            if (pixel != 0)
+            {
+                u8 targetX = originX + x;
+                u8 targetY = originY + y;
+                u16 tile = (u16)(targetX >> 3) * heightTiles + (targetY >> 3);
+                setPackedPixel(target + tile * 32, targetX & 7, targetY & 7, 1);
+            }
         }
     }
-    VDP_loadTileData(glyphBuffer, tile, 4, DMA);
-}
-static void drawGlyphPlacement(VDPPlane plane, const GlyphPlacement *placement)
-{
-    u16 attr = TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, placement->tile);
-    VDP_setTileMapXY(plane, attr, placement->x, placement->y);
-    VDP_setTileMapXY(plane, attr + 1, placement->x + 1, placement->y);
-    VDP_setTileMapXY(plane, attr + 2, placement->x, placement->y + 1);
-    VDP_setTileMapXY(plane, attr + 3, placement->x + 1, placement->y + 1);
 }
 
-static void collectPlacements(const u8 *text, u8 startX, u8 startY, bool body)
+static u16 bandColumnTile(u16 offset, u8 column)
+{
+    return messageTileBase() + offset + ((column < 9) ? (u16)column * 16 : 144);
+}
+
+static void queueRowChunk(u8 row, u8 column, u16 tile, u8 width)
+{
+    u8 first = column * 2;
+    u16 tiles = (u16)(width >> 3) * 2;
+    clearGlyphBuffer(tiles);
+    if (first < messageRowLengths[row]) packGlyph(messageRows[row][first], 0, 0, width >> 3, 2);
+    if ((width == 32) && (first + 1 < messageRowLengths[row])) packGlyph(messageRows[row][first + 1], 16, 0, 4, 2);
+    VDP_loadTileData(glyphBuffer, tile, tiles, DMA_QUEUE_COPY);
+}
+
+static void queueBandRows(u8 upperRow, u8 lowerRow, u16 offset)
+{
+    u8 column;
+    for (column = 0; column < 10; column++)
+    {
+        u8 width = (column == 9) ? 16 : 32;
+        u16 tile = bandColumnTile(offset, column);
+        u16 rowTiles = (u16)(width >> 3) * 2;
+        queueRowChunk(upperRow, column, tile, width);
+        queueRowChunk(lowerRow, column, tile + rowTiles, width);
+    }
+}
+
+static void queueMergedBand(u8 upperRow, u8 lowerRow, u16 offset)
+{
+    u8 column;
+    u8 maximum = messageRowLengths[upperRow] > messageRowLengths[lowerRow] ? messageRowLengths[upperRow] : messageRowLengths[lowerRow];
+    u8 columns = (maximum + 1) >> 1;
+    for (column = 0; column < columns; column++)
+    {
+        u8 first = column * 2;
+        u8 width = (column == 9) ? 16 : 32;
+        u16 tiles = (u16)(width >> 3) * 4;
+        clearGlyphBuffer(tiles);
+        if (first < messageRowLengths[upperRow]) packGlyph(messageRows[upperRow][first], 0, 0, width >> 3, 4);
+        if ((width == 32) && (first + 1 < messageRowLengths[upperRow])) packGlyph(messageRows[upperRow][first + 1], 16, 0, 4, 4);
+        if (first < messageRowLengths[lowerRow]) packGlyph(messageRows[lowerRow][first], 0, 16, width >> 3, 4);
+        if ((width == 32) && (first + 1 < messageRowLengths[lowerRow])) packGlyph(messageRows[lowerRow][first + 1], 16, 16, 4, 4);
+        VDP_loadTileData(glyphBuffer, bandColumnTile(offset, column), tiles, DMA_QUEUE_COPY);
+    }
+}
+
+static void queueBottomRow(void)
+{
+    u8 column;
+    for (column = 0; column < 9; column++)
+        queueRowChunk(4, column, messageTileBase() + NOVEL_MESSAGE_BOTTOM_TILES + (u16)column * 8, 32);
+}
+
+static void queueCursorTile(u8 kind)
+{
+    const u32 *source = choiceCursorTile;
+    if (kind == 1) source = messageDownTile;
+    else if (kind == 2) source = messageAutoTile;
+    VDP_loadTileData(source, messageTileBase() + NOVEL_MESSAGE_CURSOR_TILE, 1, DMA_QUEUE_COPY);
+}
+
+static void hideMessageSprites(void)
+{
+    u8 index;
+    for (index = 0; index < messageSpriteAllocated; index++)
+        if (messageSprites[index] != NULL) SPR_setVisibility(messageSprites[index], HIDDEN);
+    messageSpriteActive = 0;
+}
+
+static void emitMessageSprite(const SpriteDefinition *definition, s16 x, s16 y, u16 tile)
+{
+    Sprite *sprite;
+    if (messageSpriteActive >= NOVEL_MESSAGE_SPRITES) return;
+    sprite = messageSprites[messageSpriteActive];
+    if (sprite == NULL)
+    {
+        sprite = SPR_addSpriteEx(definition, x, y, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, tile), SPR_FLAG_INSERT_HEAD | SPR_FLAG_AUTO_VISIBILITY);
+        messageSprites[messageSpriteActive] = sprite;
+        if (sprite != NULL)
+        {
+            messageSpriteAllocated = messageSpriteActive + 1;
+            SPR_setAlwaysOnTop(sprite);
+        }
+    }
+    else if (sprite->definition != definition)
+        SPR_setDefinition(sprite, definition);
+    if (sprite == NULL) return;
+    SPR_setVRAMTileIndex(sprite, tile);
+    SPR_setPosition(sprite, x, y);
+    SPR_setPalette(sprite, PAL0);
+    SPR_setPriority(sprite, TRUE);
+    SPR_setVisibility(sprite, VISIBLE);
+    messageSpriteActive++;
+}
+
+static void finishMessageSprites(void)
+{
+    u8 index;
+    for (index = messageSpriteActive; index < messageSpriteAllocated; index++)
+        if (messageSprites[index] != NULL) SPR_setVisibility(messageSprites[index], HIDDEN);
+}
+
+static u16 bodyRowStart(u8 bodyRow)
+{
+    u8 row;
+    u16 result = 0;
+    for (row = 0; row < bodyRow; row++) result += messageRowLengths[row + 1];
+    return result;
+}
+
+static u8 visibleBodyRowLength(u8 bodyRow)
+{
+    u16 start = bodyRowStart(bodyRow);
+    u16 length = messageRowLengths[bodyRow + 1];
+    if (messageRevealed <= start) return 0;
+    if (messageRevealed >= start + length) return (u8)length;
+    return (u8)(messageRevealed - start);
+}
+
+static void emitRow(u8 row, u8 visibleLength, s16 x, s16 y, u16 offset, bool lower)
+{
+    u8 column;
+    u8 chunks = (visibleLength + 1) >> 1;
+    for (column = 0; column < chunks; column++)
+    {
+        u8 remaining = visibleLength - column * 2;
+        u16 tile = (offset == NOVEL_MESSAGE_BOTTOM_TILES)
+            ? messageTileBase() + NOVEL_MESSAGE_BOTTOM_TILES + (u16)column * 8
+            : bandColumnTile(offset, column);
+        if (lower) tile += (column == 9) ? 4 : 8;
+        emitMessageSprite(remaining == 1 ? &nov_msg_16x16 : &nov_msg_32x16, x + column * 32, y, tile);
+    }
+}
+
+static void emitMerged(u8 upperRow, u8 lowerRow, s16 x, s16 y, u16 offset)
+{
+    u8 column;
+    u8 maximum = messageRowLengths[upperRow] > messageRowLengths[lowerRow] ? messageRowLengths[upperRow] : messageRowLengths[lowerRow];
+    u8 chunks = (maximum + 1) >> 1;
+    for (column = 0; column < chunks; column++)
+    {
+        u8 second = column * 2 + 1;
+        bool wide = (second < messageRowLengths[upperRow]) || (second < messageRowLengths[lowerRow]);
+        emitMessageSprite(wide ? &nov_msg_32x32 : &nov_msg_16x32, x + column * 32, y, bandColumnTile(offset, column));
+    }
+}
+
+static void renderMessageSprites(void)
+{
+    u8 bottomVisible;
+    if (!windowVisible)
+    {
+        hideMessageSprites();
+        return;
+    }
+    messageSpriteActive = 0;
+    if (messageBandMerged[0])
+        emitMerged(0, 1, 8, NOVEL_MESSAGE_TOP_Y, NOVEL_MESSAGE_TOP_TILES);
+    else
+    {
+        emitRow(0, messageRowLengths[0], 8, NOVEL_MESSAGE_TOP_Y, NOVEL_MESSAGE_TOP_TILES, FALSE);
+        emitRow(1, visibleBodyRowLength(0), 8, NOVEL_MESSAGE_TOP_Y + 16, NOVEL_MESSAGE_TOP_TILES, TRUE);
+    }
+    if (messageBandMerged[1])
+        emitMerged(2, 3, 8, NOVEL_MESSAGE_TOP_Y + 32, NOVEL_MESSAGE_MIDDLE_TILES);
+    else
+    {
+        emitRow(2, visibleBodyRowLength(1), 8, NOVEL_MESSAGE_TOP_Y + 32, NOVEL_MESSAGE_MIDDLE_TILES, FALSE);
+        emitRow(3, visibleBodyRowLength(2), 8, NOVEL_MESSAGE_TOP_Y + 48, NOVEL_MESSAGE_MIDDLE_TILES, TRUE);
+    }
+    bottomVisible = visibleBodyRowLength(3);
+    emitRow(4, bottomVisible, 8, NOVEL_MESSAGE_TOP_Y + 64, NOVEL_MESSAGE_BOTTOM_TILES, FALSE);
+    if (messageCursorKind != 0)
+        emitMessageSprite(&nov_msg_8x8, 304, NOVEL_MESSAGE_TOP_Y + 72, messageTileBase() + NOVEL_MESSAGE_CURSOR_TILE);
+    finishMessageSprites();
+}
+
+static s16 choiceTopY(void)
+{
+    return NOVEL_MESSAGE_TOP_Y + ((activeChoice && (activeChoice->layoutFlags & NOV_CHOICE_LOWERED)) ? 16 : 0);
+}
+
+static void renderChoiceSprites(void)
+{
+    const s16 topY = choiceTopY();
+    messageSpriteActive = 0;
+    emitMerged(0, 1, 40, topY, NOVEL_MESSAGE_TOP_TILES);
+    emitMerged(2, 3, 40, topY + 32, NOVEL_MESSAGE_MIDDLE_TILES);
+    emitMessageSprite(&nov_msg_8x8, 8, topY + choiceIndex * 16 + 4, messageTileBase() + NOVEL_MESSAGE_CURSOR_TILE);
+    finishMessageSprites();
+}
+
+static void disarmMessageShadow(void)
+{
+    SYS_disableInts();
+    shadowArmed = FALSE;
+    VDP_setHInterrupt(FALSE);
+    VDP_setHilightShadow(FALSE);
+    SYS_enableInts();
+}
+
+static void hideWindow(void)
+{
+    if (!windowVisible) return;
+    windowVisible = FALSE;
+    hideMessageSprites();
+    disarmMessageShadow();
+}
+
+static void showWindow(void)
+{
+    hideMessageSprites();
+    windowVisible = TRUE;
+    shadowArmed = TRUE;
+    messageCursorKind = 0;
+}
+
+static void clearMessageRows(void)
+{
+    u8 row;
+    u8 column;
+    for (row = 0; row < NOVEL_MESSAGE_ROWS; row++)
+    {
+        messageRowLengths[row] = 0;
+        for (column = 0; column < NOVEL_MESSAGE_COLUMNS; column++) messageRows[row][column] = 0;
+    }
+}
+
+static void collectSingleRow(const u8 *text, u8 row, u8 limit)
 {
     u16 position = 0;
     u16 atlas = 0;
-    u8 x = startX;
-    u8 y = startY;
     bool newline;
-    while ((messageGlyphCount < NOVEL_MESSAGE_MAX_GLYPHS) && sjisGlyph(text, &position, &atlas, &newline))
+    while ((messageRowLengths[row] < limit) && sjisGlyph(text, &position, &atlas, &newline))
     {
-        GlyphPlacement *placement;
+        if (newline) break;
+        messageRows[row][messageRowLengths[row]++] = atlas;
+    }
+}
+
+static void collectBodyRows(const u8 *text)
+{
+    u16 position = 0;
+    u16 atlas = 0;
+    u8 row = 1;
+    bool newline;
+    while ((row < NOVEL_MESSAGE_ROWS) && sjisGlyph(text, &position, &atlas, &newline))
+    {
+        u8 limit = row == 4 ? 18 : 19;
         if (newline)
         {
-            x = startX;
-            y += 2;
+            row++;
             continue;
         }
-        placement = &messageGlyphs[messageGlyphCount];
-        placement->atlas = atlas;
-        placement->tile = windowTileBase() + 2 + messageGlyphCount * 4;
-        placement->x = x;
-        placement->y = y;
-        placement->body = body;
-        messageGlyphCount++;
-        x += 2;
+        if (messageRowLengths[row] >= limit)
+        {
+            row++;
+            if (row >= NOVEL_MESSAGE_ROWS) break;
+        }
+        messageRows[row][messageRowLengths[row]++] = atlas;
     }
 }
 
 static void setMouthAnimation(s8 slot, u16 mouth)
 {
     u16 animation;
-    if ((slot < 0) || (slot >= NOVEL_SPRITE_SLOTS) || (actorSprites[(u8)slot] == NULL))
-        return;
+    if ((slot < 0) || (slot >= NOVEL_SPRITE_SLOTS) || (actorSprites[(u8)slot] == NULL)) return;
     animation = (u16)actorAnimations[(u8)slot] + mouth;
-    if (actorSprites[(u8)slot]->definition->numAnimation > animation)
-        SPR_setAnim(actorSprites[(u8)slot], animation);
+    if (actorSprites[(u8)slot]->definition->numAnimation > animation) SPR_setAnim(actorSprites[(u8)slot], animation);
+}
+
+static u16 messageBodyGlyphCount(void)
+{
+    return messageRowLengths[1] + messageRowLengths[2] + messageRowLengths[3] + messageRowLengths[4];
 }
 
 static void prepareMessagePage(void)
 {
-    messageGlyphCount = 0;
-    messageLoaded = 0;
+    clearMessageRows();
+    collectSingleRow(activeMessage->speaker, 0, 16);
+    collectBodyRows(activeMessage->pages[activeMessagePage]);
     messageRevealed = 0;
     messageTimer = 0;
     messageComplete = FALSE;
+    messagePrepareStage = 0;
+    messageRevealStage = 0;
+    messageBandMerged[0] = FALSE;
+    messageBandMerged[1] = FALSE;
     autoCounter = 0;
     messageCursorTimer = 0;
-    PAL_setColor(1, activeMessage->color);
-    currentPalette[1] = activeMessage->color;
+    setMessageColor(activeMessage->color);
     showWindow();
-    collectPlacements(activeMessage->speaker, 1, NOVEL_WINDOW_TOP + 1, FALSE);
-    messageBodyStart = messageGlyphCount;
-    collectPlacements(activeMessage->pages[activeMessagePage], 1, NOVEL_WINDOW_TOP + 3, TRUE);
     setMouthAnimation(activeMessage->mouthSlot, 1);
     runtimeMode = MODE_MESSAGE_PREP;
 }
 
-static void revealAllMessage(void)
+static void mergeCompletedBands(void)
 {
-    while (messageRevealed < (messageGlyphCount - messageBodyStart))
+    u16 firstEnd = messageRowLengths[1];
+    u16 middleEnd = firstEnd + messageRowLengths[2] + messageRowLengths[3];
+    if (!(activeMessage->layoutFlags & NOV_MSG_SEPARATE_TOP) && !messageBandMerged[0] && (messageRevealed >= firstEnd))
     {
-        drawGlyphPlacement(WINDOW, &messageGlyphs[messageBodyStart + messageRevealed]);
-        messageRevealed++;
+        queueMergedBand(0, 1, NOVEL_MESSAGE_TOP_TILES);
+        messageBandMerged[0] = TRUE;
     }
+    if (!messageBandMerged[1] && (messageRevealed >= middleEnd))
+    {
+        queueMergedBand(2, 3, NOVEL_MESSAGE_MIDDLE_TILES);
+        messageBandMerged[1] = TRUE;
+    }
+}
+
+static void completeMessage(void)
+{
+    messageRevealed = messageBodyGlyphCount();
+    mergeCompletedBands();
     messageComplete = TRUE;
     autoCounter = 0;
     setMouthAnimation(activeMessage->mouthSlot, 0);
+    renderMessageSprites();
+}
+
+static void updateRevealAll(void)
+{
+    if (messageRevealStage == 1)
+    {
+        messageRevealed = messageRowLengths[1];
+        mergeCompletedBands();
+        renderMessageSprites();
+        messageRevealStage = 2;
+        return;
+    }
+    if (messageRevealStage == 2)
+    {
+        messageRevealed = messageRowLengths[1] + messageRowLengths[2] + messageRowLengths[3];
+        mergeCompletedBands();
+        renderMessageSprites();
+        messageRevealStage = 3;
+        return;
+    }
+    messageRevealStage = 0;
+    completeMessage();
 }
 
 static void updateMessagePrepare(void)
 {
-    u16 count = 0;
-    updateMessageCursor();
-    while ((messageLoaded < messageGlyphCount) && (count < NOVEL_MESSAGE_LOAD_BATCH))
+    if (messagePrepareStage == 0)
+        queueBandRows(0, 1, NOVEL_MESSAGE_TOP_TILES);
+    else if (messagePrepareStage == 1)
+        queueBandRows(2, 3, NOVEL_MESSAGE_MIDDLE_TILES);
+    else
     {
-        loadGlyph16(messageGlyphs[messageLoaded].atlas, messageGlyphs[messageLoaded].tile);
-        messageLoaded++;
-        count++;
+        queueBottomRow();
+        queueCursorTile(1);
+        renderMessageSprites();
+        runtimeMode = MODE_MESSAGE;
+        if (messageBodyGlyphCount() == 0) completeMessage();
+        else if (activeMessageSpeed == 0) messageRevealStage = 1;
     }
-    if (messageLoaded < messageGlyphCount)
-        return;
-    for (count = 0; count < messageBodyStart; count++)
-        drawGlyphPlacement(WINDOW, &messageGlyphs[count]);
-    runtimeMode = MODE_MESSAGE;
-    if ((messageGlyphCount == messageBodyStart) || (activeMessageSpeed == 0))
-        revealAllMessage();
+    messagePrepareStage++;
 }
 
 static bool messageAdvancePressed(void)
@@ -536,48 +795,73 @@ static bool messageAdvancePressed(void)
     return (pressedJoy & (BUTTON_B | BUTTON_C | BUTTON_START | BUTTON_RIGHT | BUTTON_DOWN)) != 0;
 }
 
+static void setMessageCursor(u8 kind)
+{
+    if (messageCursorKind == kind) return;
+    if (kind != 0) queueCursorTile(kind);
+    messageCursorKind = kind;
+    renderMessageSprites();
+}
+
+static void updateMessageCursor(void)
+{
+    if (autoEnabled)
+    {
+        setMessageCursor(2);
+        return;
+    }
+    if (!messageComplete)
+    {
+        setMessageCursor(0);
+        return;
+    }
+    messageCursorTimer = (messageCursorTimer + 1) % 60;
+    setMessageCursor(messageCursorTimer < 30 ? 1 : 0);
+}
+
 static void finishMessage(void)
 {
     setMouthAnimation(activeMessage->mouthSlot, 0);
     restoreMessageColor();
-    setMessageCursor(0);
+    messageCursorKind = 0;
+    hideMessageSprites();
     activeMessage = NULL;
     runtimeMode = MODE_RUN;
 }
+
 static void updateMessage(void)
 {
+    u16 total = messageBodyGlyphCount();
+    if (messageRevealStage != 0)
+    {
+        updateRevealAll();
+        return;
+    }
     updateMessageCursor();
     if (!messageComplete)
     {
         if (messageAdvancePressed())
         {
-            revealAllMessage();
-            updateMessageCursor();
+            messageRevealStage = 1;
             return;
         }
         messageTimer++;
         if (messageTimer >= activeMessageSpeed)
         {
             messageTimer = 0;
-            if (messageRevealed < (messageGlyphCount - messageBodyStart))
-            {
-                drawGlyphPlacement(WINDOW, &messageGlyphs[messageBodyStart + messageRevealed]);
-                messageRevealed++;
-            }
-            if (messageRevealed >= (messageGlyphCount - messageBodyStart))
-                revealAllMessage();
+            if (messageRevealed < total) messageRevealed++;
+            mergeCompletedBands();
+            if (messageRevealed >= total) completeMessage();
+            else renderMessageSprites();
         }
-        updateMessageCursor();
         return;
     }
     if (autoEnabled)
     {
         autoCounter++;
-        if (autoCounter < runtimeProject->autoWaitFrames)
-            return;
+        if (autoCounter < runtimeProject->autoWaitFrames) return;
     }
-    else if (!messageAdvancePressed())
-        return;
+    else if (!messageAdvancePressed()) return;
     if (activeMessagePage + 1 < activeMessage->pageCount)
     {
         activeMessagePage++;
@@ -587,57 +871,35 @@ static void updateMessage(void)
         finishMessage();
 }
 
-static void drawImmediateText(const u8 *text, u8 startX, u8 startY, u16 *nextTile)
+static void collectChoiceRows(void)
 {
-    u16 position = 0;
-    u16 atlas = 0;
-    u8 x = startX;
-    u8 y = startY;
-    bool newline;
-    while (sjisGlyph(text, &position, &atlas, &newline))
-    {
-        GlyphPlacement placement;
-        if (newline)
-        {
-            x = startX;
-            y += 2;
-            continue;
-        }
-        if (*nextTile + 3 > TILE_USER_MAX_INDEX)
-            return;
-        loadGlyph16(atlas, *nextTile);
-        placement.tile = *nextTile;
-        placement.x = x;
-        placement.y = y;
-        drawGlyphPlacement(WINDOW, &placement);
-        *nextTile += 4;
-        x += 2;
-    }
+    u8 row;
+    clearMessageRows();
+    for (row = 0; row < activeChoice->count; row++) collectSingleRow(activeChoice->options[row].label, row, 17);
 }
 
 static void beginChoice(void)
 {
     showWindow();
-    VDP_loadTileData(choiceCursorTile, windowTileBase() + 1, 1, DMA);
     restoreMessageColor();
-    choiceLoadIndex = 0;
-    choiceNextTile = windowTileBase() + 2;
+    collectChoiceRows();
+    messagePrepareStage = 0;
     runtimeMode = MODE_CHOICE_PREP;
 }
+
 static void updateChoicePrepare(void)
 {
-    if (choiceLoadIndex < activeChoice->count)
+    if (messagePrepareStage == 0)
     {
-        drawImmediateText(activeChoice->options[choiceLoadIndex].label, 5, NOVEL_WINDOW_TOP + 1 + choiceLoadIndex * 2, &choiceNextTile);
-        choiceLoadIndex++;
+        queueMergedBand(0, 1, NOVEL_MESSAGE_TOP_TILES);
+        messagePrepareStage++;
         return;
     }
-    VDP_setTileMapXY(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, windowTileBase() + 1), 1, NOVEL_WINDOW_TOP + 1 + choiceIndex * 2);
+    queueMergedBand(2, 3, NOVEL_MESSAGE_MIDDLE_TILES);
+    queueCursorTile(0);
+    renderChoiceSprites();
+    messagePrepareStage++;
     runtimeMode = MODE_CHOICE;
-}
-static void eraseChoiceCursor(u8 index)
-{
-    VDP_setTileMapXY(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, windowTileBase()), 1, NOVEL_WINDOW_TOP + 1 + index * 2);
 }
 
 static void updateChoice(void);
@@ -650,11 +912,7 @@ static void updateChoice(void)
         choiceIndex = (choiceIndex == 0) ? (activeChoice->count - 1) : (choiceIndex - 1);
     else if ((pressedJoy & BUTTON_DOWN) != 0)
         choiceIndex = (choiceIndex + 1) % activeChoice->count;
-    if (choiceIndex != oldIndex)
-    {
-        eraseChoiceCursor(oldIndex);
-        VDP_setTileMapXY(WINDOW, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, windowTileBase() + 1), 1, NOVEL_WINDOW_TOP + 1 + choiceIndex * 2);
-    }
+    if (choiceIndex != oldIndex) renderChoiceSprites();
     if ((pressedJoy & (BUTTON_B | BUTTON_C | BUTTON_START)) != 0)
     {
         const NovelChoiceOption *option = &activeChoice->options[choiceIndex];
@@ -666,7 +924,6 @@ static void updateChoice(void)
         else runtimeMode = MODE_RUN;
     }
 }
-
 static OverlayTile *overlayTile(u16 cell)
 {
     u16 index;
@@ -697,6 +954,7 @@ static void overlaySetPixel(s16 x, s16 y, u8 color)
 static void renderSpriteTexts(void)
 {
     u16 index;
+    SYS_disableInts();
     u8 slot;
     for (index = 0; index < previousOverlayCount; index++)
         VDP_setTileMapXY(BG_A, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, 0), previousOverlayCells[index] % NOVEL_PLANE_WIDTH, previousOverlayCells[index] / NOVEL_PLANE_WIDTH);
@@ -745,6 +1003,7 @@ static void renderSpriteTexts(void)
         VDP_setTileMapXY(BG_A, TILE_ATTR_FULL(PAL0, TRUE, FALSE, FALSE, tileIndex), cell % NOVEL_PLANE_WIDTH, cell / NOVEL_PLANE_WIDTH);
         previousOverlayCells[previousOverlayCount++] = cell;
     }
+    SYS_enableInts();
 }
 static void clearSpriteTexts(void)
 {
@@ -1127,7 +1386,7 @@ static void executeCommand(const NovelCommand *command)
                 workTileBase = TILE_USER_INDEX;
                 for (index = 0; index < 64; index++) effectPalette[index] = command->aux;
                 for (index = 0; index < 4; index++) loadedPaletteIds[index] = 0xFFFF;
-                PAL_setColors(0, effectPalette, 64, DMA);
+                setAllColorsSafe(effectPalette);
             }
             else if (effectType == NOV_EFFECT_SHAKE)
             {
@@ -1138,26 +1397,26 @@ static void executeCommand(const NovelCommand *command)
             else if (effectType == NOV_EFFECT_FLASH)
             {
                 for (index = 0; index < 64; index++) effectPalette[index] = command->aux;
-                PAL_setColors(0, effectPalette, 64, DMA);
+                setAllColorsSafe(effectPalette);
                 effectFrames = command->frames ? command->frames : 1;
                 runtimeMode = MODE_EFFECT;
             }
             else if (effectType == NOV_EFFECT_FADE_IN)
             {
-                if (command->frames == 0) PAL_setColors(0, currentPalette, 64, DMA);
+                if (command->frames == 0) setAllColorsSafe(currentPalette);
                 else
                 {
-                    PAL_fadeInAll(currentPalette, command->frames, TRUE);
+                    startFadeInSafe(command->frames);
                     runtimeMode = MODE_EFFECT;
                 }
             }
             else
             {
                 for (index = 0; index < 64; index++) effectPalette[index] = command->aux;
-                if (command->frames == 0) PAL_setColors(0, effectPalette, 64, DMA);
+                if (command->frames == 0) setAllColorsSafe(effectPalette);
                 else
                 {
-                    PAL_fadeToAll(effectPalette, command->frames, TRUE);
+                    startFadeToSafe(effectPalette, command->frames);
                     runtimeMode = MODE_EFFECT;
                 }
             }
@@ -1233,21 +1492,19 @@ static void updateEffect(void)
         if (effectFrames > 0) effectFrames--;
         if (effectFrames == 0)
         {
-            PAL_setColors(0, currentPalette, 64, DMA);
+            setAllColorsSafe(currentPalette);
             runtimeMode = MODE_RUN;
         }
         return;
     }
     if (effectFrames == 0)
     {
-        VDP_setHorizontalScroll(BG_A, 0);
-        VDP_setHorizontalScroll(BG_B, 0);
+        setHorizontalScrollSafe(0, 0);
         runtimeMode = MODE_RUN;
         return;
     }
     offset = (effectFrames & 1) ? effectIntensity : -effectIntensity;
-    VDP_setHorizontalScroll(BG_A, offset);
-    VDP_setHorizontalScroll(BG_B, -offset);
+    setHorizontalScrollSafe(offset, -offset);
     effectFrames--;
 }
 void novelInit(const NovelProject *project)
@@ -1269,6 +1526,12 @@ void novelInit(const NovelProject *project)
     backgroundTileCount = 0;
     workTileBase = TILE_USER_INDEX;
     windowVisible = FALSE;
+    shadowArmed = FALSE;
+    messageSpriteAllocated = 0;
+    messageSpriteActive = 0;
+    messagePrepareStage = 0;
+    messageRevealStage = 0;
+    for (slot = 0; slot < NOVEL_MESSAGE_SPRITES; slot++) messageSprites[slot] = NULL;
     actorSceneClearPending = FALSE;
     previousOverlayCount = 0;
     overlayTileCount = 0;
@@ -1291,6 +1554,10 @@ void novelInit(const NovelProject *project)
     JOY_init();
     Z80_loadDriver(Z80_DRIVER_XGM2, TRUE);
     SPR_initEx(project->spriteVramTiles);
+    VDP_setHilightShadow(FALSE);
+    VDP_setHInterrupt(FALSE);
+    SYS_setVIntCallback(novelVInt);
+    SYS_setHIntCallback(novelHInt);
     enterScene(project->startScene);
 }
 void novelUpdate(void)

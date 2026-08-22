@@ -9,6 +9,36 @@ function safeColor(value, fallback = '#ffffff') {
   return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value) : fallback;
 }
 
+export function mdShadowRgb333(color) {
+  const table = [0, 17, 34, 51, 68, 85, 102, 119];
+  return [0, 1, 2].map((channel) => table[Math.max(0, Math.min(7, Math.round((Number(color?.[channel]) || 0) * 7 / 255)))]);
+}
+
+function applyMessageShadow(context, width, height) {
+  const top = 128;
+  const bandHeight = Math.max(0, Math.min(height, 224) - top);
+  if (!bandHeight) return;
+  if (typeof context.getImageData !== 'function' || typeof context.putImageData !== 'function') {
+    context.save();
+    context.fillStyle = 'rgba(0,0,0,.5)';
+    context.fillRect(0, top, Math.min(width, 320), bandHeight);
+    context.restore();
+    return;
+  }
+  const image = context.getImageData(0, top, Math.min(width, 320), bandHeight);
+  for (let offset = 0; offset < image.data.length; offset += 4) {
+    const shadow = mdShadowRgb333([image.data[offset], image.data[offset + 1], image.data[offset + 2]]);
+    image.data[offset] = shadow[0];
+    image.data[offset + 1] = shadow[1];
+    image.data[offset + 2] = shadow[2];
+  }
+  context.putImageData(image, 0, top);
+}
+
+export function choiceTopY(choice) {
+  return choice?._layoutLowered === true ? 152 : 136;
+}
+
 export function collectVisualAssetIds(visual = {}) {
   return [...new Set([
     visual.background?.assetId,
@@ -217,8 +247,7 @@ export function drawNovelFrame(canvas, visual = {}, options = {}) {
     context.globalAlpha = 1;
   }
   if (visual.message || visual.choice) {
-    context.fillStyle = '#000';
-    context.fillRect(0, 128, 320, 96);
+    applyMessageShadow(context, width, height);
     if (visual.message) {
       context.fillStyle = `rgb(${physical.palettes.PAL0[1].join(',')})`;
       drawText(String(visual.message.speaker || ''), 8, 136);
@@ -233,10 +262,11 @@ export function drawNovelFrame(canvas, visual = {}, options = {}) {
       if (cursorVisible) drawText(visual.autoEnabled ? '◆' : '▼', 304, 208);
     } else {
       context.fillStyle = '#fff';
+      const topY = choiceTopY(visual.choice);
       (visual.choice.choices || []).slice(0, 4).forEach((choice, index) => {
         const selected = index === number(visual.choiceIndex, visual.choice.defaultIndex || 0);
-        if (selected) drawText('▶', 8, 136 + index * 16);
-        drawText(Array.from(String(choice.label || '')).slice(0, 17).join(''), 40, 136 + index * 16);
+        if (selected) drawText('▶', 8, topY + index * 16);
+        drawText(Array.from(String(choice.label || '')).slice(0, 17).join(''), 40, topY + index * 16);
       });
     }
   }

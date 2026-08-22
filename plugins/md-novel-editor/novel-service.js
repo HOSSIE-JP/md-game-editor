@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const {
   SCHEMA_VERSION,
+  TARGET_PROFILE_SCHEMA_VERSION,
   VISUAL_CONVERTER_VERSION,
   deepClone,
   hashDocument,
@@ -12,9 +13,12 @@ const {
   collectReferences,
   validateSceneDocument,
   defaultTargetProfile,
+  migrateTargetProfile,
   createAssetBindings,
   collectVisualPaletteRequirements,
   paletteProfile,
+  compatiblePaletteProfile,
+  paletteProfileSatisfies,
   resolveCommandPalette,
 } = require('./novel-schema');
 const {
@@ -279,9 +283,12 @@ async function validateTransaction(projectDir, transaction) {
 function validateProfile(profile) {
   const diagnostics = [];
   if (!profile || typeof profile !== 'object') return [{ severity: 'error', code: 'profile-missing', path: RELATIVE_PATHS.profile, message: 'Mega Drive target profile is missing.' }];
-  if (profile.schemaVersion !== SCHEMA_VERSION) diagnostics.push({ severity: 'error', code: 'profile-version', path: 'schemaVersion', message: `Unsupported target profile version: ${profile.schemaVersion}` });
+  if (profile.schemaVersion !== TARGET_PROFILE_SCHEMA_VERSION) diagnostics.push({ severity: 'error', code: 'profile-version', path: 'schemaVersion', message: `Unsupported target profile version: ${profile.schemaVersion}` });
   if (profile.target !== 'mega-drive') diagnostics.push({ severity: 'error', code: 'profile-target', path: 'target', message: 'Target profile must select mega-drive.' });
   if (!['pce-legacy-256', 'md-h40'].includes(profile.coordinateMode)) diagnostics.push({ severity: 'error', code: 'coordinate-mode', path: 'coordinateMode', message: 'Unknown coordinate mode.' });
+  if (profile.video?.messagePlane !== 'SPRITE') diagnostics.push({ severity: 'error', code: 'message-plane', path: 'video.messagePlane', message: 'Message plane must use hardware sprites.' });
+  if (profile.window?.renderer !== 'shadow-highlight-sprite-2x2') diagnostics.push({ severity: 'error', code: 'message-renderer', path: 'window.renderer', message: 'Message renderer must use shadow-highlight-sprite-2x2.' });
+  if (Object.prototype.hasOwnProperty.call(profile.window || {}, 'opaque')) diagnostics.push({ severity: 'error', code: 'opaque-window-removed', path: 'window.opaque', message: 'Opaque WINDOW rendering was removed; save the project to migrate it.' });
   return diagnostics;
 }
 
@@ -369,20 +376,20 @@ function validateBindings(sceneDocument, catalog, bindings) {
   for (const [assetId, requirement] of requirements) {
     const binding = bindings.assets?.[assetId];
     if (!binding) continue;
-    if (requirement.profiles.length > 1) {
+    const expected = compatiblePaletteProfile(requirement.profiles);
+    if (!expected) {
       diagnostics.push({
         severity: 'error',
         code: 'asset-palette-profile-conflict',
         path: 'bindings.assets.' + assetId,
-        message: assetId + ' is used by both PAL0-reserved and general palettes; duplicate the source asset before assigning both profiles.',
+        message: assetId + ' is used by incompatible palette conversion profiles; duplicate the source asset before assigning both profiles.',
         assetId,
         references: requirement.references,
       });
       continue;
     }
-    const expected = requirement.profiles[0] || 'general';
-    const actual = binding.conversion?.paletteProfile || paletteProfile(binding.legacyPalette || binding.palette);
-    if (actual !== expected) diagnostics.push({
+    const actual = binding.conversion?.paletteProfile || paletteProfile(binding.legacyPalette || binding.palette, { sprite: binding.runtimeType === 'SPRITE' });
+    if (!paletteProfileSatisfies(actual, expected)) diagnostics.push({
       severity: 'error',
       code: 'visual-conversion-stale',
       path: 'bindings.assets.' + assetId + '.conversion.paletteProfile',
@@ -419,10 +426,10 @@ function validateBindings(sceneDocument, catalog, bindings) {
         continue;
       }
       if (binding.paletteGroup !== group.id) diagnostics.push({ severity: 'error', code: 'palette-group-backref', path: 'bindings.assets.' + assetId + '.paletteGroup', message: assetId + ' does not reference palette group ' + group.id });
-      profiles.add(binding.conversion?.paletteProfile || paletteProfile(binding.legacyPalette || binding.palette));
+      profiles.add(binding.conversion?.paletteProfile || paletteProfile(binding.legacyPalette || binding.palette, { sprite: binding.runtimeType === 'SPRITE' }));
       if (binding.paletteFingerprint) fingerprints.add(binding.paletteFingerprint);
     }
-    if (profiles.size > 1) diagnostics.push({ severity: 'error', code: 'palette-group-profile-conflict', path: 'paletteGroups.' + group.id, message: 'PAL0-reserved and general assets cannot share palette group ' + group.id });
+    if (profiles.size && !compatiblePaletteProfile(profiles)) diagnostics.push({ severity: 'error', code: 'palette-group-profile-conflict', path: 'paletteGroups.' + group.id, message: 'Incompatible conversion profiles cannot share palette group ' + group.id });
     if (fingerprints.size > 1 || (group.paletteFingerprint && fingerprints.size && !fingerprints.has(group.paletteFingerprint))) diagnostics.push({ severity: 'error', code: 'palette-group-fingerprint-conflict', path: 'paletteGroups.' + group.id, message: 'Palette group members were not converted with one ordered palette: ' + group.id });
   }
   for (const binding of Object.values(bindings.assets || {})) {
@@ -714,7 +721,12 @@ async function conversionFreshnessDiagnostics(projectDir, sceneDocument, catalog
     try {
       const source = await readVisualSource(projectDir, catalogInfo, binding);
       const requirement = requirements.get(assetId);
-      const profile = requirement?.profiles?.[0] || binding.conversion?.paletteProfile || paletteProfile(binding.legacyPalette || binding.palette);
+      const requiredProfile = compatiblePaletteProfile(requirement?.profiles);
+      const currentProfile = binding.conversion?.paletteProfile;
+      const profile = (paletteProfileSatisfies(currentProfile, requiredProfile) && currentProfile)
+        || requiredProfile
+        || currentProfile
+        || paletteProfile(binding.legacyPalette || binding.palette, { sprite: binding.runtimeType === 'SPRITE' });
       const reserveTransparent = source.asset.type === 'sprite';
       const actualHash = conversionInputHash([source], { paletteProfile: profile, reserveTransparent });
       if (binding.conversion?.converterVersion !== VISUAL_CONVERTER_VERSION || binding.conversion?.inputHash !== actualHash) {
@@ -765,12 +777,15 @@ async function reconvertChangedVisualProfiles(projectDir, sceneDocument, catalog
   for (const [assetId, binding] of Object.entries(bindings.assets || {})) {
     if (!['IMAGE', 'SPRITE'].includes(binding?.runtimeType)) continue;
     const requirement = requirements.get(assetId);
-    if (requirement?.profiles?.length > 1) throw new Error(assetId + ' cannot be converted for PAL0 and PAL1-PAL3 at the same time');
-    const expectedProfile = requirement?.profiles?.[0]
-      || binding.conversion?.paletteProfile
-      || paletteProfile(binding.legacyPalette || binding.palette);
+    const requiredProfile = compatiblePaletteProfile(requirement?.profiles);
+    if (requirement && !requiredProfile) throw new Error(assetId + ' cannot be converted for incompatible palette profiles at the same time');
+    const currentProfile = binding.conversion?.paletteProfile;
+    const expectedProfile = (paletteProfileSatisfies(currentProfile, requiredProfile) && currentProfile)
+      || requiredProfile
+      || currentProfile
+      || paletteProfile(binding.legacyPalette || binding.palette, { sprite: binding.runtimeType === 'SPRITE' });
     if (binding.paletteGroup) {
-      if (binding.conversion?.paletteProfile !== expectedProfile) throw new Error('Palette group ' + binding.paletteGroup + ' mixes PAL0 and general profiles');
+      if (!paletteProfileSatisfies(binding.conversion?.paletteProfile, requiredProfile)) throw new Error('Palette group ' + binding.paletteGroup + ' does not satisfy the required palette profile');
       continue;
     }
     const source = await readVisualSource(projectDir, catalogInfo, binding);
@@ -810,13 +825,14 @@ async function quantizePaletteGroup(projectDir, payload = {}) {
     const binding = bindings.assets?.[assetId];
     if (!binding || !['IMAGE', 'SPRITE'].includes(binding.runtimeType)) throw new Error('Palette group visual asset is missing: ' + assetId);
     const requirement = requirements.get(assetId);
-    if (requirement?.profiles?.length > 1) throw new Error(assetId + ' is used by both PAL0 and general commands');
-    const profile = requirement?.profiles?.[0] || binding.conversion?.paletteProfile || paletteProfile(binding.legacyPalette || binding.palette);
+    const requiredProfile = compatiblePaletteProfile(requirement?.profiles);
+    if (requirement && !requiredProfile) throw new Error(assetId + ' is used by incompatible palette profiles');
+    const profile = requiredProfile || binding.conversion?.paletteProfile || paletteProfile(binding.legacyPalette || binding.palette, { sprite: binding.runtimeType === 'SPRITE' });
     profiles.add(profile);
     entries.push({ ...(await readVisualSource(projectDir, catalogInfo, binding)), binding });
   }
-  if (profiles.size !== 1) throw new Error('PAL0-reserved and general assets cannot share one palette group');
-  const paletteProfileName = [...profiles][0];
+  const paletteProfileName = compatiblePaletteProfile(profiles);
+  if (!paletteProfileName) throw new Error('Incompatible conversion profiles cannot share one palette group');
   const reserveTransparent = entries.some((entry) => entry.asset.type === 'sprite');
   const inputHash = conversionInputHash(entries, { paletteProfile: paletteProfileName, reserveTransparent, paletteGroup: groupId });
   const outputs = convertVisualGroup(entries, { paletteProfile: paletteProfileName, reserveTransparent });
@@ -902,7 +918,7 @@ async function loadProject(projectDir) {
   const documents = await readProjectDocuments(projectDir);
   const persistedProfileRevision = hashDocument(documents.targetProfile);
   if (documents.targetProfile && typeof documents.targetProfile === 'object') {
-    documents.targetProfile = { ...documents.targetProfile, font: normalizeFontSettings(documents.targetProfile.font) };
+    documents.targetProfile = migrateTargetProfile(documents.targetProfile);
   }
   const validation = validateSceneDocument(documents.sceneDocument, documents.catalog, { includeDocuments: false });
   const budget = analyzeNovelBudget(documents.sceneDocument, documents.bindings);
@@ -939,8 +955,7 @@ async function saveProject(projectDir, payload = {}) {
     if (expected && expected !== current.revisions[key]) throw new Error(`Stale ${key} document; reload before saving.`);
   }
   const sceneDocument = deepClone(payload.sceneDocument ?? current.sceneDocument);
-  const targetProfile = deepClone(payload.targetProfile ?? current.targetProfile);
-  targetProfile.font = normalizeFontSettings(targetProfile.font);
+  const targetProfile = migrateTargetProfile(payload.targetProfile ?? current.targetProfile);
   const bindings = deepClone(payload.bindings ?? current.bindings);
   assertSafeJson(sceneDocument);
   assertSafeJson(targetProfile);
@@ -1016,8 +1031,9 @@ async function importPceProject(projectDir, payload = {}, context = {}) {
   const requirements = visualProfileRequirements(sceneDocument, bindings);
   for (const entry of visualEntries) {
     const requirement = requirements.get(entry.asset.id);
-    if (requirement?.profiles?.length > 1) throw new Error(entry.asset.id + ' is used by PAL0 and PAL1-PAL3 in the imported script');
-    const paletteProfileName = requirement?.profiles?.[0] || paletteProfile(entry.binding.legacyPalette || entry.binding.palette);
+    const requiredProfile = compatiblePaletteProfile(requirement?.profiles);
+    if (requirement && !requiredProfile) throw new Error(entry.asset.id + ' is used by incompatible palette profiles in the imported script');
+    const paletteProfileName = requiredProfile || paletteProfile(entry.binding.legacyPalette || entry.binding.palette, { sprite: entry.binding.runtimeType === 'SPRITE' });
     const reserveTransparent = entry.asset.type === 'sprite';
     const inputHash = conversionInputHash([entry], { paletteProfile: paletteProfileName, reserveTransparent });
     const output = convertVisualGroup([entry], { paletteProfile: paletteProfileName, reserveTransparent }).get(entry.asset.id);
@@ -1096,6 +1112,7 @@ module.exports = {
   deleteFont,
   validateTransaction,
   validateProfile,
+  migrateTargetProfile,
   normalizePcePaletteAssignments,
   validateBindings,
   injectPcePalettes,

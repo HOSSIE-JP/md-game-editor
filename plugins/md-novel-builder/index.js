@@ -9,7 +9,8 @@ const service = require('../md-novel-editor/novel-service');
 const { FONT_FORMAT_VERSION } = require('../md-novel-editor/novel-font');
 
 const GENERATED_MANIFEST = 'data/md-novel/generated-manifest.json';
-const GENERATED_MANIFEST_VERSION = 3;
+const GENERATED_MANIFEST_VERSION = 4;
+const MESSAGE_SHAPE_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAABlBMVEUAAAD///+l2Z/dAAAAAnRSTlMA/1uRIrUAAAAWSURBVHjaY2AkABhGFYwqGFUwUhUAAESYBAF9lrJwAAAAAElFTkSuQmCC', 'base64');
 
 
 const STATIC_FILES = Object.freeze({
@@ -37,7 +38,10 @@ function fileHash(buffer) {
 }
 
 function collectStaticFiles() {
-  return Object.fromEntries(Object.entries(STATIC_FILES).map(([target, source]) => [target, fs.readFileSync(path.join(templateRoot(), source))]));
+  return {
+    ...Object.fromEntries(Object.entries(STATIC_FILES).map(([target, source]) => [target, fs.readFileSync(path.join(templateRoot(), source))])),
+    'res/novel/system/message-shapes.png': MESSAGE_SHAPE_PNG,
+  };
 }
 
 function resSymbols(text) {
@@ -112,13 +116,13 @@ function toolchainIdentity(toolchainPath) {
 function buildContractHash(payload, staticFiles) {
   const contract = {
     schemaVersion: GENERATED_MANIFEST_VERSION,
-    runtimeAbi: 3,
+    runtimeAbi: 4,
     fontFormatVersion: FONT_FORMAT_VERSION,
     sourceFiles: SOURCE_FILES,
     staticFiles: Object.fromEntries(Object.entries(staticFiles).map(([relativePath, value]) => [relativePath, fileHash(value)])),
     builder: fileHash(fs.readFileSync(__filename)),
     codegen: fileHash(fs.readFileSync(path.join(__dirname, 'codegen.js'))),
-    rescomp: 'TILESET:subset-16x16;IMAGE:NONE-ALL;SPRITE:BALANCED-FAST;XGM2;WAV:XGM2-6650',
+    rescomp: 'TILESET:subset-16x16;IMAGE:NONE-ALL;SPRITE:BALANCED-FAST+message-shapes-NONE;XGM2;WAV:XGM2-6650',
     toolchain: toolchainIdentity(payload.toolchainPath),
   };
   return fileHash(Buffer.from(JSON.stringify(contract), 'utf8'));

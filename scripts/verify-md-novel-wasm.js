@@ -28,7 +28,7 @@ function sha256(value) {
 }
 
 function loadSymbols(symbolPath) {
-  const wanted = new Set(['currentScene', 'currentPc', 'runtimeMode', 'inputWatcherCount', 'pressedJoy', 'previousJoy']);
+  const wanted = new Set(['currentScene', 'currentPc', 'runtimeMode', 'messagePrepareStage', 'activeMessagePage', 'activeMessage', 'inputWatcherCount', 'pressedJoy', 'previousJoy']);
   const result = {};
   for (const line of fs.readFileSync(symbolPath, 'utf8').split(/\r?\n/)) {
     const match = line.match(/^([0-9a-fA-F]{8})\s+\S\s+(\S+)$/);
@@ -43,6 +43,12 @@ function loadSymbols(symbolPath) {
 
 function framebufferBuffer(framebuffer) {
   return Buffer.from(framebuffer.buffer, framebuffer.byteOffset, framebuffer.byteLength);
+}
+
+function framebufferRegionBuffer(framebuffer, startY, endY) {
+  const byteOffset = framebuffer.byteOffset + startY * 320 * Uint32Array.BYTES_PER_ELEMENT;
+  const byteLength = (endY - startY) * 320 * Uint32Array.BYTES_PER_ELEMENT;
+  return Buffer.from(framebuffer.buffer, byteOffset, byteLength);
 }
 
 function writeFramebufferPng(filePath, framebuffer) {
@@ -113,6 +119,9 @@ async function main() {
       scene: readS16('currentScene'),
       commandPc: readU16('currentPc'),
       mode: readU32('runtimeMode'),
+      messagePrepareStage: readU8('messagePrepareStage'),
+      activeMessagePage: readU8('activeMessagePage'),
+      activeMessage: readU32('activeMessage'),
       inputWatchers: readU8('inputWatcherCount'),
       pressedJoy: readU16('pressedJoy'),
       previousJoy: readU16('previousJoy'),
@@ -141,7 +150,8 @@ async function main() {
       if (predicate(runtimeState())) return;
       tick(0);
     }
-    throw new Error(`Timed out waiting for ${description}: ${JSON.stringify(runtimeState())}`);
+    snapshot('timeout', 'timeout.png');
+    throw new Error(`Timed out waiting for ${description}: ${JSON.stringify({ runtime: runtimeState(), cpu: emulator.get_cpu_state() })}`);
   }
 
   function hold(buttons, heldFrames = 1, releaseFrames = 30) {
@@ -159,6 +169,10 @@ async function main() {
       frame,
       file: path.relative(root, filePath).replace(/\\/g, '/'),
       framebufferSha256: sha256(framebufferBuffer(framebuffer)),
+      regions: {
+        upperSha256: sha256(framebufferRegionBuffer(framebuffer, 0, 128)),
+        lowerSha256: sha256(framebufferRegionBuffer(framebuffer, 128, 224)),
+      },
       uniqueColors,
       runtime: runtimeState(),
       cpuPc: cpu.m68k.pc,
@@ -189,8 +203,16 @@ async function main() {
 
     hold(BUTTON_START);
     runUntil((state) => state.scene === 2 && state.commandPc >= 3, 720, 'opening message');
-    runFrames(50);
+    const openingBeforeShadow = snapshot('target-opening-before-shadow', 'ishi-no-ura-opening-before-shadow.png');
+    runFrames(2);
+    const openingShadow = snapshot('target-opening-shadow-only', 'ishi-no-ura-opening-shadow-only.png');
+    runFrames(48);
     const opening = snapshot('target-opening-message', 'ishi-no-ura-opening-message.png');
+    const shadowStartsAt128 = openingBeforeShadow.regions.upperSha256 === openingShadow.regions.upperSha256
+      && openingBeforeShadow.regions.lowerSha256 !== openingShadow.regions.lowerSha256;
+    const messageGlyphsVisible = openingShadow.regions.lowerSha256 !== opening.regions.lowerSha256;
+    if (!shadowStartsAt128) throw new Error('H/S shadow did not change only the y >= 128 region');
+    if (!messageGlyphsVisible || opening.runtime.mode !== 4) throw new Error('Message sprites were not visible after the three-frame preparation');
     if (opening.audio.nonzero <= title.audio.nonzero) throw new Error('Opening PSG BGM produced no PCM samples');
 
     hold(BUTTON_B);
@@ -237,6 +259,8 @@ async function main() {
         logoSkipReachedTitle: title.runtime.scene === 1,
         titleStartReachedOpening: opening.runtime.scene === 2,
         psgProducedAudio: opening.audio.nonzero > title.audio.nonzero,
+        shadowStartsAtY128: shadowStartsAt128,
+        messageSpritesVisible: messageGlyphsVisible && opening.runtime.mode === 4,
         messageAdvanceReachedNextMessage: secondMessage.runtime.commandPc >= 5,
         saveStateRestoredFramebuffer: restoredState.framebufferSha256 === beforeState.framebufferSha256,
         romReloadReproducedLogo: reloaded.framebufferSha256 === logo.framebufferSha256,

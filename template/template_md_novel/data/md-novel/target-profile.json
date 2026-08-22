@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "target": "mega-drive",
   "coordinateMode": "pce-legacy-256",
   "video": {
@@ -9,7 +9,7 @@
     "legacyViewportX": 32,
     "backgroundPlane": "BG_B",
     "overlayPlane": "BG_A",
-    "messagePlane": "WINDOW"
+    "messagePlane": "SPRITE"
   },
   "window": {
     "heightPixels": 96,
@@ -18,7 +18,7 @@
     "bodyPageCells": 75,
     "speakerRows": 1,
     "choiceVisibleCharacters": 17,
-    "opaque": true
+    "renderer": "shadow-highlight-sprite-2x2"
   },
   "palettes": {
     "system": 0,

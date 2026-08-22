@@ -43,8 +43,14 @@ export function openNovelPreview(options = {}) {
     const asset = (options.catalog?.assets || []).find((entry) => entry.id === assetId);
     return asset?.type === 'psg-song' ? 'bgm' : 'sfx';
   };
+  const choiceLowered = (options.budget?.choiceLowered || []).map((key) => {
+    const [sceneIndex, commandIndex] = String(key).split(':').map(Number);
+    const sceneId = options.sceneDocument?.scenes?.[sceneIndex]?.id;
+    return sceneId == null || !Number.isInteger(commandIndex) ? '' : `${sceneId}:${commandIndex}`;
+  }).filter(Boolean);
   const runtime = createScriptRuntime(options.sceneDocument, {
     startSceneId: options.startSceneId,
+    choiceLowered,
     assetKind,
     runawayLimit: 100000,
   });
@@ -75,7 +81,7 @@ export function openNovelPreview(options = {}) {
     const variables = Object.entries(snapshot.variables || {}).sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => `<div>${escapeHtml(name)} = ${value}</div>`).join('') || '<div>変数なし</div>';
     const sprites = (snapshot.sprites || []).map((entry, index) => `<div>slot${index}: ${entry ? `${escapeHtml(entry.assetId)} (${entry.x},${entry.y})` : '-'}</div>`).join('');
     const budget = options.budget || {};
-    debug.innerHTML = `<h3>Runtime</h3><div>Scene: ${escapeHtml(snapshot.sceneId)}</div><div>Command: #${snapshot.pc + 1}</div><div>Frame: ${snapshot.frame}</div><div>Executed: ${snapshot.executed}</div><div>Wait: ${escapeHtml(snapshot.waiting?.kind || '-')} ${snapshot.waiting?.frames ?? ''}</div><div>BG fade: ${escapeHtml(snapshot.backgroundTransition?.phase || '-')} ${Math.round((snapshot.fadeAlpha || 0) * 100)}%</div><div>Message: ${snapshot.message ? `${snapshot.message.revealedGlyphs}/${snapshot.message.totalGlyphs}` : '-'}</div><div>AUTO: ${snapshot.autoEnabled ? 'ON' : 'OFF'}</div><div>BGM: ${escapeHtml(snapshot.audio?.bgm?.assetId || '-')}</div><div>SFX: ${escapeHtml(snapshot.audio?.sfx?.assetId || '-')}</div><h3>Sprites</h3>${sprites}<h3>Variables</h3>${variables}<h3>MD Budget</h3><div>states ${budget.states ?? '-'}</div><div>VRAM ${budget.maxBudget ?? '-'} / 1424</div><div>overlay ${budget.maxOverlayTiles ?? '-'} / 192</div><div>pieces ${budget.maxSpritePieces ?? '-'} / 80</div>`;
+    debug.innerHTML = `<h3>Runtime</h3><div>Scene: ${escapeHtml(snapshot.sceneId)}</div><div>Command: #${snapshot.pc + 1}</div><div>Frame: ${snapshot.frame}</div><div>Executed: ${snapshot.executed}</div><div>Wait: ${escapeHtml(snapshot.waiting?.kind || '-')} ${snapshot.waiting?.frames ?? ''}</div><div>BG fade: ${escapeHtml(snapshot.backgroundTransition?.phase || '-')} ${Math.round((snapshot.fadeAlpha || 0) * 100)}%</div><div>Message: ${snapshot.message ? `${snapshot.message.revealedGlyphs}/${snapshot.message.totalGlyphs}` : '-'}</div><div>AUTO: ${snapshot.autoEnabled ? 'ON' : 'OFF'}</div><div>BGM: ${escapeHtml(snapshot.audio?.bgm?.assetId || '-')}</div><div>SFX: ${escapeHtml(snapshot.audio?.sfx?.assetId || '-')}</div><h3>Sprites</h3>${sprites}<h3>Variables</h3>${variables}<h3>MD Budget</h3><div>states ${budget.states ?? '-'}</div><div>VRAM ${budget.maxBudget ?? '-'} / 1424</div><div>overlay ${budget.maxOverlayTiles ?? '-'} / 192</div><div>message ${budget.maxMessagePieces ?? '-'} / 38 · ${budget.messageVramTiles ?? 377} tiles · reveal ≤${budget.maxRevealFrames ?? 3}f</div><div>pieces ${budget.maxSpritePieces ?? '-'} / 80</div>`;
   }
 
   function handleEvents() {

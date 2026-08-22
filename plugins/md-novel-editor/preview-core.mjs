@@ -94,14 +94,14 @@ export function simulateScene(scene, commandIndex, options = {}) {
     } else if (command.type === 'spritetext') {
       const slot = Math.max(0, Math.min(3, Number(command.slot) || 0));
       state.spriteTexts[slot] = command.visible === false ? null : clone(command);
-    } else if (command.type === 'message' && !state.fullScreenBg) {
+    } else if (command.type === 'message') {
       state.choice = null;
       state.message = {
         ...clone(command),
         pages: paginateMessage(command.text, options.columns || 19, options.rows || 4),
         pageIndex: 0,
       };
-    } else if (command.type === 'choice' && !state.fullScreenBg) {
+    } else if (command.type === 'choice') {
       state.message = null;
       state.choice = clone(command);
     } else if (command.type === 'variable') {

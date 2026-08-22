@@ -13,10 +13,10 @@
       "sourcePath": "novel/backgrounds/nov_bg_bg_sample_7d16a41f.png",
       "originalSource": "assets/images/bg_sample.png",
       "conversion": {
-        "converterVersion": 3,
+        "converterVersion": 4,
         "coordinateMode": "pce-legacy-256",
         "paletteProfile": "pal0-reserved",
-        "inputHash": "eecbaaccfab890f4b38d62a9e33991ac5d8b1553e904956110125b8c8b2d5a4a",
+        "inputHash": "83af1267e5b4c48fba1f53cc3dbb723e6f25010d1f1512a038e89678dd244fa2",
         "reserveTransparent": false
       },
       "metadata": {
@@ -139,10 +139,10 @@
       "sourcePath": "novel/sprites/nov_spr_sp_hero_b74c1708.png",
       "originalSource": "assets/sprites/sp_hero.png",
       "conversion": {
-        "converterVersion": 3,
+        "converterVersion": 4,
         "coordinateMode": "pce-legacy-256",
-        "paletteProfile": "general",
-        "inputHash": "e7faf4fe10c5b2a51eb13371f69db1638384c35bf2cc6ee14683678995a26b48",
+        "paletteProfile": "shadow-safe-pal012",
+        "inputHash": "0e10f5e0eee1c78dea8dfd35e01bb880308122722b9e115468b0b2ea45ce8c31",
         "reserveTransparent": true
       },
       "metadata": {
@@ -152,12 +152,12 @@
         "paletteEntries": 16,
         "paletteIndicesUsed": [
           0,
-          1,
-          2
+          2,
+          3
         ],
-        "usesPaletteIndex1": true,
+        "usesPaletteIndex1": false,
         "transparent": true,
-        "paletteProfile": "general",
+        "paletteProfile": "shadow-safe-pal012",
         "quality": {
           "meanDeltaE": 0,
           "p95DeltaE": 0
@@ -169,13 +169,18 @@
         "timing": "[[12]]",
         "collision": "NONE"
       },
-      "contentHash": "b5120db8c79c593f69ff33d9b8d37afce55ddbfa68654aca48e53dd4b3d26379",
-      "paletteFingerprint": "d46035203df137f1578b98db4af6b3f3e2a08ff1daab727857f390ac3b43a097",
+      "contentHash": "05581cd3cdb0461d20591eccce0321af1aab94035d46163bd3ef9d0d69bc4c70",
+      "paletteFingerprint": "d19bd02363c4e02d317b163c64be0889f6d67f57f0ab548a31e0d07d0a7ad5cd",
       "paletteRgb333": [
         [
           0,
           0,
           0
+        ],
+        [
+          255,
+          255,
+          255
         ],
         [
           219,
@@ -186,11 +191,6 @@
           255,
           219,
           146
-        ],
-        [
-          0,
-          0,
-          0
         ],
         [
           0,

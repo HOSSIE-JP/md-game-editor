@@ -86,6 +86,7 @@ export function createScriptRuntime(document, options = {}) {
   const configuredStart = String(options.startSceneId || source.startScene || scenes.keys().next().value || '');
   const random = typeof options.random === 'function' ? options.random : Math.random;
   const runawayLimit = Math.max(100, integer(options.runawayLimit, 100000));
+  const choiceLowered = new Set(options.choiceLowered || []);
   const columns = Math.max(1, integer(options.columns, 19));
   const rows = Math.max(1, integer(options.rows, 4));
   const events = [];
@@ -294,17 +295,18 @@ export function createScriptRuntime(document, options = {}) {
         }
         case 'message':
           advancePc();
-          if (!state.fullScreenBg) beginMessage(command);
+          beginMessage(command);
           break;
-        case 'choice':
+        case 'choice': {
+          const emittedIndex = commands.slice(0, state.pc + 1).filter((entry) => entry && entry.skip !== true && entry.type !== 'comment').length - 1;
+          const layoutLowered = choiceLowered.has(`${state.sceneId}:${emittedIndex}`);
           advancePc();
-          if (!state.fullScreenBg) {
-            state.choice = clone(command);
-            state.choiceIndex = Math.max(0, Math.min((command.choices || []).length - 1, integer(command.defaultIndex)));
-            state.message = null;
-            emit('choice', { command });
-          }
+          state.choice = { ...clone(command), _layoutLowered: layoutLowered };
+          state.choiceIndex = Math.max(0, Math.min((command.choices || []).length - 1, integer(command.defaultIndex)));
+          state.message = null;
+          emit('choice', { command, layoutLowered });
           break;
+        }
         case 'variable': applyVariable(command); advancePc(); break;
         case 'if': {
           const matches = comparison(String(command.operator || 'eq'), variableValue(command.variableName), signed16(command.value));

@@ -168,7 +168,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   let decisionResolve = null;
   const pcePaletteModal = api.createModal({
     id: `${plugin.id}-pce-palette-import`,
-    html: `<div class="settings-form compact-form mn-pce-palette-dialog"><h3>PCE取込パレット割り当て</h3><p>変換後のBGと各Sprite SLOTが使用するMDパレットを指定します。同じパレットを複数に割り当てて共有できます。</p><div class="mn-pce-palette-grid"><label><span>BG</span><select data-pce-palette="background"></select></label><label><span>SLOT0</span><select data-pce-palette="slot0"></select></label><label><span>SLOT1</span><select data-pce-palette="slot1"></select></label><label><span>SLOT2</span><select data-pce-palette="slot2"></select></label><label><span>SLOT3</span><select data-pce-palette="slot3"></select></label></div><p class="hint">PAL0 index 0は背景色、index 1はメッセージ文字色として予約されます。</p><div class="mn-confirm-actions"><button type="button" class="primary" data-pce-palette-action="confirm">この割り当てで取込</button><button type="button" data-pce-palette-action="cancel">キャンセル</button></div></div>`,
+    html: `<div class="settings-form compact-form mn-pce-palette-dialog"><h3>PCE取込パレット割り当て</h3><p>変換後のBGと各Sprite SLOTが使用するMDパレットを指定します。同じパレットを複数に割り当てて共有できます。</p><div class="mn-pce-palette-grid"><label><span>BG</span><select data-pce-palette="background"></select></label><label><span>SLOT0</span><select data-pce-palette="slot0"></select></label><label><span>SLOT1</span><select data-pce-palette="slot1"></select></label><label><span>SLOT2</span><select data-pce-palette="slot2"></select></label><label><span>SLOT3</span><select data-pce-palette="slot3"></select></label></div><p class="hint">PAL0 index 0は背景色、index 1はメッセージ文字色です。SpriteはH/S安全化のためPAL0-PAL2 index 14、PAL3 index 14/15も使用しません。</p><div class="mn-confirm-actions"><button type="button" class="primary" data-pce-palette-action="confirm">この割り当てで取込</button><button type="button" data-pce-palette-action="cancel">キャンセル</button></div></div>`,
   });
   let pcePaletteResolve = null;
 
@@ -262,7 +262,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
 
   function visualPaletteEditError(nextCommand) {
     if (!['background', 'sprite'].includes(nextCommand?.type) || !nextCommand.assetId) return '';
-    const profile = resolvedVisualPalette(nextCommand) === 'PAL0' ? 'pal0-reserved' : 'general';
+    const profile = nextCommand.type === 'sprite'
+      ? (resolvedVisualPalette(nextCommand) === 'PAL3' ? 'shadow-safe-pal3' : 'shadow-safe-pal012')
+      : (resolvedVisualPalette(nextCommand) === 'PAL0' ? 'pal0-reserved' : 'general');
     const binding = state.bindings?.assets?.[nextCommand.assetId];
     if (binding?.paletteGroup && binding.conversion?.paletteProfile && binding.conversion.paletteProfile !== profile) {
       return nextCommand.assetId + ' はpalette group ' + binding.paletteGroup + ' の ' + binding.conversion.paletteProfile + ' profileに固定されています。先にAssetsでgroupを変更してください。';
@@ -271,7 +273,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       for (const [commandIndex, command] of (scene.commands || []).entries()) {
         if (scene.id === state.selectedSceneId && commandIndex === state.selectedCommandIndex) continue;
         if (!['background', 'sprite'].includes(command?.type) || command.assetId !== nextCommand.assetId || command.skip === true) continue;
-        const otherProfile = resolvedVisualPalette(command) === 'PAL0' ? 'pal0-reserved' : 'general';
+        const otherProfile = command.type === 'sprite'
+          ? (resolvedVisualPalette(command) === 'PAL3' ? 'shadow-safe-pal3' : 'shadow-safe-pal012')
+          : (resolvedVisualPalette(command) === 'PAL0' ? 'pal0-reserved' : 'general');
         if (otherProfile !== profile) return nextCommand.assetId + ' はPAL0とPAL1-PAL3の両profileでは共有できません。assetを複製して割り当ててください。';
       }
     }
@@ -377,7 +381,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     elements.sceneBudget.dataset.level = level;
     elements.budgetValue.textContent = `${maximum || 0} / 1424 tiles`;
     elements.budgetFill.style.width = `${Math.min(100, ratio * 100).toFixed(1)}%`;
-    elements.budgetMetrics.innerHTML = `<span>states ${budget.states ?? 0}</span><span>overlay ${budget.maxOverlayTiles ?? 0}/192</span><span>sprite tiles ${budget.maxSpriteTiles ?? 0}</span><span>pieces ${budget.maxSpritePieces ?? 0}/80</span><span>scanline ${budget.maxScanlinePieces ?? 0}/20 · ${budget.maxScanlinePixels ?? 0}/320px</span><span>DMA ${state.targetProfile?.runtime?.dmaBytesPerFrame ?? 6144}B/f</span>`;
+    elements.budgetMetrics.innerHTML = `<span>states ${budget.states ?? 0}</span><span>overlay ${budget.maxOverlayTiles ?? 0}/192</span><span>sprite tiles ${budget.maxSpriteTiles ?? 0}</span><span>message ${budget.maxMessagePieces ?? 0}/38 · ${budget.messageVramTiles ?? 377} tiles · reveal ≤${budget.maxRevealFrames ?? 3}f</span><span>pieces ${budget.maxSpritePieces ?? 0}/80</span><span>scanline ${budget.maxScanlinePieces ?? 0}/20 · ${budget.maxScanlinePixels ?? 0}/320px</span><span>DMA ${state.targetProfile?.runtime?.dmaBytesPerFrame ?? 6144}B/f</span>`;
   }
 
   function updateSceneJsonText(force = false) {
@@ -477,6 +481,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const scene = selectedScene(state);
     const command = selectedCommand(state);
     const visual = scene ? simulateScene(scene, state.selectedCommandIndex, { columns: 19, rows: 4 }) : {};
+    if (visual.choice && command?.type === 'choice') {
+      const sceneIndex = (state.sceneDocument?.scenes || []).indexOf(scene);
+      const emittedIndex = (scene.commands || []).slice(0, state.selectedCommandIndex + 1).filter((entry) => entry && entry.skip !== true && entry.type !== 'comment').length - 1;
+      visual.choice._layoutLowered = (state.snapshot?.budget?.choiceLowered || []).includes(`${sceneIndex}:${emittedIndex}`);
+    }
     visual.choiceIndex = visual.choice?.defaultIndex || 0;
     visual.autoEnabled = state.sceneDocument?.settings?.messageAdvanceMode === 'auto';
     const draw = () => drawNovelFrame(elements.commandPreview, visual, {
