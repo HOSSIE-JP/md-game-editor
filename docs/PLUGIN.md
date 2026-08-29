@@ -1088,13 +1088,14 @@ PCE取込はplugin modal内で「BG/SLOT palette割当 → 224×136通常BGのso
 |---|---|
 | タイプ | `build` |
 | 対応 core | `mega-drive` |
-| バージョン | 1.1.0 |
+| バージョン | 1.1.4 |
 | 依存 | `md-novel-editor` |
 | フック | `onBuildStart`, `onBuildLog`, `onBuildEnd`, `onBuildError` |
 | ロール | `builder` |
 | ジェネレータ | hook-only (`generator: false`) |
+| SpriteText消去 | BG_A dirty cellへlow-priority透明tile 0を復元し、後続H/Sで旧文字領域が通常輝度になることを防止 |
 
-PCE command意味論をSGDK runtimeへ変換し、ResComp/C source、XGM2/PCM binding、scene別palette/VRAM/sprite/scanline budgetを生成します。BG/Sprite表示時はcommand指定PALへordered RGB333 paletteをloadし、同じfingerprintのDMAを省略します。fullScreen sceneでは旧actorの非表示SATをVBlankへ反映してから新BGを転送します。SpriteTextのBG_A dirty tile予約はscene別最大値として生成データへ保持し、別sceneの予約をmessage tile baseへ持ち込みません。同一sceneで共存し得るSpriteTextとmessageは非重複領域を維持します。messageはy=128のHIntで下側をShadow化し、PAL0 high-priority spriteとして表示します。横2文字/縦2行をまとめ、通常最大30 pieces、必要pageだけspeaker行を分離して最大38 pieces、固定377 VRAM tileを最大3 VBlankへDMA_QUEUE_COPY転送します。手動page待ちは点滅`▼`、AUTO中は`◆`を右下へ表示します。sync/async INPUTの空button maskは検証errorとし、旧データもzero-timeで継続します。同一PALへ同時表示する異なるfingerprint、converter v4より古い変換、H/S予約indexを使う下側actor、下側SpriteTextはBuild errorです。target profile v1は未知fieldを保持してv2へ移行し、旧opaque WINDOWへfallbackしません。PAL0 index 1と非白messageが競合する場合は画像を変色させず、そのmessageだけ白へfallbackしてwarningを出します。CD-DA/ADPCM/voice/cacheはcommand順を維持したwarning付きNOPです。Test Playでは検証済みmanifest/ROM/object/生成物/build契約だけを差分buildへ再利用し、通常Buildはcleanを維持します。`template_md_novel`はbuilderとstandard WASM roleを選択済みです。詳細は[NOVEL.md](NOVEL.md)を参照してください。
+PCE command意味論をSGDK runtimeへ変換し、ResComp/C source、XGM2/PCM binding、scene別palette/VRAM/sprite/scanline budgetを生成します。BG/Sprite表示時はcommand指定PALへordered RGB333 paletteをloadし、同じfingerprintのDMAを省略します。fullScreen sceneでは旧actorの非表示SATをVBlankへ反映してから新BGを転送します。SpriteTextのBG_A dirty tile予約はscene別最大値として生成データへ保持し、別sceneの予約をmessage tile baseへ持ち込みません。同一sceneで共存し得るSpriteTextとmessageは非重複領域を維持します。messageはHInt counter 1の周期割り込みをVBlankごとに数えてy=128から下側をShadow化します。文字spriteはBGがPAL1ならPAL2、それ以外はPAL1を選び、H/Sで通常輝度となる予約index 14を使うlow-priority 16x16 spriteとして1 glyphずつ表示します。透明index 0は背景のShadowを解除しないため、字画以外に明るい矩形を残しません。選択PALのindex 14は表示中だけ文字色へ差し替えて終了時に復元し、同indexを使う可視assetはpreflight errorにします。HInt/VInt callbackはmessage/choice表示中だけ登録し、armした途中frameではShadowへ切り替えず、次のVBlankでH/Sと走査線カウンタをリセットしてから開始します。BG転送やwindow非表示時は割り込みマスク下で即時解除し、VDP制御ポート競合とscene直後の全画面Shadowを防ぎます。実glyph数を80 pieces、20 pieces/scanline、320px/scanlineのgateへ計上し、固定377 VRAM tileを3回に分けてDMA_QUEUE_COPYへqueueし、最後のDMAが反映された次frameから表示します。手動page待ちは点滅`▼`、AUTO中は`◆`を右下へ表示します。sync/async INPUTの空button maskは検証errorとし、旧データもzero-timeで継続します。同一PALへ同時表示する異なるfingerprint、converter v4より古い変換、H/S予約indexを使う下側actor、下側SpriteTextはBuild errorです。target profile v1は未知fieldを保持してv2へ移行し、旧opaque WINDOWへfallbackしません。CD-DA/ADPCM/voice/cacheはcommand順を維持したwarning付きNOPです。Test Playでは検証済みmanifest/ROM/object/生成物/build契約だけを差分buildへ再利用し、ResComp `.d`のproject絶対pathは`out/**`内で相対化して日本語・空白pathでもmakeが解決できるようにします。通常Buildはcleanを維持します。`template_md_novel`はbuilderとstandard WASM roleを選択済みです。詳細は[NOVEL.md](NOVEL.md)を参照してください。
 
 ---
 

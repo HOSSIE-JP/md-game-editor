@@ -106,20 +106,21 @@ scene数は最大255、1 sceneのruntime commandは最大255、変数は予約�
 - `pce-legacy-256`: backgroundは`x = 4 + PCE tile x`、sprite/move/SpriteTextは`x = PCE x + 32`
 - `md-h40`: 320px native座標をそのまま使用
 - BG_B=背景、BG_A=SpriteText overlay、hardware sprite=会話/選択肢
-- VBlankでH/Sを解除してHInt counter 127を設定し、y=128の水平割り込み1回でHilight/Shadowを有効化します。VIntは停止しません。message/choiceを隠す、scene遷移、BG転送、同期input、blankではH/Sを解除します
-- y=128以降はMega DriveのShadowで疑似半透明化し、その上へPAL0・high priority・always-on-topの文字spriteを表示します。PreviewもRGB333のShadow値へ変換してから文字を描きます
-- 16x16 glyphを横2文字単位の32x16 spriteへまとめ、全文表示後は上下2行を32x32 spriteへ再編します。通常の19列×4行 + cursorは最大30 message spriteです
-- speakerと本文先頭行を同じ32px高spriteへまとめるとactorとの合計がscanline 320pxを超えるpageだけ、speaker行を分離します。この安全layoutの管理上限は38 message spriteです。preflightはlayoutをpage単位で決定し、80 pieces、20 pieces/scanline、320px/scanlineを厳密に検査します
+- message/choice表示中だけVInt/HInt callbackを有効にします。HInt counter 1の周期割り込みで走査線を数え、VBlankで必ずH/Sとカウンタをリセットした後、y=128からHilight/Shadowを有効化します。armした途中frameでは次のVBlankまでShadowへ切り替えません。message/choiceを隠す、scene遷移、BG転送、同期input、blankでは割り込みをマスクした状態でHIntとcallbackを即時解除してからVDPへ書き込み、制御ポートの競合とscene直後の全画面Shadowを防ぎます
+- y=128以降はMega DriveのShadowで疑似半透明化します。文字はBGがPAL1ならPAL2、それ以外はPAL1を選び、予約index 14のlow-priority spriteで描きます。H/SではPAL0～PAL2のlow-priority index 14だけが通常輝度となり、透明index 0は背景のShadowを解除しないため、字画以外に明るい矩形を残しません。1個の可視glyphを1個の16x16 spriteに対応させます。表示中だけ選択PALのindex 14を文字色へ差し替え、終了・window非表示時に元の色へ復元します。PreviewもRGB333のShadow値へ変換してから同じ配置で文字を描きます
+- preflightはspeaker、本文、cursor、choiceの実glyph数をsprite pieceとして数え、80 pieces、20 pieces/scanline、320px/scanlineをpage単位で厳密に検査します
 - choiceの既定位置`y=136..184`が可視actorと重なってscanline上限を超え、`y=152..200`へ1行下げると負荷が下がるcommandは自動的に下段layoutへ切り替えます。下段でも上限を超える場合はassetを暗黙に隠さずBuild errorにします
-- message用VRAMは固定377 tileです。上152 tile、中152 tile、下72 tile + cursor 1 tileを3 VBlankへ分け、各frame 6144 bytes以内の`DMA_QUEUE_COPY`で転送します。choiceは2 frameです
+- message用VRAMは固定377 tileです。上152 tile、中152 tile、下72 tile + cursor 1 tileを3回に分け、各frame 6144 bytes以内の`DMA_QUEUE_COPY`で転送します。最後のqueueがVBlankで反映された次frameにspriteを表示するため、message準備は最大4 frame、choiceは最大3 frameです
 - speaker 1行 + 本文19列×4行、1page 75 cell。choice labelはJSON上24文字まで保持し、表示は先頭17文字でwarningを出します
 - manual messageのpage完了時は右下に30frame周期で点滅する`▼`、AUTO時は本文表示中から常灯する`◆`を表示します
-- 最終pageを決定して次commandへ進むと旧文字spriteとcursorを消します。Shadow bandは次のmessage/choiceまたは解除commandまで維持するため、3frameの次page準備中に古い文字が残ったり背景が明滅したりしません
-- PAL0～PAL3はBG/Sprite Commandごとに選択できます。PAL0 index 0=黒、index 1=白をmessage/choice/SpriteTextと共有します
+- 最終pageを決定して次commandへ進むと旧文字spriteとcursorを消します。Shadow bandは次のmessage/choiceまたは解除commandまで維持するため、次pageの4段階準備中に古い文字が残ったり背景が明滅したりしません
+- PAL0～PAL3はBG/Sprite Commandごとに選択できます。PAL0 index 0=黒、index 1=白はsystem/SpriteText用に予約します。message/choiceは上記のとおりPAL1/PAL2の予約index 14を一時使用し、選択PALでindex 14を使う可視assetはBuild errorにします
 - 新規CommandはBG=PAL0、sprite slot 0=PAL1、slot 1=PAL2、slot 2/3=PAL3。palette未指定の既存JSONはAutoとして従来binding/fallback（BG=PAL1、Sprite=PAL2）を維持します
 - Unicode JSONを正本にし、build時にShift-JISへround-trip検査変換します。登録fontはcontent hashで重複排除し、`cmap` format 4/12、全runtime glyph、生成atlasのhashを検証します
 
 SpriteTextはPCEの1文字1hardware spriteを再現せず、BG_Aのdirty tile compositorへ描画します。1px座標を保持するため1文字が最大9 tileへ触れます。message/choice中に可視SpriteTextがy=128以降へ交差すると、その文字もShadowを受けて見え方が変わるためBuild errorです。先に上側へ移動するか非表示にしてください。
+
+SpriteTextの再描画・scene遷移で旧dirty cellを消すときは、BG_Aへlow-priorityの透明tile 0を書き戻します。透明なplane pixelもH/Sのpriority判定に参加するため、high-priorityのまま消すと後続messageの背景に旧SpriteText矩形だけ通常輝度で残ります。
 
 ## 画像・palette・VRAM制約
 
@@ -140,13 +141,13 @@ preflightは`startScene`からscene/command PC単位の到達可能状態を探�
 | scene VRAM | 1424 user tiles |
 | message VRAM | 377 tiles |
 | hardware sprite pieces | 80 |
-| message sprite objects | 通常30 / 安全layout最大38 |
+| message sprite objects | 実glyph + cursor / 最大80 |
 | 1 scanline sprite pieces | 20 |
 | 1 scanline sprite pixels | 320 |
 | SpriteText | 4 slots / 先頭32文字 |
 | SpriteText BG_A dirty tiles | 192 |
 | DMA profile | 6144 bytes/frame |
-| message reveal DMA | 最大3 frames |
+| message reveal DMA | 最大4 frames |
 
 VRAM診断は各到達状態について`background unique tiles + 377 message tiles + BG_A dirty tiles + simultaneous sprite frame tiles`を合算します。SpriteText用のBG_A dirty tile予約はsceneごとの最大値を生成`NovelScene`へ保存し、message tile baseも現在sceneの予約量だけ進めます。scene入口ではSpriteText/message/input watcherをclearし、`fullScreenBg`ならactorも解放するruntime規則を適用するため、別sceneのSpriteText最大値をmessage表示sceneへ持ち込みません。同一sceneでSpriteTextとmessageが共存し得る場合はscene最大値を予約して両領域の重複を防ぎます。SpriteTextは4 slotの16x16 glyphが実際に触れる8x8 cellのunionを数えます。立ち絵は生成後の`maxNumTile`/`maxNumSprite`、配置scanline、Move掃引範囲、H/S bandと交差するpalette operator indexを使用します。探索が100,000状態を超える場合も安全側のBuild errorです。超過時に暗黙の再量子化、asset omission、BG_A退避、旧WINDOW fallbackは行いません。
 
@@ -184,9 +185,9 @@ src/novel_runtime/novel_runtime.c
 src/generated/novel_data.c
 ```
 
-`src/boot/rom_head.c`と`sega.s`は通常Cソースへ混入させません。生成ABI 5では`NovelCommand.count`へBG/Spriteのpalette index（0～3）を格納し、resourceごとのordered palette fingerprint IDを`novelDataBackgroundPaletteId()` / `novelDataSpritePaletteId()`でruntimeへ渡します。`NOV_FLAG_BG_NATIVE_TILE`はMD-native背景だけPCE legacy座標補正を迂回します。`NovelMessage.layoutFlags`はscanline 320pxを守る必要があるpageに`NOV_MSG_SEPARATE_TOP`を指定し、`NovelChoice.layoutFlags`は適応下段配置に`NOV_CHOICE_LOWERED`を指定します。`onBuildStart`が`{ok:false}`を返すかthrow/rejectした場合、hostはSGDKを開始せず、`onBuildError`と失敗`build-end`を1回だけ通知します。
+`src/boot/rom_head.c`と`sega.s`は通常Cソースへ混入させません。生成ABI 5では`NovelCommand.count`へBG/Spriteのpalette index（0～3）を格納し、resourceごとのordered palette fingerprint IDを`novelDataBackgroundPaletteId()` / `novelDataSpritePaletteId()`でruntimeへ渡します。`NOV_FLAG_BG_NATIVE_TILE`はMD-native背景だけPCE legacy座標補正を迂回します。`NovelMessage.layoutFlags`の`NOV_MSG_SEPARATE_TOP`はABI互換のため保持しますが、現在の1 glyph 1 sprite rendererは常に各行を独立して配置します。`NovelChoice.layoutFlags`は適応下段配置に`NOV_CHOICE_LOWERED`を指定します。`onBuildStart`が`{ok:false}`を返すかthrow/rejectした場合、hostはSGDKを開始せず、`onBuildError`と失敗`build-end`を1回だけ通知します。
 
-通常の`Build`は従来どおり`clean release`です。`Test Play`だけ`skipClean`を要求し、前回Build成功manifest、ROM、全object、生成物、toolchain、`SRC_C`、runtime ABI、font format、ResComp契約のhashが一致した場合に限って`clean`を省略して`make release`の依存判定を使います。scene/font/asset変更時は内容が変わった生成物だけmtimeを更新するため、その依存objectだけが再生成されます。
+通常の`Build`は従来どおり`clean release`です。`Test Play`だけ`skipClean`を要求し、前回Build成功manifest、ROM、全object、生成物、toolchain、`SRC_C`、runtime ABI、font format、ResComp契約のhashが一致した場合に限って`clean`を省略して`make release`の依存判定を使います。scene/font/asset変更時は内容が変わった生成物だけmtimeを更新するため、その依存objectだけが再生成されます。ResCompの`.d`にproject絶対pathが出力された場合は`out/**`内だけを走査してproject相対pathへ正規化し、日本語や空白を含むproject pathでもincremental makeが依存画像を解決できるようにします。
 
 manifest欠落/破損、前回失敗、ROM/object/生成物の欠落またはhash不一致、toolchain/SRC_C/runtime ABI/font format/ResComp契約変更ではTest Playも自動的にclean buildへ戻ります。Build Logには生成物のchanged/unchanged件数、cache hit/miss理由、完全無変更時の`input unchanged/object reused`を出します。ROMだけをblind reuseしてTest Playを開始することはありません。
 

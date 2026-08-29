@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-08 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / MD Novel editor and builder / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata
+> § Last Updated: 2026-08 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / MD Novel editor and builder / HInt-safe VDP transfers and incremental ResComp dependencies / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata
 
 ---
 
@@ -381,6 +381,8 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 - `md-novel-builder`は`generator: false`のhook-only builder。canonical dataを読取専用にし、staging一式をhash検証後にcommitしてから明示`SRC_C`を返す。通常Buildはclean、Test Playは検証済みcacheだけ差分buildにする
 - fontはproject-local TTF/OTF/TTCまたは同梱`JF-Dot-Shinonome16.ttf`（既定size 16 / threshold 190）から固定16x16の使用glyph subsetを生成する。glyph個別bboxではなくfont共通baselineで配置して句読点・括弧の設計位置を保持し、Shift-JIS round-trip、font cmap、atlas hashをbuild時にhard validationする
 - H40 320x224、PAL0 system、PAL1 background、PAL2/PAL3 portraitを新規command/取込modalの既定とし、取込時はBG/SLOT0～3をPAL0～PAL3へ個別指定可能にする。背景・立ち絵のscene持続を含むVRAM/80 sprite/scanline/4MiB予算をbuild errorで検査する。SpriteTextのBG_A tile予約とmessage tile baseはscene別最大値を使い、別sceneのoverlay最大値を合算しない
+- message/choiceのShadow bandはHInt counter 1の周期割り込みをVBlankごとに数え、y=128から作る。armした途中frameでは次のVBlankまでShadowへ切り替えず、VBlankでH/Sとカウンタをリセットする。BG/overlay転送前には割り込みマスク下で即時解除する。文字はBGがPAL1ならPAL2、それ以外はPAL1を選び、H/Sで通常輝度になる予約index 14のlow-priority 16x16 spriteを1 glyphずつ使う。透明index 0は背景のShadowを解除しない。SpriteTextの旧BG_A dirty cellはlow-priority透明tile 0へ戻し、high-priority透明cellを後続messageへ残さない。選択PALのindex 14を使う可視assetはpreflight errorとし、表示中だけ文字色へ差し替えて終了時に復元する。実glyph数を80 pieces、20 pieces/scanline、320px/scanlineのgateへ計上し、固定377 tileは3回に分けてqueueし、最後のDMAがVBlankで反映された次frameから表示する
+- Test Play用ResComp `.d`のproject絶対pathは`out/**`内だけで相対化し、日本語・空白project pathでも差分makeが依存素材を解決できるようにする
 - PCE取込では参照画像が実寸224x136の通常BGだけを対象に、`source/**`のPNG/JPEG/BMP/WebP候補を読取専用hookで検査する。9方向cover cropで320x192へ変換し、portable master、source hash、resize recipe、`md-native-tiles`配置をbindingへ保存する。曖昧/未検出はPCE画像へfallbackし、256x224等は変更しない
 - PCE CDDA/ADPCM/voiceはJSONを保持してwarning+NOP、PSG song/SFXは参照された`(assetId, channel)`だけXGM2/VGMまたはWAVへ変換する
 - 詳細契約、入力対応、検証手順は`docs/NOVEL.md`を実装と同時に更新する

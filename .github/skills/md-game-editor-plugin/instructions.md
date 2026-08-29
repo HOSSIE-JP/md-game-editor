@@ -327,6 +327,8 @@ renderer activationの`beforeBuild` / `beforeProjectSwitch`はmain process hook�
 - `md-novel-builder`は`generator: false`のhook-only builder。canonical dataを変更せず、staging生成物をhash検証してからcommitし、`makeVariables.SRC_C`へ全C sourceを明示する。通常Buildはclean、Test Playは検証済みmanifest/ROM/object/生成物/build契約だけを差分buildへ再利用する。
 - Font tabはproject-local TTF/OTF/TTCまたは同梱`JF-Dot-Shinonome16.ttf`（既定size 16 / threshold 190）から固定16x16の使用glyph subsetを生成する。glyph個別bboxではなくfont共通baselineで配置して句読点・括弧の設計位置を保持し、Command/Full Previewも同じatlasを使用する。Shift-JIS round-trip、font cmap、atlas hashをsave/buildで検査し、silent fallbackしない。
 - H40 320x224、PAL0=system、PAL1=background、PAL2/PAL3=portraitを既定とし、PCE取込時はBG/SLOT0～3をPAL0～PAL3へ個別指定できる。PreviewはBG fade、typewriter/page cursor、WAIT/INPUT割込、Move、SpriteText blinkをruntimeと同期する。背景・立ち絵のscene持続を含むVRAM、sprite、scanline、DMA、4MiB ROM gateをbuild時に再検査する。SpriteTextのBG_A tile予約とmessage tile baseはscene別最大値で固定し、別sceneのoverlay最大値を加算しない。
+- message/choiceのShadow bandはHInt counter 1の周期割り込みをVBlankごとに数え、y=128から作る。armした途中frameでは次のVBlankまでShadowへ切り替えず、VBlankでH/Sとカウンタをリセットする。BG/overlay転送前には割り込みマスク下で即時解除する。文字はBGがPAL1ならPAL2、それ以外はPAL1を選び、H/Sで通常輝度になる予約index 14のlow-priority 16x16 spriteを1 glyphずつ使う。透明index 0は背景のShadowを解除しない。SpriteTextの旧BG_A dirty cellはlow-priority透明tile 0へ戻し、high-priority透明cellを後続messageへ残さない。選択PALのindex 14を使う可視assetはpreflight errorとし、表示中だけ文字色へ差し替えて終了時に復元する。実glyph数を80 pieces、20 pieces/scanline、320px/scanlineのgateへ計上し、固定377 tileは3回に分けてqueueし、最後のDMAがVBlankで反映された次frameから表示する。
+- Test Play用ResComp `.d`のproject絶対pathは`out/**`内だけでproject相対pathへ正規化し、日本語・空白project pathでも差分makeを成立させる。
 - PCE取込はpalette割当後に、参照画像が実寸224x136の通常BGについて`source/**`のPNG/JPEG/BMP/WebP候補、fallback、9方向crop、320x192 previewをplugin modalで確認する。確定までは書き込まず、source revision/hashを再検証してatomic importし、portable masterと`md-native-tiles` bindingを保存する。256x224等は変更しない。
 - CDDA/ADPCM/voiceはwarning+NOP、PSG song/SFXは参照された`(assetId, channel)` variantだけをXGM2/VGMまたはWAVへ変換する。
 - 実装、`docs/PLUGIN.md`、`docs/NOVEL.md`、`tests/novel-plugins.test.js`を同じ作業で更新する。
@@ -357,7 +359,7 @@ renderer activationの`beforeBuild` / `beforeProjectSwitch`はmain process hook�
 - GPL/AGPL コードを参考に実装した場合は制御フローを変えて書き直す
 
 ---
-*Last Updated: 2026-08 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / MD Novel editor and builder / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata*
+*Last Updated: 2026-08 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / MD Novel editor and builder / HInt-safe VDP transfers and incremental ResComp dependencies / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata*
 
 
 ## MD/PCE split note

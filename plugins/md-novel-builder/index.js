@@ -178,6 +178,32 @@ function collectObjectFiles(projectDir) {
   return result.sort();
 }
 
+function normalizeRescompDependencyFiles(projectDir) {
+  const root = path.resolve(projectDir);
+  const outputRoot = path.resolve(root, 'out');
+  if (!fs.existsSync(outputRoot)) return 0;
+  const normalizedPrefix = root.replace(/\\/g, '/').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/';
+  const absolutePattern = new RegExp(normalizedPrefix, 'gi');
+  let changed = 0;
+  function walk(directory) {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const target = path.resolve(directory, entry.name);
+      if (target !== outputRoot && !target.startsWith(outputRoot + path.sep)) throw new Error('ResComp dependency path escapes project output');
+      if (entry.isDirectory()) walk(target);
+      else if (entry.isFile() && entry.name.endsWith('.d')) {
+        const current = fs.readFileSync(target, 'utf8');
+        const normalized = current.replace(absolutePattern, '');
+        if (normalized !== current) {
+          fs.writeFileSync(target, normalized, 'utf8');
+          changed++;
+        }
+      }
+    }
+  }
+  walk(outputRoot);
+  return changed;
+}
+
 async function writeGeneratedManifest(projectDir, value) {
   const root = await service.ensureProjectRoot(projectDir);
   const target = await service.resolveProjectPath(root, GENERATED_MANIFEST);
@@ -240,6 +266,8 @@ async function commitGeneratedFiles(projectDir, files, report, metadata = {}) {
 }
 
 async function prepareProject(projectDir, context = {}, payload = {}) {
+  const normalizedDependencies = normalizeRescompDependencyFiles(projectDir);
+  if (normalizedDependencies > 0) context.logger?.info?.(`MD Novel: normalized ${normalizedDependencies} ResComp dependency file(s) for incremental make`);
   const previous = await readGeneratedManifest(projectDir);
   const snapshot = await service.loadProject(projectDir);
   const errors = snapshot.diagnostics.filter((entry) => entry.severity === 'error');
@@ -324,6 +352,7 @@ async function onBuildEnd(payload = {}, context = {}) {
     const relativeRom = path.relative(projectDir, path.resolve(romPath));
     if (!relativeRom || relativeRom.startsWith('..') || path.isAbsolute(relativeRom)) throw new Error('Build ROM path escapes project root');
     const objectFiles = collectObjectFiles(projectDir);
+    normalizeRescompDependencyFiles(projectDir);
     const objectHashes = Object.fromEntries(objectFiles.map((relativePath) => [relativePath, fileHash(fs.readFileSync(path.join(projectDir, relativePath)))]));
     await recordBuildState(projectDir, {
       lastBuildSuccess: true,
@@ -359,6 +388,7 @@ module.exports = {
   resSymbols,
   collectOtherResSymbols,
   validateResSymbols,
+  normalizeRescompDependencyFiles,
   groupedWarnings,
   commitGeneratedFiles,
   prepareProject,

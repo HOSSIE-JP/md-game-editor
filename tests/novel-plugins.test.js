@@ -845,7 +845,6 @@ test('codegen preserves control flow, variables, input mapping, animation, and 7
     { type: 'message', speaker: 'A', text: 'A'.repeat(76), textColor: '#ff0000', mouthSlot: 0 },
   ];
   const bindings = structuredClone(imported.bindings);
-  bindings.assets.bg.metadata = { ...bindings.assets.bg.metadata, usesPaletteIndex1: true };
   bindings.sourceSceneRevision = schema.hashDocument(sceneDocument);
   const fontSource = await service.readFontSource(target, imported.targetProfile.font);
   const fontPlan = font.createFontPlan(sceneDocument, imported.targetProfile.font, fontSource.buffer);
@@ -872,8 +871,8 @@ test('codegen preserves control flow, variables, input mapping, animation, and 7
   assert.match(c, /static const NovelSwitch nov_switch_1 = \{ 0, \d+, \{ \{ 0, -1 \} \} \};/);
   assert.match(c, /static const s16 nov_initial_variables\[\] = \{ 0, 0, 5, 0 \}/);
   assert.match(c, /nov_message_0_pages\[\] = \{ nov_text_\d+, nov_text_\d+ \}/);
-  assert.match(c, /static const NovelMessage nov_message_0 = \{ [^\r\n]+0x0eee, \d+ \};/);
-  assert.equal(generated.warnings.some((entry) => entry.code === 'pal0-message-index1-conflict'), true);
+  assert.match(c, /static const NovelMessage nov_message_0 = \{ [^\r\n]+0x000e, \d+ \};/);
+  assert.equal(generated.warnings.some((entry) => entry.code?.startsWith('pal0-message-')), false);
   assert.equal(generated.report.variables, 4);
   assert.equal(generated.report.switches, 2);
   assert.equal(generated.report.messages, 1);
@@ -969,7 +968,7 @@ test('preflight rejects simultaneous physical PAL conflicts but allows sequentia
   assert.equal(shared.diagnostics.some((entry) => entry.code === 'palette-runtime-conflict'), false);
 });
 
-test('preflight falls non-white messages back to white when PAL0 index 1 is occupied', () => {
+test('preflight reserves the selected PAL1 or PAL2 index 14 for normal-intensity message glyphs', () => {
   const pal0Background = {
     paletteFingerprint: 'bg',
     metadata: { uniqueTiles: 1, usesPaletteIndex1: true },
@@ -979,24 +978,38 @@ test('preflight falls non-white messages back to white when PAL0 index 1 is occu
     { type: 'background', assetId: 'bg', palette: 'PAL0' },
     { type: 'message', text: 'red', textColor: '#ff0000' },
   ] }] }, assetBindings);
-  const occupiedDiagnostic = occupied.diagnostics.find((entry) => entry.code === 'pal0-message-index1-conflict');
-  assert.equal(occupiedDiagnostic?.severity, 'warning');
-  assert.deepEqual(occupied.messageColorFallbacks, ['0:1']);
+  assert.equal(occupied.diagnostics.some((entry) => entry.code?.startsWith('pal0-message-')), false);
+  assert.deepEqual(occupied.messageColorFallbacks, []);
 
-  const overlay = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [
-    { type: 'spritetext', slot: 0, text: 'overlay', x: 0, y: 0, visible: true },
-    { type: 'message', text: 'red', textColor: '#ff0000' },
-  ] }] }, { assets: {} });
-  const overlayDiagnostic = overlay.diagnostics.find((entry) => entry.code === 'pal0-message-spritetext-conflict');
-  assert.equal(overlayDiagnostic?.severity, 'warning');
-  assert.deepEqual(overlay.messageColorFallbacks, ['0:1']);
+  const spriteBinding = (fingerprint, paletteIndicesUsed) => ({
+    paletteFingerprint: fingerprint,
+    metadata: { frameWidth: 8, frameHeight: 8, maxNumTile: 1, maxNumSprite: 1, paletteIndicesUsed },
+  });
+  const pal1BackgroundUsesPal2 = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [
+    { type: 'background', assetId: 'bg', palette: 'PAL1' },
+    { type: 'sprite', slot: 0, assetId: 'actor', palette: 'PAL2', x: 0, y: 0, visible: true },
+    { type: 'message', text: 'white' },
+  ] }] }, { assets: { bg: pal0Background, actor: spriteBinding('actor', [14]) } });
+  const pal2Diagnostic = pal1BackgroundUsesPal2.diagnostics.find((entry) => entry.code === 'message-normal-index-conflict');
+  assert.equal(pal2Diagnostic?.severity, 'error');
+  assert.equal(pal2Diagnostic?.palette, 'PAL2');
+  assert.deepEqual(pal2Diagnostic?.assetIds, ['actor']);
 
-  const white = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [
+  const pal0BackgroundUsesPal1 = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [
     { type: 'background', assetId: 'bg', palette: 'PAL0' },
-    { type: 'message', text: 'white', textColor: '#ffffff' },
-  ] }] }, assetBindings);
-  assert.equal(white.diagnostics.some((entry) => entry.code?.startsWith('pal0-message-')), false);
-  assert.deepEqual(white.messageColorFallbacks, []);
+    { type: 'sprite', slot: 0, assetId: 'actor', palette: 'PAL1', x: 0, y: 0, visible: true },
+    { type: 'message', text: 'white' },
+  ] }] }, { assets: { bg: pal0Background, actor: spriteBinding('actor', [14]) } });
+  assert.equal(pal0BackgroundUsesPal1.diagnostics.some((entry) => entry.code === 'message-normal-index-conflict' && entry.palette === 'PAL1'), true);
+
+  const safe = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [
+    { type: 'background', assetId: 'bg', palette: 'PAL0' },
+    { type: 'sprite', slot: 0, assetId: 'actor', palette: 'PAL1', x: 0, y: 0, visible: true },
+    { type: 'spritetext', slot: 1, text: 'overlay', x: 0, y: 0, visible: true },
+    { type: 'message', text: 'red', textColor: '#ff0000' },
+  ] }] }, { assets: { bg: pal0Background, actor: spriteBinding('actor', [13]) } });
+  assert.equal(safe.diagnostics.some((entry) => entry.code === 'message-normal-index-conflict'), false);
+  assert.deepEqual(safe.messageColorFallbacks, []);
 });
 test('builder rejects case-insensitive ResComp symbol conflicts', (t) => {
   const target = temporaryDirectory(t, 'md-novel-symbol-target-');
@@ -1077,6 +1090,26 @@ test('Test Play cache reuses unchanged objects and forces clean after generated 
   manifest = JSON.parse(fs.readFileSync(path.join(target, 'data', 'md-novel', 'generated-manifest.json'), 'utf8'));
   assert.equal(manifest.lastBuildSuccess, false);
   assert.equal(logs.some((line) => /cache mismatch/.test(line)), true);
+});
+
+test('incremental build rewrites absolute ResComp dependencies below a non-ASCII project path', (t) => {
+  const target = temporaryDirectory(t, 'md-novel-日本語-path-');
+  const dependencyDir = path.join(target, 'out', 'res');
+  fs.mkdirSync(dependencyDir, { recursive: true });
+  const dependencyPath = path.join(dependencyDir, 'novel.d');
+  const absoluteRoot = path.resolve(target).replace(/\\/g, '/');
+  fs.writeFileSync(dependencyPath, [
+    'out/res/novel.o: res/novel.res \\',
+    `${absoluteRoot}/res/novel/backgrounds/bg.png \\`,
+    `${absoluteRoot}/res/novel/font/generated.png`,
+    '',
+  ].join('\n'));
+  assert.equal(builder.normalizeRescompDependencyFiles(target), 1);
+  const normalized = fs.readFileSync(dependencyPath, 'utf8');
+  assert.equal(normalized.includes(absoluteRoot), false);
+  assert.match(normalized, /res\/novel\/backgrounds\/bg\.png/);
+  assert.match(normalized, /res\/novel\/font\/generated\.png/);
+  assert.equal(builder.normalizeRescompDependencyFiles(target), 0);
 });
 
 test('target profile v1 migrates to sprite shadow profile v2 without discarding extensions', () => {
@@ -1205,12 +1238,12 @@ test('cover crop honors all anchor axes and emits the exact MD dimensions', () =
   assert.equal(left.rgba[0] < right.rgba[0], true);
 });
 
-test('message hardware budget uses 377 tiles, 2-character chunks, and adaptive top separation', () => {
-  const message = { type: 'message', speaker: 'A'.repeat(16), text: 'A'.repeat(75) };
+test('message hardware budget uses 377 tiles and one 16px sprite per glyph', () => {
+  const message = { type: 'message', speaker: 'A'.repeat(8), text: 'A'.repeat(50) };
   const plain = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [message] }] }, { assets: {} });
   assert.equal(plain.messageVramTiles, 377);
-  assert.equal(plain.maxMessagePieces, 30);
-  assert.equal(plain.maxRevealFrames, 3);
+  assert.equal(plain.maxMessagePieces, 59);
+  assert.equal(plain.maxRevealFrames, 4);
   const afterAdvance = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', fullScreenBg: true, commands: [
     message,
     { type: 'sprite', slot: 0, assetId: 'actor', palette: 'PAL1', x: 0, y: 128, visible: true },
@@ -1223,11 +1256,17 @@ test('message hardware budget uses 377 tiles, 2-character chunks, and adaptive t
     { type: 'sprite', slot: 0, assetId: 'actor', palette: 'PAL1', x: 0, y: 121, visible: true },
     message,
   ] }] }, { assets: { actor } });
-  assert.deepEqual(adaptive.messageSeparateTop, ['0:1']);
-  assert.equal(adaptive.maxMessagePieces, 38);
-  assert.equal(adaptive.maxSpritePieces, 39);
+  assert.deepEqual(adaptive.messageSeparateTop, []);
+  assert.equal(adaptive.maxMessagePieces, 59);
+  assert.equal(adaptive.maxSpritePieces, 60);
   assert.equal(adaptive.maxScanlinePixels, 304);
   assert.equal(adaptive.diagnostics.length, 0);
+
+  const tooMany = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [{
+    type: 'message', speaker: 'A'.repeat(16), text: 'A'.repeat(75),
+  }] }] }, { assets: {} });
+  assert.equal(tooMany.maxMessagePieces, 92);
+  assert.equal(tooMany.diagnostics.some((entry) => entry.code === 'sprite-piece-budget'), true);
 });
 
 test('choice layout lowers only when the shifted rows reduce scanline overflow', () => {
@@ -1285,41 +1324,68 @@ test('preflight rejects shadow operator palette indices and lower-band SpriteTex
   assert.equal(upperText.diagnostics.some((entry) => entry.code === 'spritetext-shadow-overlap'), false);
 });
 
-test('runtime uses one y=128 H interrupt, high-priority manual-VRAM message sprites, and queued DMA', () => {
+test('runtime guards the y=128 H interrupt and uses low-priority index 14 message sprites', () => {
   const root = path.join(__dirname, '..', 'plugins', 'md-novel-builder');
   const runtime = fs.readFileSync(path.join(root, 'template', 'src', 'novel_runtime', 'novel_runtime.c'), 'utf8');
   const header = fs.readFileSync(path.join(root, 'template', 'inc', 'novel_runtime', 'novel_runtime.h'), 'utf8');
   const res = codegen.generateResFile({ backgrounds: [], sprites: [], bgm: [], sfx: [] });
-  assert.match(runtime, /#define NOVEL_MESSAGE_SPRITES\s+38/);
+  assert.match(runtime, /#define NOVEL_MESSAGE_SPRITES\s+80/);
   assert.match(runtime, /#define NOVEL_MESSAGE_VRAM_TILES\s+377/);
   assert.match(header, /u16 overlayVramTiles;[\s\S]*?bool fullScreen;/);
   assert.match(runtime, /runtimeProject->scenes\[currentScene\]\.overlayVramTiles/);
   assert.match(runtime, /SYS_setVIntCallback\(novelVInt\)/);
   assert.match(runtime, /static HINTERRUPT_CALLBACK novelHInt\(void\)/);
   assert.match(runtime, /SYS_setHIntCallback\(novelHInt\)/);
-  assert.match(runtime, /VDP_setHIntCounter\(127\)/);
-  assert.match(runtime, /VDP_setHilightShadow\(TRUE\)/);
+  assert.match(runtime, /VDP_setHIntCounter\(1\)/);
+  assert.match(runtime, /shadowHIntCount\+\+;[\s\S]*?shadowHIntCount >= 64/);
+  assert.match(runtime, /VDP_setHilightShadow\(shadowHIntCount >= 64\)/);
   assert.match(runtime, /SPR_FLAG_INSERT_HEAD \| SPR_FLAG_AUTO_VISIBILITY/);
   const messageEmitter = runtime.slice(runtime.indexOf('static void emitMessageSprite'), runtime.indexOf('static void finishMessageSprites'));
   assert.doesNotMatch(messageEmitter, /SPR_FLAG_AUTO_VRAM_ALLOC/);
   assert.match(runtime, /SPR_setAlwaysOnTop\(sprite\)/);
-  assert.match(runtime, /SPR_setPriority\(sprite, TRUE\)/);
+  assert.match(runtime, /#define NOVEL_MESSAGE_COLOR_INDEX\s+14/);
+  assert.doesNotMatch(runtime, /NOVEL_MESSAGE_MASK_INDEX/);
+  assert.match(runtime, /for \(index = 0; index < tiles \* 32; index\+\+\) target\[index\] = 0/);
+  assert.match(runtime, /setPackedPixel\([^;]+NOVEL_MESSAGE_COLOR_INDEX\);/);
+  assert.match(runtime, /return \(backgroundPalette == PAL1\) \? PAL2 : PAL1;/);
+  assert.match(messageEmitter, /TILE_ATTR_FULL\(messagePalette, FALSE,/);
+  assert.match(runtime, /emitMessageSprite\(&nov_msg_16x16, x \+ glyph \* 16, y, tile\)/);
+  assert.match(runtime, /emitMessageSprite\(&nov_msg_8x8, 304,/);
+  assert.match(runtime, /emitMessageSprite\(&nov_msg_8x8, 8, topY \+ choiceIndex \* 16 \+ 4,/);
+  assert.match(messageEmitter, /SPR_setPalette\(sprite, messagePalette\)/);
+  assert.match(runtime, /SPR_setPriority\(sprite, FALSE\)/);
+  assert.match(runtime, /messagePaletteOriginalColor = currentPalette\[index\];/);
+  assert.match(runtime, /currentPalette\[index\] = messagePaletteOriginalColor;[\s\S]*?PAL_setColors\(index, &currentPalette\[index\], 1, DMA_QUEUE_COPY\);/);
+  assert.match(runtime, /messageDownTile\[8\][^\r\n]+0x0EEEEEE0/);
+  const spriteTextRenderer = runtime.slice(runtime.indexOf('static void renderSpriteTexts'), runtime.indexOf('static void clearSpriteTexts'));
+  assert.match(spriteTextRenderer, /TILE_ATTR_FULL\(PAL0, FALSE, FALSE, FALSE, 0\), previousOverlayCells/);
+  assert.match(spriteTextRenderer, /TILE_ATTR_FULL\(PAL0, TRUE, FALSE, FALSE, tileIndex\), cell/);
+  assert.match(runtime, /messagePrepareStage == 2[\s\S]*?queueBottomRow\(\);[\s\S]*?queueCursorTile\(1\);[\s\S]*?else[\s\S]*?renderMessageSprites\(\);/);
   assert.match(runtime, /messageCursorKind = 0;[\s\S]*?hideMessageSprites\(\);[\s\S]*?activeMessage = NULL;/);
   assert.match(runtime, /setAllColorsSafe\(effectPalette\)/);
   assert.match(runtime, /setHorizontalScrollSafe\(offset, -offset\)/);
   assert.match(runtime, /VDP_loadTileData\([^;]+DMA_QUEUE_COPY\)/);
   assert.match(runtime, /PAL_setPalette\(palette, colors, DMA_QUEUE_COPY\)/);
-  assert.match(runtime, /PAL_setPalette\(PAL0, currentPalette, DMA_QUEUE_COPY\)/);
+  assert.match(runtime, /PAL_setColors\(index, &currentPalette\[index\], 1, DMA_QUEUE_COPY\)/);
   assert.match(runtime, /PAL_setColors\(0, colors, 64, DMA_QUEUE_COPY\)/);
-  const disarm = runtime.slice(runtime.indexOf('static void disarmMessageShadow'), runtime.indexOf('static void hideWindow'));
-  assert.doesNotMatch(disarm, /VDP_setHInterrupt|VDP_setHilightShadow/);
+  const disarm = runtime.slice(runtime.indexOf('static void disarmMessageShadow'), runtime.indexOf('static void armMessageShadow'));
+  assert.match(disarm, /SYS_disableInts\(\);[\s\S]*?VDP_setHInterrupt\(FALSE\);[\s\S]*?SYS_setHIntCallback\(NULL\);[\s\S]*?SYS_setVIntCallback\(NULL\);[\s\S]*?VDP_setHilightShadow\(FALSE\);[\s\S]*?SYS_enableInts\(\);/);
+  const arm = runtime.slice(runtime.indexOf('static void armMessageShadow'), runtime.indexOf('static void hideWindow'));
+  assert.match(arm, /SYS_disableInts\(\);[\s\S]*?shadowFrameReady = FALSE;[\s\S]*?VDP_setHInterrupt\(FALSE\);[\s\S]*?SYS_setHIntCallback\(novelHInt\);[\s\S]*?SYS_setVIntCallback\(novelVInt\);[\s\S]*?VDP_setHIntCounter\(1\);[\s\S]*?VDP_setVInterrupt\(TRUE\);[\s\S]*?VDP_setHInterrupt\(TRUE\);[\s\S]*?SYS_enableInts\(\);/);
+  const vInt = runtime.slice(runtime.indexOf('static void novelVInt'), runtime.indexOf('static s16 effectiveX'));
+  assert.match(vInt, /shadowHIntCount = 0;[\s\S]*?VDP_setHilightShadow\(FALSE\);[\s\S]*?shadowFrameReady = TRUE;/);
+  const backgroundLoader = runtime.slice(runtime.indexOf('static void loadBackground'), runtime.indexOf('static void setActor'));
+  assert.match(backgroundLoader, /hideWindow\(\);[\s\S]*?VDP_clearPlane\(BG_B, TRUE\);[\s\S]*?VDP_drawImageEx\(BG_B,/);
+  const init = runtime.slice(runtime.indexOf('void novelInit'), runtime.indexOf('void novelUpdate'));
+  assert.match(init, /VDP_setHInterrupt\(FALSE\);[\s\S]*?SYS_setVIntCallback\(NULL\);[\s\S]*?SYS_setHIntCallback\(NULL\);/);
   assert.doesNotMatch(runtime, /VDP_setTextPlane\(WINDOW\)/);
   assert.match(header, /NOV_MSG_SEPARATE_TOP\s+0x01/);
   assert.match(header, /NOV_CHOICE_LOWERED\s+0x01/);
   assert.match(header, /u8 layoutFlags;[\s\S]*?s16 variableIndex;/);
   assert.match(runtime, /choiceTopY\(void\)[\s\S]*?activeChoice->layoutFlags & NOV_CHOICE_LOWERED/);
-  assert.match(runtime, /emitMerged\(0, 1, 40, topY,/);
+  assert.match(runtime, /emitGlyphRow\(messageRowLengths\[0\], 40, topY,/);
   assert.match(runtime, /topY \+ choiceIndex \* 16 \+ 4/);
-  assert.match(res, /SPRITE nov_msg_32x32/);
+  assert.doesNotMatch(res, /SPRITE nov_msg_(?:32x16|16x32|32x32)/);
+  assert.match(res, /SPRITE nov_msg_16x16/);
   assert.match(res, /SPRITE nov_msg_8x8/);
 });
