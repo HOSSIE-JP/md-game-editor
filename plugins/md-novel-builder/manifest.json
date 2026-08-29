@@ -2,7 +2,7 @@
   "id": "md-novel-builder",
   "name": "MDノベルビルダー",
   "description": "PCE VN JSON v2互換スクリプトをSGDK 2.11用runtimeとデータへ変換します。",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "icon": "build",
   "types": ["build"],
   "generator": false,

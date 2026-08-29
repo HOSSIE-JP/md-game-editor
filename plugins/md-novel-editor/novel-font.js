@@ -5,7 +5,7 @@ const iconv = require('iconv-lite');
 const { decodePng, encodeIndexedPng } = require('./novel-image');
 
 const FONT_FORMAT_VERSION = 1;
-const FONT_RENDERER = 'subset-16x16-v1';
+const FONT_RENDERER = 'subset-16x16-v2-baseline';
 const FONT_CELL_SIZE = 16;
 const FONT_GRID_COLUMNS = 16;
 const FONT_OUTPUT_PATH = 'res/novel/font/generated.png';

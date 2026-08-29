@@ -168,9 +168,18 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   let decisionResolve = null;
   const pcePaletteModal = api.createModal({
     id: `${plugin.id}-pce-palette-import`,
-    html: `<div class="settings-form compact-form mn-pce-palette-dialog"><h3>PCE取込パレット割り当て</h3><p>変換後のBGと各Sprite SLOTが使用するMDパレットを指定します。同じパレットを複数に割り当てて共有できます。</p><div class="mn-pce-palette-grid"><label><span>BG</span><select data-pce-palette="background"></select></label><label><span>SLOT0</span><select data-pce-palette="slot0"></select></label><label><span>SLOT1</span><select data-pce-palette="slot1"></select></label><label><span>SLOT2</span><select data-pce-palette="slot2"></select></label><label><span>SLOT3</span><select data-pce-palette="slot3"></select></label></div><p class="hint">PAL0 index 0は背景色、index 1はメッセージ文字色です。SpriteはH/S安全化のためPAL0-PAL2 index 14、PAL3 index 14/15も使用しません。</p><div class="mn-confirm-actions"><button type="button" class="primary" data-pce-palette-action="confirm">この割り当てで取込</button><button type="button" data-pce-palette-action="cancel">キャンセル</button></div></div>`,
+    html: `<div class="settings-form compact-form mn-pce-palette-dialog"><h3>PCE取込パレット割り当て</h3><p>変換後のBGと各Sprite SLOTが使用するMDパレットを指定します。同じパレットを複数に割り当てて共有できます。</p><div class="mn-pce-palette-grid"><label><span>BG</span><select data-pce-palette="background"></select></label><label><span>SLOT0</span><select data-pce-palette="slot0"></select></label><label><span>SLOT1</span><select data-pce-palette="slot1"></select></label><label><span>SLOT2</span><select data-pce-palette="slot2"></select></label><label><span>SLOT3</span><select data-pce-palette="slot3"></select></label></div><p class="hint">PAL0 index 0は背景色、index 1はメッセージ文字色です。SpriteはH/S安全化のためPAL0-PAL2 index 14、PAL3 index 14/15も使用しません。</p><div class="mn-confirm-actions"><button type="button" class="primary" data-pce-palette-action="confirm">背景ソース確認へ</button><button type="button" data-pce-palette-action="cancel">キャンセル</button></div></div>`,
   });
   let pcePaletteResolve = null;
+  const pceBackgroundModal = api.createModal({
+    id: `${plugin.id}-pce-background-import`,
+    panelClassName: 'app-panel app-panel-lg mn-pce-background-panel',
+    html: `<div class="settings-form mn-pce-background-dialog"><h3>PCE背景ソース確認</h3><p>224×136の通常BGを320×192へ変換します。高画質候補、PCE画像へのフォールバック、クロップ位置を背景ごとに確認してください。</p><div class="mn-pce-background-summary" data-pce-background-summary></div><div class="mn-pce-background-list" data-pce-background-list></div><div class="mn-confirm-actions"><button type="button" class="primary" data-pce-background-action="confirm">この設定で取込</button><button type="button" data-pce-background-action="cancel">キャンセル</button></div></div>`,
+  });
+  let pceBackgroundResolve = null;
+  let pceBackgroundInspection = null;
+  let pceBackgroundSourceDir = '';
+  let pceBackgroundPreviewObserver = null;
 
 
   function askDecision(options = {}) {
@@ -228,6 +237,150 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     const button = event.target.closest('[data-pce-palette-action]');
     if (!button) return;
     finishPcePaletteAssignments(button.dataset.pcePaletteAction === 'confirm');
+  }
+
+  const cropAnchors = [
+    ['top-left', '左上'], ['top', '上'], ['top-right', '右上'],
+    ['left', '左'], ['center', '中央'], ['right', '右'],
+    ['bottom-left', '左下'], ['bottom', '下'], ['bottom-right', '右下'],
+  ];
+
+  function renderPceBackgroundInspection(inspection) {
+    const backgrounds = inspection?.backgrounds || [];
+    pceBackgroundModal.panel.querySelector('[data-pce-background-summary]').textContent = backgrounds.length
+      ? `${backgrounds.length}件の通常BGを320×192へ変換します。高信頼候補だけ自動選択されています。`
+      : '224×136の通常BGはありません。既存画像をそのまま取り込みます。';
+    pceBackgroundModal.panel.querySelector('[data-pce-background-list]').innerHTML = backgrounds.map((background) => {
+      const defaultPath = background.defaultSelection?.mode === 'source' ? background.defaultSelection.relativePath : '__pce__';
+      const sourceOptions = [
+        `<option value="__pce__" ${defaultPath === '__pce__' ? 'selected' : ''}>PCE画像を拡大 (${background.original.width}×${background.original.height})</option>`,
+        ...background.candidates.map((candidate) => `<option value="${escapeHtml(candidate.relativePath)}" ${defaultPath === candidate.relativePath ? 'selected' : ''}>${escapeHtml(candidate.relativePath)} (${candidate.width}×${candidate.height})${candidate.lowQualityPath ? ' ⚠低優先' : ''}</option>`),
+      ].join('');
+      const anchorOptions = cropAnchors.map(([value, label]) => `<option value="${value}" ${value === (background.defaultSelection?.anchor || 'center') ? 'selected' : ''}>${label}</option>`).join('');
+      return `<article class="mn-pce-background-row" data-pce-background-row data-asset-id="${escapeHtml(background.assetId)}"><header><strong>${escapeHtml(background.assetId)}</strong><span>${escapeHtml(background.source)}</span></header><div class="mn-pce-background-controls"><label><span>取込元</span><select data-pce-background-source>${sourceOptions}</select></label><label><span>クロップ</span><select data-pce-background-anchor>${anchorOptions}</select></label><button type="button" data-pce-background-preview>プレビュー</button></div><div class="mn-pce-background-preview"><img data-pce-background-image alt="${escapeHtml(background.assetId)} preview" hidden><span data-pce-background-status>プレビュー未読込</span></div></article>`;
+    }).join('');
+  }
+
+  function askPceBackgroundSelections(inspection, sourceProjectDir) {
+    if (pceBackgroundResolve) pceBackgroundResolve(null);
+    pceBackgroundInspection = inspection;
+    pceBackgroundSourceDir = sourceProjectDir;
+    renderPceBackgroundInspection(inspection);
+    pceBackgroundModal.open();
+    startPceBackgroundPreviewObservation();
+    return new Promise((resolve) => { pceBackgroundResolve = resolve; });
+  }
+
+  function selectionFromBackgroundRow(row) {
+    const background = (pceBackgroundInspection?.backgrounds || []).find((entry) => entry.assetId === row?.dataset.assetId);
+    if (!background) return null;
+    const selectedPath = row.querySelector('[data-pce-background-source]')?.value || '__pce__';
+    const anchor = row.querySelector('[data-pce-background-anchor]')?.value || 'center';
+    if (selectedPath === '__pce__') return { mode: 'pce', relativePath: background.source, sha256: background.original.sha256, anchor };
+    const candidate = background.candidates.find((entry) => entry.relativePath === selectedPath);
+    return candidate ? { mode: 'source', relativePath: candidate.relativePath, sha256: candidate.sha256, anchor } : null;
+  }
+
+  function finishPceBackgroundSelections(confirmed) {
+    const resolve = pceBackgroundResolve;
+    pceBackgroundResolve = null;
+    pceBackgroundPreviewObserver?.disconnect();
+    pceBackgroundPreviewObserver = null;
+    if (!confirmed) {
+      pceBackgroundModal.close();
+      resolve?.(null);
+      return;
+    }
+    const selections = {};
+    for (const row of pceBackgroundModal.panel.querySelectorAll('[data-pce-background-row]')) {
+      const selection = selectionFromBackgroundRow(row);
+      if (selection) selections[row.dataset.assetId] = selection;
+    }
+    pceBackgroundModal.close();
+    resolve?.(selections);
+  }
+
+  async function loadPceBackgroundPreview(row) {
+    const selection = selectionFromBackgroundRow(row);
+    const status = row?.querySelector('[data-pce-background-status]');
+    const image = row?.querySelector('[data-pce-background-image]');
+    if (!selection || !status || !image) return;
+    const requestId = String((Number(row.dataset.pcePreviewRequest) || 0) + 1);
+    row.dataset.pcePreviewRequest = requestId;
+    status.textContent = '読込中…';
+    image.hidden = true;
+    image.removeAttribute('src');
+    let result;
+    try {
+      result = await api.plugins.invokeHook(plugin.id, 'readPceNovelImportPreview', {
+        sourceProjectDir: pceBackgroundSourceDir,
+        sourceRevision: pceBackgroundInspection?.sourceRevision,
+        assetId: row.dataset.assetId,
+        selection,
+      });
+    } catch (error) {
+      result = { error: String(error?.message || error) };
+    }
+    if (row.dataset.pcePreviewRequest !== requestId) return;
+    if (!result?.dataUrl) {
+      status.textContent = result?.error || 'プレビューに失敗しました';
+      return;
+    }
+    image.onload = () => {
+      if (row.dataset.pcePreviewRequest !== requestId) return;
+      image.hidden = false;
+      status.textContent = `${result.sourceWidth}×${result.sourceHeight} → ${result.targetWidth}×${result.targetHeight}`;
+    };
+    image.onerror = () => {
+      if (row.dataset.pcePreviewRequest !== requestId) return;
+      image.hidden = true;
+      status.textContent = 'プレビュー画像を表示できませんでした';
+    };
+    image.src = result.dataUrl;
+  }
+
+  function startPceBackgroundPreviewObservation() {
+    pceBackgroundPreviewObserver?.disconnect();
+    pceBackgroundPreviewObserver = null;
+    const list = pceBackgroundModal.panel.querySelector('[data-pce-background-list]');
+    const rows = [...list.querySelectorAll('[data-pce-background-row]')];
+    if (!rows.length) return;
+    const loadOnce = (row) => {
+      if (row.dataset.pcePreviewObserved === 'true') return;
+      row.dataset.pcePreviewObserved = 'true';
+      void loadPceBackgroundPreview(row);
+    };
+    if (typeof IntersectionObserver !== 'function') {
+      rows.slice(0, 3).forEach(loadOnce);
+      return;
+    }
+    pceBackgroundPreviewObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        pceBackgroundPreviewObserver?.unobserve(entry.target);
+        loadOnce(entry.target);
+      }
+    }, { root: list, rootMargin: '160px 0px' });
+    rows.forEach((row) => pceBackgroundPreviewObserver.observe(row));
+  }
+
+  function onPceBackgroundClick(event) {
+    const action = event.target.closest('[data-pce-background-action]');
+    if (action) {
+      finishPceBackgroundSelections(action.dataset.pceBackgroundAction === 'confirm');
+      return;
+    }
+    const preview = event.target.closest('[data-pce-background-preview]');
+    if (preview) void loadPceBackgroundPreview(preview.closest('[data-pce-background-row]'));
+  }
+
+  function onPceBackgroundChange(event) {
+    const row = event.target.closest('[data-pce-background-row]');
+    if (row && event.target.matches('[data-pce-background-source],[data-pce-background-anchor]')) void loadPceBackgroundPreview(row);
+  }
+
+  function onPceBackgroundBackdropClick(event) {
+    if (event.target.closest('[data-modal-close]')) finishPceBackgroundSelections(false);
   }
 
   function setStatus(message, tone = '') {
@@ -546,16 +699,20 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     context.textAlign = 'left';
     context.textBaseline = 'alphabetic';
     context.font = `${size}px "${state.fontFaceName}"`;
+    const baselineMetrics = context.measureText('国');
+    const fontAscent = Number(baselineMetrics.fontBoundingBoxAscent
+      || baselineMetrics.actualBoundingBoxAscent || size * .8);
+    const fontDescent = Number(baselineMetrics.fontBoundingBoxDescent
+      || baselineMetrics.actualBoundingBoxDescent || size * .2);
+    const baselineOffset = (16 - fontAscent - fontDescent) / 2 + fontAscent;
     for (const [index, entry] of plan.entries.entries()) {
       if (entry.character === '　') continue;
       const metrics = context.measureText(entry.character);
-      const ascent = Number(metrics.actualBoundingBoxAscent || size * .8);
-      const descent = Number(metrics.actualBoundingBoxDescent || size * .2);
       const width = Number(metrics.width || size);
       const cellX = (index % 16) * 16;
       const cellY = Math.floor(index / 16) * 16;
       const x = cellX + (16 - width) / 2 + xOffset;
-      const baseline = cellY + (16 - ascent - descent) / 2 + ascent + yOffset;
+      const baseline = cellY + baselineOffset + yOffset;
       context.save();
       context.beginPath();
       context.rect(cellX, cellY, 16, 16);
@@ -974,13 +1131,26 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     if (!/[/\\]project\.json$/i.test(picked.sourcePath)) { setStatus('PCE project.jsonを選択してください', 'error'); return; }
     const paletteAssignments = await askPcePaletteAssignments();
     if (!paletteAssignments) return;
-    setStatus('PCEノベルをMD向けに変換中…');
+    const sourceProjectDir = sourceDirectory(picked.sourcePath);
+    setStatus('PCE背景の高画質ソースを検査中…');
     try {
-      const result = await api.plugins.invokeHook(plugin.id, 'importPceNovelProject', { sourceProjectDir: sourceDirectory(picked.sourcePath), paletteAssignments });
+      const inspection = await api.plugins.invokeHook(plugin.id, 'inspectPceNovelImport', { sourceProjectDir });
+      if (!inspection?.backgrounds) throw new Error(inspection?.error || 'PCE背景の検査に失敗しました');
+      const backgroundSelections = await askPceBackgroundSelections(inspection, sourceProjectDir);
+      if (!backgroundSelections) { setStatus('PCE取込をキャンセルしました'); return; }
+      setStatus('PCEノベルをMD向けに変換中…');
+      const result = await api.plugins.invokeHook(plugin.id, 'importPceNovelProject', {
+        sourceProjectDir,
+        paletteAssignments,
+        sourceRevision: inspection.sourceRevision,
+        backgroundSelections,
+      });
       if (!result?.sceneDocument) throw new Error(result?.error || 'PCE importに失敗しました');
       adoptSnapshot(result, { resetHistory: true });
       render();
-      setStatus(`取込完了: visual ${result.importReport?.visualAssets || 0}, PSG ${result.importReport?.audioVariants || 0}`, 'ok');
+      const report = result.importReport || {};
+      const warningCount = report.warnings?.length || 0;
+      setStatus(`取込完了: HQ ${report.hqBackgrounds || 0}, PCE拡大 ${report.fallbackBackgrounds || 0}, visual ${report.visualAssets || 0}${warningCount ? `, 警告 ${warningCount}` : ''}`, warningCount ? 'warn' : 'ok');
     } catch (error) { setStatus(error.message, 'error'); }
   }
 
@@ -1445,6 +1615,9 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   root.addEventListener('dragend', onDragEnd);
   root.addEventListener('pointerdown', startResize);
   pcePaletteModal.panel.addEventListener('click', onPcePaletteClick);
+  pceBackgroundModal.panel.addEventListener('click', onPceBackgroundClick);
+  pceBackgroundModal.panel.addEventListener('change', onPceBackgroundChange);
+  pceBackgroundModal.modal.addEventListener('click', onPceBackgroundBackdropClick);
   window.addEventListener('keydown', onKeyDown);
 
   const observer = new MutationObserver(() => {
@@ -1486,6 +1659,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       window.removeEventListener('keydown', onKeyDown);
       decision.panel.removeEventListener('click', onDecisionClick);
       pcePaletteModal.panel.removeEventListener('click', onPcePaletteClick);
+      pceBackgroundModal.panel.removeEventListener('click', onPceBackgroundClick);
+      pceBackgroundModal.panel.removeEventListener('change', onPceBackgroundChange);
+      pceBackgroundModal.modal.removeEventListener('click', onPceBackgroundBackdropClick);
+      pceBackgroundPreviewObserver?.disconnect();
+      pceBackgroundModal.destroy();
       pcePaletteModal.destroy();
       decision.destroy();
       if (style.owned) style.element.remove();

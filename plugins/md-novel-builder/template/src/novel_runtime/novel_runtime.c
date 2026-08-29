@@ -139,7 +139,9 @@ static const u32 choiceCursorTile[8] = { 0x01000000, 0x01100000, 0x01110000, 0x0
 
 static u16 messageTileBase(void)
 {
-    return workTileBase + runtimeProject->overlayVramTiles;
+    if ((currentScene < 0) || (currentScene >= runtimeProject->sceneCount))
+        return workTileBase;
+    return workTileBase + runtimeProject->scenes[currentScene].overlayVramTiles;
 }
 
 static HINTERRUPT_CALLBACK novelHInt(void)
@@ -1057,8 +1059,16 @@ static void loadBackground(const NovelCommand *command)
     backgroundPalette = (u8)palette;
     claimPaletteOwner(backgroundPalette);
     loadPhysicalPalette(palette, image->palette->data, paletteId);
-    x = runtimeProject->legacyCoordinates ? (u16)(4 + command->x) : (u16)(command->x >> 3);
-    y = runtimeProject->legacyCoordinates ? (u16)command->y : (u16)(command->y >> 3);
+    if (command->flags & NOV_FLAG_BG_NATIVE_TILE)
+    {
+        x = (u16)command->x;
+        y = (u16)command->y;
+    }
+    else
+    {
+        x = runtimeProject->legacyCoordinates ? (u16)(4 + command->x) : (u16)(command->x >> 3);
+        y = runtimeProject->legacyCoordinates ? (u16)command->y : (u16)(command->y >> 3);
+    }
     VDP_drawImageEx(BG_B, image, TILE_ATTR_FULL(palette, FALSE, FALSE, FALSE, TILE_USER_INDEX), x, y, FALSE, TRUE);
     backgroundTileCount = image->tileset->numTile;
     workTileBase = TILE_USER_INDEX + backgroundTileCount;

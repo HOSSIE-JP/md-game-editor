@@ -8,6 +8,16 @@ export function effectiveX(commandType, value, coordinateMode = 'pce-legacy-256'
   return commandType === 'background' ? 32 + x * 8 : 32 + x;
 }
 
+export function backgroundPosition(command, binding, coordinateMode = 'pce-legacy-256') {
+  if (binding?.placementMode === 'md-native-tiles') {
+    return { x: (Number(command?.x) || 0) * 8, y: (Number(command?.y) || 0) * 8 };
+  }
+  return {
+    x: effectiveX('background', command?.x, coordinateMode),
+    y: coordinateMode === 'pce-legacy-256' ? (Number(command?.y) || 0) * 8 : (Number(command?.y) || 0),
+  };
+}
+
 export function paginateMessage(text, columns = 19, rows = 4) {
   const widths = Array.from({ length: rows }, (_, index) => index === rows - 1 ? columns - 1 : columns);
   const pages = [];

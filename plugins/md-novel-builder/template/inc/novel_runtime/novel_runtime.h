@@ -28,6 +28,7 @@ typedef enum
 #define NOV_FLAG_FLIP_Y         0x04
 #define NOV_FLAG_ASYNC          0x08
 #define NOV_FLAG_FADE           0x10
+#define NOV_FLAG_BG_NATIVE_TILE 0x20
 
 #define NOV_FLAG_AUDIO_PLAY     0x01
 #define NOV_FLAG_AUDIO_STOP     0x02
@@ -124,6 +125,7 @@ typedef struct
     const NovelCommand *commands;
     u16 commandCount;
     s16 nextScene;
+    u16 overlayVramTiles;
     bool fullScreen;
 } NovelScene;
 
@@ -136,7 +138,6 @@ typedef struct
     bool autoEnabled;
     u16 autoWaitFrames;
     u16 spriteVramTiles;
-    u16 overlayVramTiles;
     bool legacyCoordinates;
     const s16 *initialVariables;
     u16 variableCount;

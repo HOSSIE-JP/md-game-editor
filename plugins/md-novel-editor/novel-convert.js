@@ -200,7 +200,7 @@ function convertVisualGroup(entries, options = {}) {
   const paletteProfile = ['pal0-reserved', 'shadow-safe-pal012', 'shadow-safe-pal3'].includes(requestedProfile) ? requestedProfile : 'general';
   const reserveTransparent = Boolean(options.reserveTransparent);
   const decoded = entries.map((entry) => ({
-    ...decodePng(entry.buffer),
+    ...(entry.decoded || decodePng(entry.buffer)),
     assetId: entry.asset.id,
     transparentIndex: entry.asset?.options?.transparentIndex,
     reserveTransparent: entry.asset.type === 'sprite',

@@ -27,8 +27,16 @@ const {
   generatePsgSongVgm,
   generatePsgSfxWav,
 } = require('./novel-convert');
-const { decodePng } = require('./novel-image');
+const { decodePng, encodeRgbaPng, normalizeCropAnchor, resizeRgbaCover } = require('./novel-image');
 const { analyzeNovelBudget } = require('./novel-budget');
+const {
+  TARGET_BACKGROUND,
+  decodeImageBuffer,
+  inspectPceBackgrounds,
+  previewDataUrl,
+  resizedBackground,
+  hashBuffer: hashImportBuffer,
+} = require('./pce-import');
 const {
   FONT_OUTPUT_PATH,
   BUNDLED_FONT_SOURCE,
@@ -676,7 +684,14 @@ async function readVisualSource(projectDir, catalogInfo, binding) {
   const relativePath = String(binding.originalSource || asset.source || '').split(String.fromCharCode(92)).join('/');
   if (!relativePath) throw new Error('Visual source is missing: ' + asset.id);
   const sourcePath = await resolveProjectPath(projectDir, relativePath, { mustExist: true });
-  return { asset, buffer: await fsp.readFile(sourcePath), relativePath };
+  const buffer = await fsp.readFile(sourcePath);
+  const entry = { asset, binding, buffer, relativePath };
+  const resize = binding?.conversion?.resize;
+  if (resize && Number(resize.width) > 0 && Number(resize.height) > 0) {
+    const decoded = decodePng(buffer);
+    entry.decoded = resizeRgbaCover(decoded, Number(resize.width), Number(resize.height), normalizeCropAnchor(resize.anchor));
+  }
+  return entry;
 }
 
 async function conversionFreshnessDiagnostics(projectDir, sceneDocument, catalog, bindings) {
@@ -751,7 +766,14 @@ function conversionInputHash(entries, options = {}) {
     paletteProfile: options.paletteProfile || 'general',
     reserveTransparent: Boolean(options.reserveTransparent),
     paletteGroup: options.paletteGroup || null,
-    sources: entries.map((entry) => ({ assetId: entry.asset.id, sha256: hashBuffer(entry.buffer) })).sort((left, right) => left.assetId.localeCompare(right.assetId)),
+    sources: entries.map((entry) => {
+      const resize = entry.binding?.conversion?.resize || entry.resize;
+      return {
+        assetId: entry.asset.id,
+        sha256: hashBuffer(entry.buffer),
+        ...(resize ? { resize } : {}),
+      };
+    }).sort((left, right) => left.assetId.localeCompare(right.assetId)),
   });
 }
 
@@ -980,6 +1002,109 @@ async function saveProject(projectDir, payload = {}) {
   return loadProject(projectDir);
 }
 
+async function readPceImportDocuments(sourceRoot) {
+  const [sceneDocument, catalog, projectConfig] = await Promise.all([
+    readJsonFile(await resolveSourcePath(sourceRoot, RELATIVE_PATHS.scene)),
+    readJsonFile(await resolveSourcePath(sourceRoot, RELATIVE_PATHS.catalog)),
+    readJsonFile(await resolveSourcePath(sourceRoot, 'project.json')),
+  ]);
+  return { sceneDocument, catalog, projectConfig };
+}
+
+const pceImportInspectionCache = new Map();
+
+function rememberPceImportInspection(sourceRoot, inspection) {
+  const key = path.resolve(sourceRoot).toLowerCase();
+  pceImportInspectionCache.delete(key);
+  pceImportInspectionCache.set(key, inspection);
+  while (pceImportInspectionCache.size > 4) {
+    pceImportInspectionCache.delete(pceImportInspectionCache.keys().next().value);
+  }
+}
+
+function cachedPceImportInspection(sourceRoot, sourceRevision) {
+  if (!sourceRevision) return null;
+  const inspection = pceImportInspectionCache.get(path.resolve(sourceRoot).toLowerCase());
+  return inspection?.sourceRevision === sourceRevision ? inspection : null;
+}
+
+async function inspectPceProject(_projectDir, payload = {}) {
+  const sourceRoot = await ensureProjectRoot(payload.sourceProjectDir);
+  const documents = await readPceImportDocuments(sourceRoot);
+  const readSource = async (relativePath) => fsp.readFile(await resolveSourcePath(sourceRoot, relativePath));
+  const inspection = await inspectPceBackgrounds(sourceRoot, documents.sceneDocument, documents.catalog, readSource);
+  rememberPceImportInspection(sourceRoot, inspection);
+  return { ok: true, sourceProjectDir: sourceRoot, ...inspection };
+}
+
+function pceAssetById(catalog, assetId) {
+  const assets = Array.isArray(catalog?.assets) ? catalog.assets : Array.isArray(catalog) ? catalog : [];
+  return assets.find((asset) => String(asset?.id || '') === String(assetId || '')) || null;
+}
+
+function selectedPceSource(asset, selection) {
+  const mode = selection?.mode === 'source' ? 'source' : 'pce';
+  const requestedPath = mode === 'source'
+    ? String(selection?.relativePath || '').replace(/\\/g, '/')
+    : String(asset?.source || '').replace(/\\/g, '/');
+  const relativePath = normalizeRelative(requestedPath).replace(/\\/g, '/');
+  if (mode === 'source' && !relativePath.startsWith('source/')) throw new Error(`HQ source must be under source/: ${relativePath}`);
+  return { mode, relativePath, anchor: normalizeCropAnchor(selection?.anchor), sha256: String(selection?.sha256 || '') };
+}
+
+async function readPceNovelImportPreview(_projectDir, payload = {}, context = {}) {
+  const sourceRoot = await ensureProjectRoot(payload.sourceProjectDir);
+  const { sceneDocument, catalog } = await readPceImportDocuments(sourceRoot);
+  const asset = pceAssetById(catalog, payload.assetId);
+  if (!asset || asset.type !== 'image') throw new Error(`PCE background asset is missing: ${payload.assetId}`);
+  const readSource = async (relativePath) => fsp.readFile(await resolveSourcePath(sourceRoot, relativePath));
+  const inspection = cachedPceImportInspection(sourceRoot, payload.sourceRevision)
+    || await inspectPceBackgrounds(sourceRoot, sceneDocument, catalog, readSource);
+  if (payload.sourceRevision && inspection.sourceRevision !== payload.sourceRevision) {
+    throw new Error('PCE source files changed. Run the import inspection again.');
+  }
+  rememberPceImportInspection(sourceRoot, inspection);
+  const inspected = inspection.backgrounds.find((entry) => entry.assetId === String(asset.id));
+  if (!inspected) throw new Error(`PCE background is not an eligible 224x136 image: ${payload.assetId}`);
+  const selected = selectedPceSource(asset, payload.selection || {});
+  const expected = selected.mode === 'source'
+    ? inspected.candidates.find((entry) => entry.relativePath === selected.relativePath)
+    : { sha256: inspected.original.sha256 };
+  if (!expected) throw new Error(`HQ source is not an inspected candidate for ${payload.assetId}: ${selected.relativePath}`);
+  const target = await resolveSourcePath(sourceRoot, selected.relativePath);
+  const buffer = await fsp.readFile(target);
+  const actualHash = hashImportBuffer(buffer);
+  if (expected.sha256 !== actualHash || (selected.sha256 && selected.sha256 !== actualHash)) throw new Error('PCE source changed. Run the import inspection again.');
+  const decoded = decodeImageBuffer(buffer, path.extname(selected.relativePath), {
+    allowElectronFallback: true,
+    decodeExternal: context.decodeExternal,
+  });
+  return {
+    ok: true,
+    assetId: String(asset.id),
+    mode: selected.mode,
+    relativePath: selected.relativePath,
+    sourceWidth: decoded.width,
+    sourceHeight: decoded.height,
+    targetWidth: TARGET_BACKGROUND.width,
+    targetHeight: TARGET_BACKGROUND.height,
+    dataUrl: previewDataUrl(decoded, selected.anchor),
+  };
+}
+
+function resizeImportedBackgroundCommands(sceneDocument, assetIds) {
+  const result = deepClone(sceneDocument);
+  for (const scene of result.scenes || []) {
+    for (const command of scene.commands || []) {
+      if (command?.type === 'background' && assetIds.has(String(command.assetId || ''))) {
+        command.x = 0;
+        command.y = 0;
+      }
+    }
+  }
+  return result;
+}
+
 function sourceProjectId(projectConfig, sourceRoot) {
   const explicit = projectConfig.id || projectConfig.uuid || projectConfig.serial || projectConfig.romName || projectConfig.title;
   if (explicit) return String(explicit);
@@ -988,11 +1113,17 @@ function sourceProjectId(projectConfig, sourceRoot) {
 
 async function importPceProject(projectDir, payload = {}, context = {}) {
   const sourceRoot = await ensureProjectRoot(payload.sourceProjectDir);
-  const sourceSceneDocument = await readJsonFile(await resolveSourcePath(sourceRoot, RELATIVE_PATHS.scene));
+  const { sceneDocument: sourceSceneDocument, catalog, projectConfig } = await readPceImportDocuments(sourceRoot);
+  const readSource = async (relativePath) => fsp.readFile(await resolveSourcePath(sourceRoot, relativePath));
+  const inspection = await inspectPceBackgrounds(sourceRoot, sourceSceneDocument, catalog, readSource);
+  if (payload.sourceRevision && payload.sourceRevision !== inspection.sourceRevision) throw new Error('PCE source files changed. Run the import inspection again.');
+  const inspectedBackgrounds = new Map(inspection.backgrounds.map((entry) => [entry.assetId, entry]));
+  for (const assetId of Object.keys(payload.backgroundSelections || {})) {
+    if (!inspectedBackgrounds.has(assetId)) throw new Error(`Background selection is not an eligible 224x136 image: ${assetId}`);
+  }
+  const resizedAssetIds = new Set(inspectedBackgrounds.keys());
   const paletteAssignments = normalizePcePaletteAssignments(payload.paletteAssignments);
-  const sceneDocument = injectPcePalettes(sourceSceneDocument, paletteAssignments);
-  const catalog = await readJsonFile(await resolveSourcePath(sourceRoot, RELATIVE_PATHS.catalog));
-  const projectConfig = await readJsonFile(await resolveSourcePath(sourceRoot, 'project.json'));
+  const sceneDocument = resizeImportedBackgroundCommands(injectPcePalettes(sourceSceneDocument, paletteAssignments), resizedAssetIds);
   const pceFontPath = path.join(sourceRoot, RELATIVE_PATHS.pceFont.replace(/\//g, path.sep));
   const pceFont = await exists(pceFontPath) ? await readJsonFile(pceFontPath) : null;
   const validation = validateSceneDocument(sceneDocument, catalog);
@@ -1020,13 +1151,64 @@ async function importPceProject(projectDir, payload = {}, context = {}) {
   };
   if (pceFont) documents[RELATIVE_PATHS.pceFont] = pceFont;
   const visualEntries = [];
+  let hqBackgrounds = 0;
+  let fallbackBackgrounds = 0;
   for (const binding of Object.values(bindings.assets)) {
     if (!['IMAGE', 'SPRITE'].includes(binding.runtimeType)) continue;
     const asset = catalogInfo.byId.get(binding.assetId);
     const sourcePath = await resolveSourcePath(sourceRoot, asset.source);
     const buffer = await fsp.readFile(sourcePath);
     documents[String(asset.source).replace(/\\/g, '/')] = buffer;
-    visualEntries.push({ asset, binding, buffer });
+    const inspected = inspectedBackgrounds.get(binding.assetId);
+    if (!inspected || binding.runtimeType !== 'IMAGE') {
+      visualEntries.push({ asset, binding, buffer });
+      continue;
+    }
+    const requested = payload.backgroundSelections?.[binding.assetId] || inspected.defaultSelection;
+    const selected = selectedPceSource(asset, requested);
+    let selectedBuffer = buffer;
+    let selectedPath = String(asset.source).replace(/\\/g, '/');
+    if (selected.mode === 'source') {
+      const candidate = inspected.candidates.find((entry) => entry.relativePath === selected.relativePath);
+      if (!candidate) throw new Error(`HQ source is not an inspected candidate for ${binding.assetId}: ${selected.relativePath}`);
+      selectedPath = candidate.relativePath;
+      selectedBuffer = await readSource(selectedPath);
+      const actualHash = hashImportBuffer(selectedBuffer);
+      if (actualHash !== candidate.sha256 || (selected.sha256 && selected.sha256 !== actualHash)) throw new Error(`HQ source changed for ${binding.assetId}. Run the import inspection again.`);
+    } else {
+      const actualHash = hashImportBuffer(selectedBuffer);
+      if (actualHash !== inspected.original.sha256 || (selected.sha256 && selected.sha256 !== actualHash)) throw new Error(`PCE background changed for ${binding.assetId}. Run the import inspection again.`);
+    }
+    const decoded = decodeImageBuffer(selectedBuffer, path.extname(selectedPath), {
+      allowElectronFallback: true,
+      decodeExternal: context.decodeExternal,
+    });
+    binding.conversion.resize = {
+      width: TARGET_BACKGROUND.width,
+      height: TARGET_BACKGROUND.height,
+      fit: 'cover',
+      anchor: selected.anchor,
+    };
+    binding.placementMode = 'md-native-tiles';
+    binding.importSource = {
+      mode: selected.mode,
+      sourceRelativePath: selectedPath,
+      sourceSha256: hashImportBuffer(selectedBuffer),
+      sourceWidth: decoded.width,
+      sourceHeight: decoded.height,
+      sourceFormat: path.extname(selectedPath).slice(1).toLowerCase(),
+    };
+    if (selected.mode === 'source') {
+      const normalizedSourcePath = `assets/md-novel/import-sources/${binding.symbol}.png`;
+      const normalized = encodeRgbaPng(decoded.width, decoded.height, decoded.rgba);
+      binding.originalSource = normalizedSourcePath;
+      documents[normalizedSourcePath] = normalized;
+      visualEntries.push({ asset, binding, buffer: normalized, decoded: resizedBackground(decoded, selected.anchor) });
+      hqBackgrounds += 1;
+    } else {
+      visualEntries.push({ asset, binding, buffer, decoded: resizedBackground(decoded, selected.anchor) });
+      fallbackBackgrounds += 1;
+    }
   }
   const requirements = visualProfileRequirements(sceneDocument, bindings);
   for (const entry of visualEntries) {
@@ -1075,13 +1257,32 @@ async function importPceProject(projectDir, payload = {}, context = {}) {
   await ensureFontDocuments(projectDir, sceneDocument, targetProfile, documents);
   await commitDocuments(projectDir, documents, { sourceSceneRevision: sceneRevision });
   const result = await loadProject(projectDir);
+  const importWarnings = (result.budget?.diagnostics || [])
+    .filter((entry) => entry.severity === 'error')
+    .map((entry) => ({ ...entry, severity: 'warning' }));
+  if (importWarnings.length) {
+    const warningCodes = new Set(importWarnings.map((entry) => entry.code));
+    result.diagnostics = result.diagnostics.map((entry) => warningCodes.has(entry.code) && entry.severity === 'error'
+      ? { ...entry, severity: 'warning' }
+      : entry);
+    result.budget = {
+      ...result.budget,
+      diagnostics: result.budget.diagnostics.map((entry) => entry.severity === 'error' ? { ...entry, severity: 'warning' } : entry),
+    };
+    result.ok = !result.diagnostics.some((entry) => entry.severity === 'error');
+  }
   result.importReport = {
     sourceProjectDir: sourceRoot,
     paletteAssignments,
+    sourceRevision: inspection.sourceRevision,
     sourceSceneRevision: sceneRevision,
     visualAssets: visualEntries.length,
+    resizedBackgrounds: resizedAssetIds.size,
+    hqBackgrounds,
+    fallbackBackgrounds,
     audioVariants: Object.keys(bindings.audioVariants).length,
     ignoredAudioReferences: validation.diagnostics.filter((entry) => ['audio-ignored', 'voice-ignored'].includes(entry.code)).length,
+    warnings: importWarnings,
   };
   return result;
 }
@@ -1123,5 +1324,7 @@ module.exports = {
   readProjectDocuments,
   loadProject,
   saveProject,
+  inspectPceProject,
+  readPceNovelImportPreview,
   importPceProject,
 };

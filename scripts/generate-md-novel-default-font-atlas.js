@@ -87,16 +87,20 @@ async function renderAtlas(fontBuffer, threshold) {
       context.textAlign = 'left';
       context.textBaseline = 'alphabetic';
       context.font = `${cellSize}px "md_novel_default"`;
+      const baselineMetrics = context.measureText('国');
+      const fontAscent = Number(baselineMetrics.fontBoundingBoxAscent
+        || baselineMetrics.actualBoundingBoxAscent || cellSize * 0.8);
+      const fontDescent = Number(baselineMetrics.fontBoundingBoxDescent
+        || baselineMetrics.actualBoundingBoxDescent || cellSize * 0.2);
+      const baselineOffset = (cellSize - fontAscent - fontDescent) / 2 + fontAscent;
       for (const entry of glyphs) {
         if (!entry.character || entry.character === '　') continue;
         const metrics = context.measureText(entry.character);
-        const ascent = Number(metrics.actualBoundingBoxAscent || cellSize * 0.8);
-        const descent = Number(metrics.actualBoundingBoxDescent || cellSize * 0.2);
         const width = Number(metrics.width || cellSize);
         const cellX = entry.column * cellSize;
         const cellY = entry.row * cellSize;
         const x = cellX + (cellSize - width) / 2;
-        const baseline = cellY + (cellSize - ascent - descent) / 2 + ascent;
+        const baseline = cellY + baselineOffset;
         context.save();
         context.beginPath();
         context.rect(cellX, cellY, cellSize, cellSize);

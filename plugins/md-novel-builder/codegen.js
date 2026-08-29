@@ -286,9 +286,13 @@ function compileScenes(sceneDocument, catalog, bindings, resources, pool, warnin
       if (command.type === 'background') {
         target = resources.bgIndex.get(String(command.assetId));
         if (target == null) throw new Error(`Missing background binding: ${command.assetId}`);
-        count = paletteIndex(resolveCommandPalette(command, bindings.assets?.[String(command.assetId)]));
+        const backgroundBinding = bindings.assets?.[String(command.assetId)];
+        count = paletteIndex(resolveCommandPalette(command, backgroundBinding));
         if (count < 0) throw new Error('Invalid background palette: ' + command.palette);
-        if (command.transition === 'fade') flags = 'NOV_FLAG_FADE';
+        const backgroundFlags = [];
+        if (command.transition === 'fade') backgroundFlags.push('NOV_FLAG_FADE');
+        if (backgroundBinding?.placementMode === 'md-native-tiles') backgroundFlags.push('NOV_FLAG_BG_NATIVE_TILE');
+        flags = backgroundFlags.join(' | ') || '0';
         frames = clamp(command.fadeOutFrames, 0, 65535, 0);
         aux = String(clamp(command.fadeInFrames, 0, 65535, 0));
       } else if (command.type === 'sprite') {
@@ -441,7 +445,7 @@ function generateDataSource(resources, compiled, pool, settings, profile, budget
     return `static const NovelSwitch ${branch.symbol} = { ${branch.cases.length}, ${branch.defaultPc}, { ${caseSource} } };`;
   }).join('\n');
   const sceneSource = compiled.compiled.map((scene) => `static const NovelCommand ${scene.symbol}_commands[] = {\n${scene.rows.join(',\n')}\n};`).join('\n\n');
-  const projectScenes = compiled.compiled.map((scene) => `    { ${scene.symbol}_commands, ${scene.rows.length}, ${scene.nextScene}, ${scene.fullScreen ? 'TRUE' : 'FALSE'} }`).join(',\n');
+  const projectScenes = compiled.compiled.map((scene, sceneIndex) => `    { ${scene.symbol}_commands, ${scene.rows.length}, ${scene.nextScene}, ${budget.sceneOverlayTiles?.[sceneIndex] || 0}, ${scene.fullScreen ? 'TRUE' : 'FALSE'} }`).join(',\n');
   const initialVariables = `static const s16 nov_initial_variables[] = { ${variables.initialValues.join(', ')} };\nconst u16 nov_font_codes[] = { ${fontPlan.entries.map((entry) => `0x${Number(entry.code).toString(16).padStart(4, '0')}`).join(', ')} };\nconst u16 nov_font_glyph_count = ${fontPlan.entries.length};`;
   const bgSwitch = resources.backgrounds.map((entry, index) => `        case ${index}: return &${entry.symbol};`).join('\n');
   const sprSwitch = resources.sprites.map((entry, index) => `        case ${index}: return &${entry.symbol};`).join('\n');
@@ -451,7 +455,7 @@ function generateDataSource(resources, compiled, pool, settings, profile, budget
   const sprPalIdSwitch = resources.sprites.map((entry, index) => '        case ' + index + ': return ' + paletteId(entry) + ';').join('\n');
   const bgmSwitch = resources.bgm.map((entry, index) => `        case ${index}: XGM2_setLoopNumber(-1); XGM2_play(${entry.symbol}); break;`).join('\n');
   const sfxSwitch = resources.sfx.map((entry, index) => `        case ${index}: XGM2_stopPCM(SOUND_PCM_CH2); XGM2_playPCMEx(${entry.symbol}, sizeof(${entry.symbol}), SOUND_PCM_CH2, 6, TRUE, FALSE); break;`).join('\n');
-  return `#include <genesis.h>\n#include "novel.h"\n#include "generated/novel_data.h"\n\n${pool.source()}\n\n${messageSource}\n${textSource}\n${choiceSource}\n${switchSource}\n${initialVariables}\n\n${sceneSource}\n\nstatic const NovelScene nov_scenes[] = {\n${projectScenes}\n};\n\nconst NovelProject gNovelProject = { nov_scenes, ${compiled.compiled.length}, ${compiled.startScene}, ${clamp(settings.messageSpeedFrames, 0, 50, 10)}, ${settings.messageAdvanceMode === 'auto' ? 'TRUE' : 'FALSE'}, ${clamp(settings.messageAutoWaitFrames, 0, 255, 60)}, ${Math.max(1, budget.maxSpriteTiles)}, ${budget.maxOverlayTiles}, ${profile.coordinateMode === 'pce-legacy-256' ? 'TRUE' : 'FALSE'}, nov_initial_variables, ${variables.names.length} };\n\nconst Image* novelDataBackground(u16 index)\n{\n    switch (index)\n    {\n${bgSwitch}\n        default: return NULL;\n    }\n}\n\nconst SpriteDefinition* novelDataSprite(u16 index)\n{\n    switch (index)\n    {\n${sprSwitch}\n        default: return NULL;\n    }\n}\n\nu16 novelDataBackgroundPaletteId(u16 index)\n{\n    switch (index)\n    {\n${bgPalIdSwitch}\n        default: return 0xFFFF;\n    }\n}\n\nu16 novelDataSpritePaletteId(u16 index)\n{\n    switch (index)\n    {\n${sprPalIdSwitch}\n        default: return 0xFFFF;\n    }\n}\n\nvoid novelDataPlayBgm(u16 index)\n{\n    switch (index)\n    {\n${bgmSwitch}\n        default: break;\n    }\n}\n\nvoid novelDataPlaySfx(u16 index)\n{\n    switch (index)\n    {\n${sfxSwitch}\n        default: break;\n    }\n}\n`;
+  return `#include <genesis.h>\n#include "novel.h"\n#include "generated/novel_data.h"\n\n${pool.source()}\n\n${messageSource}\n${textSource}\n${choiceSource}\n${switchSource}\n${initialVariables}\n\n${sceneSource}\n\nstatic const NovelScene nov_scenes[] = {\n${projectScenes}\n};\n\nconst NovelProject gNovelProject = { nov_scenes, ${compiled.compiled.length}, ${compiled.startScene}, ${clamp(settings.messageSpeedFrames, 0, 50, 10)}, ${settings.messageAdvanceMode === 'auto' ? 'TRUE' : 'FALSE'}, ${clamp(settings.messageAutoWaitFrames, 0, 255, 60)}, ${Math.max(1, budget.maxSpriteTiles)}, ${profile.coordinateMode === 'pce-legacy-256' ? 'TRUE' : 'FALSE'}, nov_initial_variables, ${variables.names.length} };\n\nconst Image* novelDataBackground(u16 index)\n{\n    switch (index)\n    {\n${bgSwitch}\n        default: return NULL;\n    }\n}\n\nconst SpriteDefinition* novelDataSprite(u16 index)\n{\n    switch (index)\n    {\n${sprSwitch}\n        default: return NULL;\n    }\n}\n\nu16 novelDataBackgroundPaletteId(u16 index)\n{\n    switch (index)\n    {\n${bgPalIdSwitch}\n        default: return 0xFFFF;\n    }\n}\n\nu16 novelDataSpritePaletteId(u16 index)\n{\n    switch (index)\n    {\n${sprPalIdSwitch}\n        default: return 0xFFFF;\n    }\n}\n\nvoid novelDataPlayBgm(u16 index)\n{\n    switch (index)\n    {\n${bgmSwitch}\n        default: break;\n    }\n}\n\nvoid novelDataPlaySfx(u16 index)\n{\n    switch (index)\n    {\n${sfxSwitch}\n        default: break;\n    }\n}\n`;
 }
 const NOVEL_MESSAGE_VRAM_TILES = 377;
 const NOVEL_OVERLAY_MAX_TILES = 192;
@@ -639,6 +643,7 @@ function visibleBudget(sceneDocument, bindings, options = {}) {
       maxScanlinePieces: 0,
       maxScanlinePixels: 0,
       maxOverlayTiles: 0,
+      sceneOverlayTiles: [],
       maxMessagePieces: 0,
       messageVramTiles: NOVEL_MESSAGE_VRAM_TILES,
       maxRevealFrames: 3,
@@ -780,6 +785,11 @@ function visibleBudget(sceneDocument, bindings, options = {}) {
       }
     }
     measurements.push({
+      sceneIndex: state.sceneIndex,
+      sceneId: String(rawScenes[state.sceneIndex]?.id || ''),
+      commandIndex: Math.max(0, state.pc - 1),
+      backgroundAssetId: state.background?.assetId || '',
+      spriteAssetIds: metas.map((meta) => meta.assetId).filter(Boolean),
       backgroundTiles: state.backgroundTiles,
       spriteTiles,
       overlayTiles,
@@ -1014,11 +1024,20 @@ function visibleBudget(sceneDocument, bindings, options = {}) {
     }
   }
 
-  const maxOverlayTiles = measurements.reduce((maximum, entry) => Math.max(maximum, entry.overlayTiles), 0);
-  const maxBudget = measurements.reduce((maximum, entry) => Math.max(maximum,
-    entry.backgroundTiles + entry.spriteTiles + (entry.windowVisible
-      ? maxOverlayTiles + entry.messageVramTiles
-      : entry.overlayTiles)), 0);
+  const sceneOverlayTiles = rawScenes.map((_, sceneIndex) => measurements.reduce(
+    (maximum, entry) => entry.sceneIndex === sceneIndex ? Math.max(maximum, entry.overlayTiles) : maximum,
+    0,
+  ));
+  const maxOverlayTiles = sceneOverlayTiles.reduce((maximum, tiles) => Math.max(maximum, tiles), 0);
+  const measuredBudgets = measurements.map((entry) => ({
+    ...entry,
+    reservedOverlayTiles: entry.windowVisible ? sceneOverlayTiles[entry.sceneIndex] : entry.overlayTiles,
+    totalTiles: entry.backgroundTiles + entry.spriteTiles + (entry.windowVisible
+      ? sceneOverlayTiles[entry.sceneIndex] + entry.messageVramTiles
+      : entry.overlayTiles),
+  }));
+  const maxBudgetState = measuredBudgets.reduce((maximum, entry) => !maximum || entry.totalTiles > maximum.totalTiles ? entry : maximum, null);
+  const maxBudget = maxBudgetState?.totalTiles || 0;
   if (!options.choiceLayoutFixed && choiceLowered.size > configuredChoiceLowered.size) {
     return visibleBudget(sceneDocument, bindings, { ...options, choiceLowered: [...choiceLowered], choiceLayoutFixed: true });
   }
@@ -1027,17 +1046,31 @@ function visibleBudget(sceneDocument, bindings, options = {}) {
   if (maxSpritePieces > 80) diagnostics.push({ severity: 'error', code: 'sprite-piece-budget', message: `hardware sprite count ${maxSpritePieces} > 80` });
   if (maxScanlinePieces > 20) diagnostics.push({ severity: 'error', code: 'sprite-scanline-pieces', message: `scanline sprite pieces ${maxScanlinePieces} > 20`, ...(maxScanlinePiecesState || {}) });
   if (maxScanlinePixels > 320) diagnostics.push({ severity: 'error', code: 'sprite-scanline-pixels', message: `scanline sprite pixels ${maxScanlinePixels} > 320`, ...(maxScanlinePixelsState || {}) });
-  if (maxBudget > 1424) diagnostics.push({ severity: 'error', code: 'vram-budget', message: `scene VRAM budget ${maxBudget} tiles > 1424` });
+  if (maxBudget > 1424) diagnostics.push({
+    severity: 'error',
+    code: 'vram-budget',
+    message: `scene VRAM budget ${maxBudget} tiles > 1424 (BG ${maxBudgetState.backgroundTiles}, sprites ${maxBudgetState.spriteTiles}, overlay ${maxBudgetState.reservedOverlayTiles}, message ${maxBudgetState.messageVramTiles})`,
+    sceneId: maxBudgetState.sceneId,
+    commandIndex: maxBudgetState.commandIndex,
+    backgroundAssetId: maxBudgetState.backgroundAssetId,
+    spriteAssetIds: maxBudgetState.spriteAssetIds,
+    backgroundTiles: maxBudgetState.backgroundTiles,
+    spriteTiles: maxBudgetState.spriteTiles,
+    overlayTiles: maxBudgetState.reservedOverlayTiles,
+    messageVramTiles: maxBudgetState.messageVramTiles,
+  });
   return {
     maxSpriteTiles,
     maxSpritePieces,
     maxScanlinePieces,
     maxScanlinePixels,
     maxOverlayTiles,
+    sceneOverlayTiles,
     maxMessagePieces,
     messageVramTiles: NOVEL_MESSAGE_VRAM_TILES,
     maxRevealFrames: 3,
     maxBudget,
+    maxBudgetState,
     states: visited.size,
     messageColorFallbacks: [...messageColorFallbacks].sort(),
     messageSeparateTop: [...messageSeparateTop].sort(),

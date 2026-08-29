@@ -116,7 +116,7 @@ function toolchainIdentity(toolchainPath) {
 function buildContractHash(payload, staticFiles) {
   const contract = {
     schemaVersion: GENERATED_MANIFEST_VERSION,
-    runtimeAbi: 4,
+    runtimeAbi: 5,
     fontFormatVersion: FONT_FORMAT_VERSION,
     sourceFiles: SOURCE_FILES,
     staticFiles: Object.fromEntries(Object.entries(staticFiles).map(([relativePath, value]) => [relativePath, fileHash(value)])),

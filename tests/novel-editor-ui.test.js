@@ -52,7 +52,10 @@ test('PCE型Script UIは18 command、階層Scene、参照renameを提供する',
 });
 
 test('inline previewはSkip aliasを維持しFull BGでもmessage/choiceを表示する', async () => {
-  const { simulateScene } = await importEditorModule('preview-core.mjs');
+  const { simulateScene, backgroundPosition, effectiveX } = await importEditorModule('preview-core.mjs');
+  assert.deepEqual(backgroundPosition({ x: 0, y: 0 }, { placementMode: 'md-native-tiles' }), { x: 0, y: 0 });
+  assert.deepEqual(backgroundPosition({ x: 2, y: 1 }, {}, 'pce-legacy-256'), { x: 48, y: 8 });
+  assert.equal(effectiveX('sprite', 5, 'pce-legacy-256'), 37);
   const state = simulateScene({
     fullScreenBg: true,
     commands: [
@@ -350,6 +353,14 @@ test('renderer entryはPCE型3ペインv2 UIを有効化する', () => {
   assert.match(app, /guardSceneJson/);
   assert.match(app, /importMdNovelFont/);
   assert.match(app, /data-pce-palette="background"/);
+  assert.match(app, /panelClassName: 'app-panel app-panel-lg mn-pce-background-panel'/);
+  assert.match(app, /startPceBackgroundPreviewObservation/);
+  assert.match(app, /sourceRevision: pceBackgroundInspection\?\.sourceRevision/);
+  assert.match(app, /fontBoundingBoxAscent/);
+  assert.match(app, /const baselineOffset = \(16 - fontAscent - fontDescent\) \/ 2 \+ fontAscent/);
+  assert.match(app, /IntersectionObserver/);
+  assert.match(css, /\.mn-pce-background-preview img\[hidden\] \{ display:none; \}/);
+  assert.match(css, /\.mn-pce-background-controls button \{ grid-column:1\/-1;/);
   assert.match(app, /data-pce-palette="slot3"/);
   assert.match(app, /paletteAssignments/);
   assert.match(app, /ensurePreviewFont/);

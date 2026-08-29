@@ -1,4 +1,4 @@
-import { effectiveX } from './preview-core.mjs';
+import { backgroundPosition, effectiveX } from './preview-core.mjs';
 
 function number(value, fallback = 0) {
   const parsed = Number(value);
@@ -214,9 +214,8 @@ export function drawNovelFrame(canvas, visual = {}, options = {}) {
   if (visual.background) {
     const image = sourceFor(visual.background, 'background');
     if (image) {
-      const x = effectiveX('background', visual.background.x, coordinateMode);
-      const y = coordinateMode === 'pce-legacy-256' ? number(visual.background.y) * 8 : number(visual.background.y);
-      context.drawImage(image, x, y);
+      const position = backgroundPosition(visual.background, bindings.assets?.[visual.background.assetId], coordinateMode);
+      context.drawImage(image, position.x, position.y);
     }
   }
   for (const sprite of visual.sprites || []) {

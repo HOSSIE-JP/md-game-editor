@@ -164,6 +164,25 @@
 .md-novel-editor-page .mn-empty { padding:18px; color:#8291a7; text-align:center; }
 .mn-confirm-dialog { min-width:min(520px,80vw); }
 .mn-confirm-dialog h3 { margin-top:0; }
+.mn-pce-background-panel { width:min(1040px,96vw); }
+.mn-pce-background-dialog { width:100%; max-height:86vh; overflow:hidden; container-type:inline-size; }
+.mn-pce-background-dialog>h3 { margin-top:0; }
+.mn-pce-background-summary { margin-bottom:9px; color:#9fb1c6; }
+.mn-pce-background-list { display:grid; gap:9px; max-height:calc(86vh - 170px); overflow:auto; overflow-x:hidden; padding-right:5px; }
+.mn-pce-background-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,322px); gap:9px; align-items:start; border:1px solid #334359; border-radius:7px; background:#111a26; padding:9px; }
+.mn-pce-background-row header { grid-column:1/-1; display:flex; align-items:baseline; gap:8px; min-width:0; }
+.mn-pce-background-row header strong { color:#eef6ff; }
+.mn-pce-background-row header span { min-width:0; overflow:hidden; color:#8395aa; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.mn-pce-background-controls { display:grid; grid-template-columns:minmax(0,1fr) 105px; gap:7px; align-items:end; min-width:0; }
+.mn-pce-background-controls label { display:grid; gap:3px; min-width:0; color:#91a4ba; font-size:10px; }
+.mn-pce-background-controls select { width:100%; min-width:0; }
+.mn-pce-background-controls button { grid-column:1/-1; justify-self:start; }
+.mn-pce-background-preview { grid-column:2; grid-row:2; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; min-height:214px; overflow:hidden; border:1px solid #29394c; background:#05080c; color:#7f91a7; font-size:10px; }
+.mn-pce-background-preview img { display:block; width:320px; height:192px; max-width:100%; object-fit:contain; image-rendering:pixelated; }
+.mn-pce-background-preview img[hidden] { display:none; }
+.mn-pce-background-preview span { min-height:14px; padding:0 5px; text-align:center; }
+@container (max-width:700px) { .mn-pce-background-row { grid-template-columns:1fr; } .mn-pce-background-preview { grid-column:1; grid-row:auto; } }
+@media (max-width:760px) { .mn-pce-background-row { grid-template-columns:1fr; } .mn-pce-background-preview { grid-column:1; grid-row:auto; } }
 .mn-confirm-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
 .mn-pce-palette-dialog { min-width:min(560px,84vw); }
 .mn-pce-palette-dialog h3 { margin-top:0; }

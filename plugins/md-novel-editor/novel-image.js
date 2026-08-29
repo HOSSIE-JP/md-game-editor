@@ -225,6 +225,95 @@ function encodeIndexedPng(width, height, indices, palette) {
   return Buffer.concat(chunks);
 }
 
+function encodeRgbaPng(width, height, rgba) {
+  const w = Number(width) | 0;
+  const h = Number(height) | 0;
+  if (w <= 0 || h <= 0) throw new Error('RGBA PNG dimensions must be positive');
+  if (!(rgba instanceof Uint8Array) && !Buffer.isBuffer(rgba)) throw new Error('RGBA pixels are required');
+  if (rgba.length !== w * h * 4) throw new Error('RGBA pixel count mismatch');
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  const raw = Buffer.alloc(h * (w * 4 + 1));
+  for (let y = 0; y < h; y += 1) {
+    const target = y * (w * 4 + 1);
+    raw[target] = 0;
+    Buffer.from(rgba.buffer, rgba.byteOffset + y * w * 4, w * 4).copy(raw, target + 1);
+  }
+  return Buffer.concat([PNG_SIGNATURE, pngChunk('IHDR', ihdr), pngChunk('IDAT', zlib.deflateSync(raw, { level: 9 })), pngChunk('IEND')]);
+}
+
+const CROP_ANCHORS = Object.freeze(['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']);
+
+function normalizeCropAnchor(value) {
+  const anchor = String(value || 'center').toLowerCase();
+  return CROP_ANCHORS.includes(anchor) ? anchor : 'center';
+}
+
+function anchorFactor(anchor, axis) {
+  const value = normalizeCropAnchor(anchor);
+  if (axis === 'x') {
+    if (value.endsWith('left') || value === 'left') return 0;
+    if (value.endsWith('right') || value === 'right') return 1;
+  } else {
+    if (value.startsWith('top') || value === 'top') return 0;
+    if (value.startsWith('bottom') || value === 'bottom') return 1;
+  }
+  return 0.5;
+}
+
+function coverCropRect(width, height, targetWidth, targetHeight, anchor = 'center') {
+  const sourceWidth = Number(width);
+  const sourceHeight = Number(height);
+  const outputWidth = Number(targetWidth);
+  const outputHeight = Number(targetHeight);
+  if (![sourceWidth, sourceHeight, outputWidth, outputHeight].every((value) => Number.isFinite(value) && value > 0)) throw new Error('Cover crop dimensions must be positive');
+  const sourceAspect = sourceWidth / sourceHeight;
+  const targetAspect = outputWidth / outputHeight;
+  let cropWidth = sourceWidth;
+  let cropHeight = sourceHeight;
+  if (sourceAspect > targetAspect) cropWidth = sourceHeight * targetAspect;
+  else if (sourceAspect < targetAspect) cropHeight = sourceWidth / targetAspect;
+  return {
+    x: (sourceWidth - cropWidth) * anchorFactor(anchor, 'x'),
+    y: (sourceHeight - cropHeight) * anchorFactor(anchor, 'y'),
+    width: cropWidth,
+    height: cropHeight,
+  };
+}
+
+function sampleRgbaBilinear(image, x, y, channel) {
+  const left = Math.max(0, Math.min(image.width - 1, Math.floor(x)));
+  const top = Math.max(0, Math.min(image.height - 1, Math.floor(y)));
+  const right = Math.max(0, Math.min(image.width - 1, left + 1));
+  const bottom = Math.max(0, Math.min(image.height - 1, top + 1));
+  const fx = Math.max(0, Math.min(1, x - left));
+  const fy = Math.max(0, Math.min(1, y - top));
+  const topValue = image.rgba[(top * image.width + left) * 4 + channel] * (1 - fx) + image.rgba[(top * image.width + right) * 4 + channel] * fx;
+  const bottomValue = image.rgba[(bottom * image.width + left) * 4 + channel] * (1 - fx) + image.rgba[(bottom * image.width + right) * 4 + channel] * fx;
+  return Math.round(topValue * (1 - fy) + bottomValue * fy);
+}
+
+function resizeRgbaCover(image, targetWidth, targetHeight, anchor = 'center') {
+  if (!image || !Number.isInteger(image.width) || !Number.isInteger(image.height) || !(image.rgba instanceof Uint8Array)) throw new Error('Decoded RGBA image is required');
+  const width = Number(targetWidth) | 0;
+  const height = Number(targetHeight) | 0;
+  if (width <= 0 || height <= 0) throw new Error('Resize dimensions must be positive');
+  const crop = coverCropRect(image.width, image.height, width, height, anchor);
+  const rgba = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    const sourceY = crop.y + ((y + 0.5) * crop.height / height) - 0.5;
+    for (let x = 0; x < width; x += 1) {
+      const sourceX = crop.x + ((x + 0.5) * crop.width / width) - 0.5;
+      const target = (y * width + x) * 4;
+      for (let channel = 0; channel < 4; channel += 1) rgba[target + channel] = sampleRgbaBilinear(image, sourceX, sourceY, channel);
+    }
+  }
+  return { width, height, rgba, crop, anchor: normalizeCropAnchor(anchor) };
+}
+
 function snapChannel(value) {
   return Math.round(Math.max(0, Math.min(255, Number(value) || 0)) * 7 / 255) * 255 / 7;
 }
@@ -565,6 +654,11 @@ module.exports = {
   crc32,
   decodePng,
   encodeIndexedPng,
+  encodeRgbaPng,
+  CROP_ANCHORS,
+  normalizeCropAnchor,
+  coverCropRect,
+  resizeRgbaCover,
   snapRgb333,
   rgbToLab,
   ciede2000,

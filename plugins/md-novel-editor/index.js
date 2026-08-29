@@ -35,6 +35,8 @@ function onDeactivate(_payload, context = {}) {
 
 const loadMdNovelProject = guarded((root) => service.loadProject(root));
 const saveMdNovelProject = guarded((root, payload) => service.saveProject(root, payload));
+const inspectPceNovelImport = guarded((root, payload) => service.inspectPceProject(root, payload));
+const readPceNovelImportPreview = guarded((root, payload, context) => service.readPceNovelImportPreview(root, payload, context));
 const importPceNovelProject = guarded((root, payload, context) => service.importPceProject(root, payload, context));
 const validateMdNovelProject = guarded((root) => service.loadProject(root));
 const prepareMdNovelFontGeneration = guarded((root, payload) => service.prepareFontGeneration(root, payload));
@@ -51,6 +53,8 @@ module.exports = {
   onDeactivate,
   loadMdNovelProject,
   saveMdNovelProject,
+  inspectPceNovelImport,
+  readPceNovelImportPreview,
   importPceNovelProject,
   validateMdNovelProject,
   prepareMdNovelFontGeneration,

@@ -1073,12 +1073,14 @@ Priority用のstatic/fwd/turnデシジョンテーブルはテクスチャ非依
 |---|---|
 | タイプ | `editor`, `asset` |
 | 対応 core | `mega-drive` |
-| バージョン | 1.0.0 |
+| バージョン | 1.1.0 |
 | 依存 | `md-novel-builder`, `asset-manager`, `image-resize-converter`, `image-quantize-converter`, `audio-converter` |
-| main hook | `loadMdNovelProject`, `saveMdNovelProject`, `importPceNovelProject`, `validateMdNovelProject`, font hooks, `quantizeMdNovelPaletteGroup`, `readMdNovelIndexedAssets` |
+| main hook | `loadMdNovelProject`, `saveMdNovelProject`, `inspectPceNovelImport`, `readPceNovelImportPreview`, `importPceNovelProject`, `validateMdNovelProject`, font hooks, `quantizeMdNovelPaletteGroup`, `readMdNovelIndexedAssets` |
 | renderer capability | `page`, `md-novel-editor` |
 
-PCE VN JSON v2を非破壊で読み書きし、PCE project import、Script/System/Font/Assets/診断、revision/transaction付きatomic saveを提供します。PCE取込前のplugin modalでBGとSLOT0～SLOT3を個別にPAL0～PAL3へ割り当て、選択profileで元画像を再減色します。Script rendererはPCE型のScene階層 + 18種Commandパレット / 色分けカード + 320x224 preview / 型別GUIの常時3列構成です。狭いviewportは横scrollし、GUI/Scene JSONの明示適用guard、Scene/Command drag & drop、Skip、同project clipboard、100段Undo/Redo、未知field round-trip、別windowの分岐対応Full Previewをplugin module内で実装します。Full PreviewはBG fade、message typewriter/page cursor/AUTO、choice、WAIT、sync/async INPUT割込、Sprite Move、SpriteText blink、sprite animationを60fpsで再現します。Font tabは既定の同梱`JF-Dot-Shinonome16.ttf`（size 16 / threshold 190）とproject-local TTF/OTF/TTC登録、cmap/glyph検査、16x16 subset indexed atlas生成を提供し、Command/Full Previewも同じatlasを使います。BG/Spriteのscriptには任意の`palette: PAL0..PAL3`を追加し、物理palette/fingerprint/quality/groupは`data/md-novel/` sidecarへ分離します。Assets tabはindexed変換結果、使用PAL、CIEDE2000品質を表示し、明示的な共同減色を実行します。
+PCE VN JSON v2を非破壊で読み書きし、PCE project import、Script/System/Font/Assets/診断、revision/transaction付きatomic saveを提供します。PCE取込前のplugin modalでBGとSLOT0～SLOT3を個別にPAL0～PAL3へ割り当て、選択profileで元画像を再減色します。Script rendererはPCE型のScene階層 + 18種Commandパレット / 色分けカード + 320x224 preview / 型別GUIの常時3列構成です。狭いviewportは横scrollし、GUI/Scene JSONの明示適用guard、Scene/Command drag & drop、Skip、同project clipboard、100段Undo/Redo、未知field round-trip、別windowの分岐対応Full Previewをplugin module内で実装します。Full PreviewはBG fade、message typewriter/page cursor/AUTO、choice、WAIT、sync/async INPUT割込、Sprite Move、SpriteText blink、sprite animationを60fpsで再現します。Font tabは既定の同梱`JF-Dot-Shinonome16.ttf`（size 16 / threshold 190）とproject-local TTF/OTF/TTC登録、cmap/glyph検査、font共通baselineで句読点や括弧の設計位置を保持する16x16 subset indexed atlas生成を提供し、Command/Full Previewも同じatlasを使います。BG/Spriteのscriptには任意の`palette: PAL0..PAL3`を追加し、物理palette/fingerprint/quality/groupは`data/md-novel/` sidecarへ分離します。Assets tabはindexed変換結果、使用PAL、CIEDE2000品質を表示し、明示的な共同減色を実行します。
+
+PCE取込はplugin modal内で「BG/SLOT palette割当 → 224×136通常BGのsource確認 → atomic import」を行います。`inspectPceNovelImport`は`source/**`のPNG/JPEG/BMP/WebP候補・信頼度・hash・source revisionを読取専用で返し、`readPceNovelImportPreview`は検証済み相対pathと9方向anchorから320×192 previewを返します。source確認modalはlarge panelを使用し、表示範囲へ入った行を自動preview、選択変更時はrequest世代を照合して最新結果だけを表示します。同一source revisionのinspectionはpreview間で再利用しますが、選択fileのSHA-256は毎回再検証します。`importPceNovelProject.backgroundSelections`はasset別の`mode`、`relativePath`、`sha256`、`anchor`を受け、再検証後に5:3 cover crop、RGB333/indexed変換、portable HQ master保存、`x:0,y:0`化を行います。256×224等の画像は変更しません。
 
 ### `md-novel-builder` — MDノベルビルダー
 
@@ -1086,13 +1088,13 @@ PCE VN JSON v2を非破壊で読み書きし、PCE project import、Script/Syste
 |---|---|
 | タイプ | `build` |
 | 対応 core | `mega-drive` |
-| バージョン | 1.0.0 |
+| バージョン | 1.1.0 |
 | 依存 | `md-novel-editor` |
 | フック | `onBuildStart`, `onBuildLog`, `onBuildEnd`, `onBuildError` |
 | ロール | `builder` |
 | ジェネレータ | hook-only (`generator: false`) |
 
-PCE command意味論をSGDK runtimeへ変換し、ResComp/C source、XGM2/PCM binding、scene別palette/VRAM/sprite/scanline budgetを生成します。BG/Sprite表示時はcommand指定PALへordered RGB333 paletteをloadし、同じfingerprintのDMAを省略します。fullScreen sceneでは旧actorの非表示SATをVBlankへ反映してから新BGを転送します。messageはy=128のHIntで下側をShadow化し、PAL0 high-priority spriteとして表示します。横2文字/縦2行をまとめ、通常最大30 pieces、必要pageだけspeaker行を分離して最大38 pieces、固定377 VRAM tileを最大3 VBlankへDMA_QUEUE_COPY転送します。手動page待ちは点滅`▼`、AUTO中は`◆`を右下へ表示します。sync/async INPUTの空button maskは検証errorとし、旧データもzero-timeで継続します。同一PALへ同時表示する異なるfingerprint、converter v4より古い変換、H/S予約indexを使う下側actor、下側SpriteTextはBuild errorです。target profile v1は未知fieldを保持してv2へ移行し、旧opaque WINDOWへfallbackしません。PAL0 index 1と非白messageが競合する場合は画像を変色させず、そのmessageだけ白へfallbackしてwarningを出します。CD-DA/ADPCM/voice/cacheはcommand順を維持したwarning付きNOPです。Test Playでは検証済みmanifest/ROM/object/生成物/build契約だけを差分buildへ再利用し、通常Buildはcleanを維持します。`template_md_novel`はbuilderとstandard WASM roleを選択済みです。詳細は[NOVEL.md](NOVEL.md)を参照してください。
+PCE command意味論をSGDK runtimeへ変換し、ResComp/C source、XGM2/PCM binding、scene別palette/VRAM/sprite/scanline budgetを生成します。BG/Sprite表示時はcommand指定PALへordered RGB333 paletteをloadし、同じfingerprintのDMAを省略します。fullScreen sceneでは旧actorの非表示SATをVBlankへ反映してから新BGを転送します。SpriteTextのBG_A dirty tile予約はscene別最大値として生成データへ保持し、別sceneの予約をmessage tile baseへ持ち込みません。同一sceneで共存し得るSpriteTextとmessageは非重複領域を維持します。messageはy=128のHIntで下側をShadow化し、PAL0 high-priority spriteとして表示します。横2文字/縦2行をまとめ、通常最大30 pieces、必要pageだけspeaker行を分離して最大38 pieces、固定377 VRAM tileを最大3 VBlankへDMA_QUEUE_COPY転送します。手動page待ちは点滅`▼`、AUTO中は`◆`を右下へ表示します。sync/async INPUTの空button maskは検証errorとし、旧データもzero-timeで継続します。同一PALへ同時表示する異なるfingerprint、converter v4より古い変換、H/S予約indexを使う下側actor、下側SpriteTextはBuild errorです。target profile v1は未知fieldを保持してv2へ移行し、旧opaque WINDOWへfallbackしません。PAL0 index 1と非白messageが競合する場合は画像を変色させず、そのmessageだけ白へfallbackしてwarningを出します。CD-DA/ADPCM/voice/cacheはcommand順を維持したwarning付きNOPです。Test Playでは検証済みmanifest/ROM/object/生成物/build契約だけを差分buildへ再利用し、通常Buildはcleanを維持します。`template_md_novel`はbuilderとstandard WASM roleを選択済みです。詳細は[NOVEL.md](NOVEL.md)を参照してください。
 
 ---
 

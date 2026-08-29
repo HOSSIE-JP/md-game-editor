@@ -322,11 +322,12 @@ renderer activationの`beforeBuild` / `beforeProjectSwitch`はmain process hook�
 ## MDノベル plugin
 
 - `md-novel-editor`は`assets/pce-vn-scenes.json` v2を正本として未知fieldを保持し、MD設定を`data/md-novel/target-profile.json`、asset対応を`asset-bindings.json`へ分離する。
-- renderer UI、import、BG/SLOT0～3のpalette割当modal、preview、診断はplugin内に置き、main serviceはproject root/realpath検査、revision、atomic replace、transaction hashを必須とする。
+- renderer UI、import、BG/SLOT0～3のpalette割当modal、preview、診断はplugin内に置き、main serviceはproject root/realpath検査、revision、atomic replace、transaction hashを必須とする。背景source modalはhostのlarge panel classを使い、container幅で崩れないlayout、可視行の自動preview、非同期request世代照合を備える。
 - `beforeBuild` / `beforeProjectSwitch`は未保存編集をatomic saveし、失敗した場合はvetoする。古いdisk状態でBuild/Test Playを成功させない。
 - `md-novel-builder`は`generator: false`のhook-only builder。canonical dataを変更せず、staging生成物をhash検証してからcommitし、`makeVariables.SRC_C`へ全C sourceを明示する。通常Buildはclean、Test Playは検証済みmanifest/ROM/object/生成物/build契約だけを差分buildへ再利用する。
-- Font tabはproject-local TTF/OTF/TTCまたは同梱`JF-Dot-Shinonome16.ttf`（既定size 16 / threshold 190）から固定16x16の使用glyph subsetを生成する。Command/Full Previewも同じatlasを使用する。Shift-JIS round-trip、font cmap、atlas hashをsave/buildで検査し、silent fallbackしない。
-- H40 320x224、PAL0=system、PAL1=background、PAL2/PAL3=portraitを既定とし、PCE取込時はBG/SLOT0～3をPAL0～PAL3へ個別指定できる。PreviewはBG fade、typewriter/page cursor、WAIT/INPUT割込、Move、SpriteText blinkをruntimeと同期する。背景・立ち絵のscene持続を含むVRAM、sprite、scanline、DMA、4MiB ROM gateをbuild時に再検査する。
+- Font tabはproject-local TTF/OTF/TTCまたは同梱`JF-Dot-Shinonome16.ttf`（既定size 16 / threshold 190）から固定16x16の使用glyph subsetを生成する。glyph個別bboxではなくfont共通baselineで配置して句読点・括弧の設計位置を保持し、Command/Full Previewも同じatlasを使用する。Shift-JIS round-trip、font cmap、atlas hashをsave/buildで検査し、silent fallbackしない。
+- H40 320x224、PAL0=system、PAL1=background、PAL2/PAL3=portraitを既定とし、PCE取込時はBG/SLOT0～3をPAL0～PAL3へ個別指定できる。PreviewはBG fade、typewriter/page cursor、WAIT/INPUT割込、Move、SpriteText blinkをruntimeと同期する。背景・立ち絵のscene持続を含むVRAM、sprite、scanline、DMA、4MiB ROM gateをbuild時に再検査する。SpriteTextのBG_A tile予約とmessage tile baseはscene別最大値で固定し、別sceneのoverlay最大値を加算しない。
+- PCE取込はpalette割当後に、参照画像が実寸224x136の通常BGについて`source/**`のPNG/JPEG/BMP/WebP候補、fallback、9方向crop、320x192 previewをplugin modalで確認する。確定までは書き込まず、source revision/hashを再検証してatomic importし、portable masterと`md-native-tiles` bindingを保存する。256x224等は変更しない。
 - CDDA/ADPCM/voiceはwarning+NOP、PSG song/SFXは参照された`(assetId, channel)` variantだけをXGM2/VGMまたはWAVへ変換する。
 - 実装、`docs/PLUGIN.md`、`docs/NOVEL.md`、`tests/novel-plugins.test.js`を同じ作業で更新する。
 

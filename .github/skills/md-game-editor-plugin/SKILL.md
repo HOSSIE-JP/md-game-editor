@@ -363,7 +363,7 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `rhythm-game-builder` | `build` | リズムゲームエンジン同期、譜面/RES/C データ生成、builder role による ROM ビルド連携 |
 | `dungeon-game-editor` | `editor` | Mega Drive向け3Dダンジョンの薄壁フロア編集、ランダム生成、フロア別4要素素材セットとプロジェクト共通ビルボード、標準SGDK画像pipelineによる取り込み/検証/個別preview、固定BG_B + 動的Priority付き透明BG_A壁を共有する実機一致3D preview、セット別リソース生成 |
 | `dungeon-game-builder` | `build` | 素材セット別 `DunViewSet` 切替、固定BG_Bの床/天井と透明BG_Aの壁/扉、共通Priorityデシジョンテーブル、低Priority自動VRAMビルボード、移動/旋回/階段/LOS/暗闇/ミニマップ、builder roleによるROMビルド連携 |
-| `md-novel-editor` | `editor`, `asset` | PCE VN JSON v2の非破壊編集/import、取込palette割当modal、MD target sidecar、runtime相当320x224 preview、診断、async保存guard |
+| `md-novel-editor` | `editor`, `asset` | PCE VN JSON v2の非破壊編集/import、palette割当と224x136 BG source確認wizard、MD target sidecar、runtime相当320x224 preview、診断、async保存guard |
 | `md-novel-builder` | `build` | hook-only preflight/codegen、SGDK Novel runtime、XGM2/PCM変換、VRAM/scanline/ROM gate、builder role連携 |
 | `horizontal-stg-editor` | `editor` | 実画像320x224 preview、8x8背景stamp、system/enemy/boss sprite、BGM preview、弾幕、timeline配置、安定ID、検証 |
 | `horizontal-stg-builder` | `build` | 横STGランタイム同期、C/RES/event stream生成、18 tile icon HUD、MD密度の等倍8x8背景、title IMAGEとline-scrollロゴ、背景VRAM診断、builder role連携 |
@@ -376,11 +376,12 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 ### MD Novel plugin規約
 
 - script正本は`assets/pce-vn-scenes.json`。未知fieldを保持し、MD物理設定を`data/md-novel/target-profile.json`、asset対応を`asset-bindings.json`へ分離する
-- `md-novel-editor`のUI/import/palette割当modal/previewはplugin renderer内に置き、main処理はmanifestの`hooks`と`mainApi.hooks`を一致させてserviceへ委譲する。Full PreviewはBG fade、typewriter、page cursor、WAIT/INPUT割込、Move、SpriteText blink、生成subset fontをruntimeと同期する
+- `md-novel-editor`のUI/import/palette割当modal/previewはplugin renderer内に置き、main処理はmanifestの`hooks`と`mainApi.hooks`を一致させてserviceへ委譲する。背景source modalはlarge panelとcontainer-responsive layoutを使い、可視行だけ自動previewし、非同期結果の世代を照合する。Full PreviewはBG fade、typewriter、page cursor、WAIT/INPUT割込、Move、SpriteText blink、生成subset fontをruntimeと同期する
 - 保存はrevision照合、project root/realpath検査、atomic replace、transaction hashを使う。`beforeBuild` / `beforeProjectSwitch`は保存完了までawaitし、失敗時にvetoする
 - `md-novel-builder`は`generator: false`のhook-only builder。canonical dataを読取専用にし、staging一式をhash検証後にcommitしてから明示`SRC_C`を返す。通常Buildはclean、Test Playは検証済みcacheだけ差分buildにする
-- fontはproject-local TTF/OTF/TTCまたは同梱`JF-Dot-Shinonome16.ttf`（既定size 16 / threshold 190）から固定16x16の使用glyph subsetを生成し、Shift-JIS round-trip、font cmap、atlas hashをbuild時にhard validationする
-- H40 320x224、PAL0 system、PAL1 background、PAL2/PAL3 portraitを新規command/取込modalの既定とし、取込時はBG/SLOT0～3をPAL0～PAL3へ個別指定可能にする。背景・立ち絵のscene持続を含むVRAM/80 sprite/scanline/4MiB予算をbuild errorで検査する
+- fontはproject-local TTF/OTF/TTCまたは同梱`JF-Dot-Shinonome16.ttf`（既定size 16 / threshold 190）から固定16x16の使用glyph subsetを生成する。glyph個別bboxではなくfont共通baselineで配置して句読点・括弧の設計位置を保持し、Shift-JIS round-trip、font cmap、atlas hashをbuild時にhard validationする
+- H40 320x224、PAL0 system、PAL1 background、PAL2/PAL3 portraitを新規command/取込modalの既定とし、取込時はBG/SLOT0～3をPAL0～PAL3へ個別指定可能にする。背景・立ち絵のscene持続を含むVRAM/80 sprite/scanline/4MiB予算をbuild errorで検査する。SpriteTextのBG_A tile予約とmessage tile baseはscene別最大値を使い、別sceneのoverlay最大値を合算しない
+- PCE取込では参照画像が実寸224x136の通常BGだけを対象に、`source/**`のPNG/JPEG/BMP/WebP候補を読取専用hookで検査する。9方向cover cropで320x192へ変換し、portable master、source hash、resize recipe、`md-native-tiles`配置をbindingへ保存する。曖昧/未検出はPCE画像へfallbackし、256x224等は変更しない
 - PCE CDDA/ADPCM/voiceはJSONを保持してwarning+NOP、PSG song/SFXは参照された`(assetId, channel)`だけXGM2/VGMまたはWAVへ変換する
 - 詳細契約、入力対応、検証手順は`docs/NOVEL.md`を実装と同時に更新する
 

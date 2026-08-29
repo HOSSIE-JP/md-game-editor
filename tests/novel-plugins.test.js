@@ -12,6 +12,7 @@ const image = require('../plugins/md-novel-editor/novel-image');
 const font = require('../plugins/md-novel-editor/novel-font');
 const convert = require('../plugins/md-novel-editor/novel-convert');
 const service = require('../plugins/md-novel-editor/novel-service');
+const pceImport = require('../plugins/md-novel-editor/pce-import');
 const plugin = require('../plugins/md-novel-editor');
 const builder = require('../plugins/md-novel-builder');
 const codegen = require('../plugins/md-novel-builder/codegen');
@@ -32,6 +33,60 @@ function solidPng(width, height, palette, pattern = 0) {
     for (let x = 0; x < width; x += 1) indices[y * width + x] = (x + y + pattern) % palette.length;
   }
   return image.encodeIndexedPng(width, height, indices, palette);
+}
+
+function patternedPng(width, height, palette, seed = 1) {
+  const indices = new Uint8Array(width * height);
+  let state = seed >>> 0;
+  for (let index = 0; index < indices.length; index += 1) {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    indices[index] = (state >>> 0) % palette.length;
+  }
+  return image.encodeIndexedPng(width, height, indices, palette);
+}
+
+function minimalJpegHeader(width, height) {
+  const buffer = Buffer.alloc(23);
+  buffer.set([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08], 0);
+  buffer.writeUInt16BE(height, 7);
+  buffer.writeUInt16BE(width, 9);
+  buffer.set([0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xd9], 11);
+  return buffer;
+}
+
+function minimalBmpHeader(width, height) {
+  const buffer = Buffer.alloc(26);
+  buffer.write('BM', 0, 'ascii');
+  buffer.writeInt32LE(width, 18);
+  buffer.writeInt32LE(height, 22);
+  return buffer;
+}
+
+function twoPixelBmp() {
+  const buffer = Buffer.alloc(62);
+  buffer.write('BM', 0, 'ascii');
+  buffer.writeUInt32LE(buffer.length, 2);
+  buffer.writeUInt32LE(54, 10);
+  buffer.writeUInt32LE(40, 14);
+  buffer.writeInt32LE(2, 18);
+  buffer.writeInt32LE(1, 22);
+  buffer.writeUInt16LE(1, 26);
+  buffer.writeUInt16LE(24, 28);
+  buffer.writeUInt32LE(8, 34);
+  buffer.set([0, 0, 255, 0, 255, 0, 0, 0], 54);
+  return buffer;
+}
+
+function minimalWebpHeader(width, height) {
+  const buffer = Buffer.alloc(30);
+  buffer.write('RIFF', 0, 'ascii');
+  buffer.writeUInt32LE(22, 4);
+  buffer.write('WEBPVP8X', 8, 'ascii');
+  buffer.writeUIntLE(width - 1, 24, 3);
+  buffer.writeUIntLE(height - 1, 27, 3);
+  return buffer;
 }
 
 function minimalUnicodeFont(codePoints) {
@@ -256,18 +311,37 @@ test('default novel font is the bundled JF-Dot-Shinonome16 at 16px and threshold
   assert.equal(crypto.createHash('sha256').update(source).digest('hex'), '5e265e45349b3328afa67dc3905a3ca3c628cf7c7e0eccea9c7ce8a8acc127cc');
   const atlas = image.decodePng(fs.readFileSync(path.join(__dirname, '..', 'plugins', 'md-novel-builder', 'template', 'res', 'novel', 'font', 'JF-Dot-Shinonome16-atlas.png')));
   assert.deepEqual([atlas.width, atlas.height], [1504, 1504]);
+  const glyphBounds = (character) => {
+    const cell = font.jisCell(font.shiftJisEntry(character).code);
+    let minimumY = 16;
+    let maximumY = -1;
+    for (let y = 0; y < 16; y += 1) {
+      for (let x = 0; x < 16; x += 1) {
+        const offset = (((cell.row * 16) + y) * atlas.width + (cell.column * 16) + x) * 4;
+        if (atlas.rgba[offset + 3] >= 128) {
+          minimumY = Math.min(minimumY, y);
+          maximumY = Math.max(maximumY, y);
+        }
+      }
+    }
+    return { minimumY, maximumY };
+  };
+  assert.deepEqual(glyphBounds('、'), { minimumY: 12, maximumY: 15 });
+  assert.deepEqual(glyphBounds('。'), { minimumY: 11, maximumY: 14 });
+  assert.deepEqual(glyphBounds('「'), { minimumY: 0, maximumY: 10 });
+  assert.deepEqual(glyphBounds('」'), { minimumY: 5, maximumY: 15 });
   const migrated = font.normalizeFontSettings({ kind: 'bundled', source: 'font/misaki_gothic.png', fontSize: 16, threshold: 32 });
   assert.equal(migrated.source, profile.source);
   assert.equal(migrated.threshold, 190);
 });
-test('subset font plan generates indexed 16x16 glyphs and rejects unsupported text', () => {
+test('subset font plan generates baseline-preserving indexed 16x16 glyphs and rejects unsupported text', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'md-novel-builder', 'template', 'res', 'novel', 'font', 'JF-Dot-Shinonome16.ttf'));
   const atlas = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'md-novel-builder', 'template', 'res', 'novel', 'font', 'JF-Dot-Shinonome16-atlas.png'));
   const sceneDocument = {
     scenes: [{
       id: 'font',
       commands: [
-        { type: 'message', speaker: 'A', text: '日本語' },
+        { type: 'message', speaker: 'A', text: '日本語、。' },
         { type: 'choice', choices: [{ label: 'OK' }] },
         { type: 'spritetext', text: '表示' },
       ],
@@ -284,6 +358,23 @@ test('subset font plan generates indexed 16x16 glyphs and rejects unsupported te
   assert.equal(plan.previewEntries.some((entry) => entry.character === 'Ｍ'), true);
   assert.equal(plan.entries.some((entry) => entry.character === 'Ｍ'), false);
   assert.equal(plan.entries.some((entry) => entry.character === '▼'), true);
+  for (const [character, expected] of [['、', [12, 15]], ['。', [11, 14]]]) {
+    const glyphIndex = plan.entries.findIndex((entry) => entry.character === character);
+    const cellX = (glyphIndex % 16) * 16;
+    const cellY = Math.floor(glyphIndex / 16) * 16;
+    let minimumY = 16;
+    let maximumY = -1;
+    for (let y = 0; y < 16; y += 1) {
+      for (let x = 0; x < 16; x += 1) {
+        const offset = ((cellY + y) * decoded.width + cellX + x) * 4;
+        if (decoded.rgba[offset + 3] >= 128) {
+          minimumY = Math.min(minimumY, y);
+          maximumY = Math.max(maximumY, y);
+        }
+      }
+    }
+    assert.deepEqual([minimumY, maximumY], expected);
+  }
   const custom = minimalUnicodeFont(['日', '本'].map((character) => character.codePointAt(0)));
   assert.equal(font.validateProjectFontCoverage(custom, [{ character: '日' }, { character: '本' }]), true);
   assert.throws(() => font.validateProjectFontCoverage(custom, [{ character: '語' }]), /glyph/);
@@ -370,6 +461,140 @@ test('project font import deduplicates, generates a validated subset, and delete
   assert.equal(adjustedSaved.targetProfile.font.generation.pngSha256, adjustedCommit.generation.pngSha256);
   await service.deleteFont(target, { relativePath: first.entry.file });
   assert.equal(fs.existsSync(path.join(target, first.entry.file)), false);
+});
+
+test('PCE HQ background inspection, preview, portable import, and native placement are atomic', async (t) => {
+  const source = temporaryDirectory(t, 'md-novel-hq-source-');
+  const target = temporaryDirectory(t, 'md-novel-hq-target-');
+  const fixture = createSourceFixture(source);
+  fixture.sceneDocument.scenes[0].commands[0] = {
+    ...fixture.sceneDocument.scenes[0].commands[0], x: 2, y: 1, futureCropField: { keep: true },
+  };
+  fixture.sceneDocument.scenes[0].commands.splice(1, 0, {
+    type: 'background', assetId: 'full_title', transition: 'none', x: 3, y: 4, futureFullField: 9,
+  });
+  fixture.catalog.assets.push({ id: 'full_title', type: 'image', source: 'assets/images/full-title.png', options: {} });
+  fs.writeFileSync(path.join(source, 'assets', 'pce-vn-scenes.json'), JSON.stringify(fixture.sceneDocument, null, 2));
+  fs.writeFileSync(path.join(source, 'assets', 'pce-assets.json'), JSON.stringify(fixture.catalog, null, 2));
+  fs.writeFileSync(path.join(source, 'assets', 'images', 'bg.png'), solidPng(224, 136, [[0, 0, 0, 255], [8, 24, 64, 255], [240, 80, 40, 255]]));
+  fs.writeFileSync(path.join(source, 'assets', 'images', 'full-title.png'), solidPng(256, 224, [[0, 0, 0, 255], [80, 160, 240, 255]]));
+  fs.mkdirSync(path.join(source, 'source', 'art'), { recursive: true });
+  fs.writeFileSync(path.join(source, 'source', 'art', 'bg.png'), solidPng(640, 384, [[0, 0, 0, 255], [16, 80, 168, 255], [248, 200, 72, 255]]));
+  fs.writeFileSync(path.join(target, 'project.json'), JSON.stringify({ coreId: 'mega-drive' }, null, 2));
+
+  const inspected = await service.inspectPceProject(target, { sourceProjectDir: source });
+  assert.equal(inspected.backgrounds.length, 1);
+  assert.equal(inspected.backgrounds[0].assetId, 'bg');
+  assert.equal(inspected.backgrounds[0].defaultSelection.mode, 'source');
+  assert.deepEqual(inspected.target, { width: 320, height: 192 });
+  const candidate = inspected.backgrounds[0].candidates[0];
+  const selection = { mode: 'source', relativePath: candidate.relativePath, sha256: candidate.sha256, anchor: 'bottom-right' };
+  const preview = await service.readPceNovelImportPreview(target, {
+    sourceProjectDir: source, sourceRevision: inspected.sourceRevision, assetId: 'bg', selection,
+  });
+  assert.equal(preview.sourceWidth, 640);
+  assert.equal(preview.sourceHeight, 384);
+  assert.match(preview.dataUrl, /^data:image\/png;base64,/);
+  await assert.rejects(() => service.readPceNovelImportPreview(target, {
+    sourceProjectDir: source, sourceRevision: 'stale', assetId: 'bg', selection,
+  }), /source files changed/);
+  await assert.rejects(() => service.readPceNovelImportPreview(target, {
+    sourceProjectDir: source,
+    assetId: 'bg',
+    selection: { mode: 'source', relativePath: '../escape.png', anchor: 'center' },
+  }), /Unsafe project path|must be under source/);
+
+  const imported = await service.importPceProject(target, {
+    sourceProjectDir: source,
+    sourceRevision: inspected.sourceRevision,
+    backgroundSelections: { bg: selection },
+  });
+  assert.equal(imported.ok, true);
+  assert.equal(imported.importReport.resizedBackgrounds, 1);
+  assert.equal(imported.importReport.hqBackgrounds, 1);
+  assert.equal(imported.importReport.fallbackBackgrounds, 0);
+  const backgroundCommand = imported.sceneDocument.scenes[0].commands[0];
+  const fullCommand = imported.sceneDocument.scenes[0].commands[1];
+  assert.deepEqual({ x: backgroundCommand.x, y: backgroundCommand.y }, { x: 0, y: 0 });
+  assert.deepEqual(backgroundCommand.futureCropField, { keep: true });
+  assert.deepEqual({ x: fullCommand.x, y: fullCommand.y, future: fullCommand.futureFullField }, { x: 3, y: 4, future: 9 });
+  const bgBinding = imported.bindings.assets.bg;
+  assert.equal(bgBinding.placementMode, 'md-native-tiles');
+  assert.deepEqual(bgBinding.conversion.resize, { width: 320, height: 192, fit: 'cover', anchor: 'bottom-right' });
+  assert.equal(bgBinding.importSource.mode, 'source');
+  assert.equal(bgBinding.importSource.sourceWidth, 640);
+  assert.equal(bgBinding.importSource.sourceHeight, 384);
+  assert.equal(fs.existsSync(path.join(target, bgBinding.originalSource)), true);
+  const convertedBg = image.decodePng(fs.readFileSync(path.join(target, 'res', bgBinding.sourcePath)));
+  assert.deepEqual({ width: convertedBg.width, height: convertedBg.height }, { width: 320, height: 192 });
+  assert.deepEqual(convertedBg.palette[0].slice(0, 3), [0, 0, 0]);
+  assert.deepEqual(convertedBg.palette[1].slice(0, 3), [255, 255, 255]);
+  const convertedFull = image.decodePng(fs.readFileSync(path.join(target, 'res', imported.bindings.assets.full_title.sourcePath)));
+  assert.deepEqual({ width: convertedFull.width, height: convertedFull.height }, { width: 256, height: 224 });
+
+  const fontSource = await service.readFontSource(target, imported.targetProfile.font);
+  const fontPlan = font.createFontPlan(imported.sceneDocument, imported.targetProfile.font, fontSource.buffer);
+  const generated = codegen.generateProject({ ...imported, fontPlan: { entries: fontPlan.entries } });
+  assert.match(generated.files['src/generated/novel_data.c'], /NOV_CMD_BACKGROUND, NOV_FLAG_BG_NATIVE_TILE, 0, 0, 0, 0,/);
+  fs.writeFileSync(path.join(source, 'source', 'art', 'bg.png'), solidPng(640, 384, [[0, 0, 0, 255], [255, 0, 0, 255]]));
+  await assert.rejects(() => service.importPceProject(target, {
+    sourceProjectDir: source,
+    sourceRevision: inspected.sourceRevision,
+    backgroundSelections: { bg: selection },
+  }), /source files changed/);
+  const afterRejectedImport = await service.loadProject(target);
+  assert.equal(afterRejectedImport.bindings.assets.bg.importSource.sourceSha256, bgBinding.importSource.sourceSha256);
+});
+
+test('ambiguous or absent HQ candidates fall back to the PCE image', async (t) => {
+  const source = temporaryDirectory(t, 'md-novel-hq-ambiguous-');
+  const fixture = createSourceFixture(source);
+  fs.writeFileSync(path.join(source, 'assets', 'images', 'bg.png'), solidPng(224, 136, [[0, 0, 0, 255], [128, 128, 128, 255]]));
+  fs.mkdirSync(path.join(source, 'source', 'a'), { recursive: true });
+  fs.mkdirSync(path.join(source, 'source', 'b'), { recursive: true });
+  fs.writeFileSync(path.join(source, 'source', 'a', 'bg.png'), solidPng(640, 384, [[0, 0, 0, 255], [255, 0, 0, 255]]));
+  fs.writeFileSync(path.join(source, 'source', 'b', 'bg.png'), solidPng(640, 384, [[0, 0, 0, 255], [0, 255, 0, 255]]));
+  const inspected = await service.inspectPceProject('', { sourceProjectDir: source });
+  assert.equal(inspected.backgrounds[0].candidates.length, 2);
+  assert.equal(inspected.backgrounds[0].defaultSelection.mode, 'pce');
+  fs.rmSync(path.join(source, 'source'), { recursive: true, force: true });
+  const absent = await service.inspectPceProject('', { sourceProjectDir: source });
+  assert.equal(absent.backgrounds[0].candidates.length, 0);
+  assert.equal(absent.backgrounds[0].defaultSelection.mode, 'pce');
+  assert.equal(fixture.catalog.assets[0].id, 'bg');
+});
+
+test('PCE import reports oversized 320x192 VRAM as a warning while build preflight stays hard', async (t) => {
+  const source = temporaryDirectory(t, 'md-novel-vram-import-source-');
+  const target = temporaryDirectory(t, 'md-novel-vram-import-target-');
+  const fixture = createSourceFixture(source);
+  const palette = Array.from({ length: 16 }, (_, index) => [
+    (index & 1) ? 255 : 0,
+    (index & 2) ? 255 : 0,
+    (index & 4) ? 255 : ((index & 8) ? 128 : 0),
+    255,
+  ]);
+  fs.writeFileSync(path.join(source, 'assets', 'images', 'bg.png'), patternedPng(224, 136, palette, 11));
+  for (const [assetId, fileName, seed] of [['sp_mu_a', 'a.png', 21], ['sp_mu_b', 'b.png', 31]]) {
+    const asset = fixture.catalog.assets.find((entry) => entry.id === assetId);
+    asset.options.spriteEditor.frameWidth = 64;
+    asset.options.spriteEditor.frameHeight = 64;
+    asset.options.animations[0].frameWidth = 64;
+    asset.options.animations[0].frameHeight = 64;
+    fs.writeFileSync(path.join(source, 'assets', 'sprites', fileName), patternedPng(64, 64, palette, seed));
+  }
+  fs.writeFileSync(path.join(source, 'assets', 'pce-assets.json'), JSON.stringify(fixture.catalog, null, 2));
+  fs.writeFileSync(path.join(target, 'project.json'), JSON.stringify({ coreId: 'mega-drive' }, null, 2));
+
+  const imported = await service.importPceProject(target, { sourceProjectDir: source });
+  const warning = imported.importReport.warnings.find((entry) => entry.code === 'vram-budget');
+  assert.equal(imported.ok, true);
+  assert.equal(warning?.severity, 'warning');
+  assert.equal(warning?.backgroundAssetId, 'bg');
+  assert.equal(Array.isArray(warning?.spriteAssetIds), true);
+  const reloaded = await service.loadProject(target);
+  assert.equal(reloaded.ok, false);
+  assert.equal(reloaded.budget.diagnostics.some((entry) => entry.code === 'vram-budget' && entry.severity === 'error'), true);
 });
 
 test('import, explicit PCE palettes, joint quantization, optimistic save, and unknown-field round-trip', async (t) => {
@@ -664,7 +889,11 @@ test('preflight rejects aggregate VRAM and scanline sprite overflow', () => {
     { type: 'background', assetId: 'bg' },
     { type: 'message', text: 'x' },
   ] }] }, { assets: { bg: { metadata: { uniqueTiles: 1100 } } } });
-  assert.equal(vram.diagnostics.some((entry) => entry.code === 'vram-budget'), true);
+  const vramDiagnostic = vram.diagnostics.find((entry) => entry.code === 'vram-budget');
+  assert.equal(Boolean(vramDiagnostic), true);
+  assert.equal(vramDiagnostic.backgroundAssetId, 'bg');
+  assert.equal(vramDiagnostic.backgroundTiles, 1100);
+  assert.match(vramDiagnostic.message, /BG 1100, sprites 0, overlay 0, message 377/);
 
   const commands = Array.from({ length: 4 }, (_, slot) => ({ type: 'sprite', slot, assetId: `sp${slot}`, x: slot * 32, y: 0, visible: true }));
   const assets = Object.fromEntries(Array.from({ length: 4 }, (_, slot) => [`sp${slot}`, { metadata: { frameWidth: 96, frameHeight: 128, maxNumTile: 64, maxNumSprite: 12 } }]));
@@ -693,8 +922,25 @@ test('preflight reserves disjoint VRAM for simultaneous SpriteText and message s
     { type: 'message', text: 'x' },
   ] }] }, { assets: {} });
   assert.equal(budget.maxOverlayTiles, 18);
+  assert.deepEqual(budget.sceneOverlayTiles, [18]);
   assert.equal(budget.maxBudget, 395);
   assert.equal(budget.diagnostics.length, 0);
+});
+
+test('preflight reserves SpriteText overlay per scene instead of across unrelated scenes', () => {
+  const budget = codegen.visibleBudget({ startScene: 'title', scenes: [
+    { id: 'title', nextSceneId: 'story', commands: [
+      { type: 'spritetext', slot: 0, text: 'TITLE', x: 0, y: 0, visible: true },
+    ] },
+    { id: 'story', commands: [
+      { type: 'background', assetId: 'bg' },
+      { type: 'message', text: 'x' },
+    ] },
+  ] }, { assets: { bg: { metadata: { uniqueTiles: 960 } } } });
+  assert.equal(budget.maxOverlayTiles > 0, true);
+  assert.deepEqual(budget.sceneOverlayTiles, [budget.maxOverlayTiles, 0]);
+  assert.equal(budget.maxBudget, 1337);
+  assert.equal(budget.diagnostics.some((entry) => entry.code === 'vram-budget'), false);
 });
 
 test('preflight rejects simultaneous physical PAL conflicts but allows sequential or shared-fingerprint reuse', () => {
@@ -909,6 +1155,56 @@ test('weighted palette splitting never emits empty black boxes for a dominant ed
   assert.equal(converted.metadata.quality.p95DeltaE < 20, true);
 });
 
+test('PCE HQ candidate probing supports four formats and deterministic name ranking', () => {
+  assert.deepEqual(pceImport.probeImageDimensions(solidPng(13, 17, [[0, 0, 0, 255]]), '.png'), { width: 13, height: 17 });
+  assert.deepEqual(pceImport.probeImageDimensions(minimalJpegHeader(321, 199), '.jpg'), { width: 321, height: 199 });
+  assert.deepEqual(pceImport.probeImageDimensions(minimalBmpHeader(640, 384), '.bmp'), { width: 640, height: 384 });
+  assert.deepEqual(pceImport.probeImageDimensions(minimalWebpHeader(800, 480), '.webp'), { width: 800, height: 480 });
+  const bmp = pceImport.decodeImageBuffer(twoPixelBmp(), '.bmp');
+  assert.deepEqual({ width: bmp.width, height: bmp.height }, { width: 2, height: 1 });
+  assert.deepEqual([...bmp.rgba], [255, 0, 0, 255, 0, 255, 0, 255]);
+  for (const extension of ['.jpg', '.jpeg', '.webp']) {
+    let called = '';
+    const decoded = pceImport.decodeImageBuffer(Buffer.from([1]), extension, {
+      decodeExternal: (_buffer, ext) => { called = ext; return { width: 1, height: 1, rgba: Uint8Array.from([1, 2, 3, 255]) }; },
+    });
+    assert.equal(called, extension);
+    assert.deepEqual([...decoded.rgba], [1, 2, 3, 255]);
+  }
+  const asset = { id: 'bg_hallway.day', source: 'assets/images/BG_HALLWAY_DAY.png' };
+  const exact = pceImport.candidateNameScore('source/art/bg-hallway_day.png', asset);
+  const contained = pceImport.candidateNameScore('source/art/final_bg_hallway_day_master.png', asset);
+  const preview = pceImport.candidateNameScore('source/preview/bg-hallway_day.png', asset);
+  assert.equal(pceImport.normalizeCandidateName('ＢＧ．Hallway-day.png'), 'bg_hallway_day');
+  assert.equal(exact > contained, true);
+  assert.equal(preview < exact, true);
+});
+
+test('cover crop honors all anchor axes and emits the exact MD dimensions', () => {
+  for (const anchor of ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']) {
+    const output = image.resizeRgbaCover({
+      width: 4,
+      height: 2,
+      rgba: Uint8Array.from([
+        10, 0, 0, 255, 20, 0, 0, 255, 30, 0, 0, 255, 40, 0, 0, 255,
+        50, 0, 0, 255, 60, 0, 0, 255, 70, 0, 0, 255, 80, 0, 0, 255,
+      ]),
+    }, 2, 2, anchor);
+    assert.equal(output.width, 2);
+    assert.equal(output.height, 2);
+    assert.equal(output.rgba.length, 16);
+  }
+  const left = image.resizeRgbaCover({ width: 4, height: 2, rgba: Uint8Array.from([
+    10, 0, 0, 255, 20, 0, 0, 255, 30, 0, 0, 255, 40, 0, 0, 255,
+    50, 0, 0, 255, 60, 0, 0, 255, 70, 0, 0, 255, 80, 0, 0, 255,
+  ]) }, 2, 2, 'left');
+  const right = image.resizeRgbaCover({ width: 4, height: 2, rgba: Uint8Array.from([
+    10, 0, 0, 255, 20, 0, 0, 255, 30, 0, 0, 255, 40, 0, 0, 255,
+    50, 0, 0, 255, 60, 0, 0, 255, 70, 0, 0, 255, 80, 0, 0, 255,
+  ]) }, 2, 2, 'right');
+  assert.equal(left.rgba[0] < right.rgba[0], true);
+});
+
 test('message hardware budget uses 377 tiles, 2-character chunks, and adaptive top separation', () => {
   const message = { type: 'message', speaker: 'A'.repeat(16), text: 'A'.repeat(75) };
   const plain = codegen.visibleBudget({ startScene: 's', scenes: [{ id: 's', commands: [message] }] }, { assets: {} });
@@ -996,6 +1292,8 @@ test('runtime uses one y=128 H interrupt, high-priority manual-VRAM message spri
   const res = codegen.generateResFile({ backgrounds: [], sprites: [], bgm: [], sfx: [] });
   assert.match(runtime, /#define NOVEL_MESSAGE_SPRITES\s+38/);
   assert.match(runtime, /#define NOVEL_MESSAGE_VRAM_TILES\s+377/);
+  assert.match(header, /u16 overlayVramTiles;[\s\S]*?bool fullScreen;/);
+  assert.match(runtime, /runtimeProject->scenes\[currentScene\]\.overlayVramTiles/);
   assert.match(runtime, /SYS_setVIntCallback\(novelVInt\)/);
   assert.match(runtime, /static HINTERRUPT_CALLBACK novelHInt\(void\)/);
   assert.match(runtime, /SYS_setHIntCallback\(novelHInt\)/);
