@@ -787,6 +787,7 @@ async function openWasmTestPlayWindow(options = {}) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      backgroundThrottling: false,
     },
   }));
   if (pluginId === 'pce-standard-emulator') {

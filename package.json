@@ -6,6 +6,7 @@
   "main": "main.js",
   "scripts": {
     "copy-pkg": "node scripts/copy-pkg.js",
+    "verify:standard-emulator-fps": "electron scripts/verify-standard-emulator-fps.js",
     "verify:bulletml-stg-wasm": "node scripts/verify-bulletml-stg-wasm.js",
     "inject-build-meta": "node scripts/inject-build-meta.js",
     "generate:md-novel-font-atlas": "electron scripts/generate-md-novel-default-font-atlas.js",

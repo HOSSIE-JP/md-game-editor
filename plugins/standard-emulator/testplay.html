@@ -15,7 +15,8 @@
     .icon-btn { width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
     .screen-area { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; }
     canvas#screen { image-rendering: pixelated; background: #000; }
-    .status-bar { padding: 4px 14px; font-size: 11px; color: #9ba7b8; background: #0f1117; border-top: 1px solid #1e2535; }
+    .status-bar { padding: 4px 14px; font-size: 11px; color: #9ba7b8; background: #0f1117; border-top: 1px solid #1e2535; display: flex; justify-content: space-between; gap: 12px; }
+    .fps-meter { color: #7ee787; font-variant-numeric: tabular-nums; white-space: nowrap; }
     svg { width: 16px; height: 16px; }
   </style>
 </head>
@@ -55,10 +56,10 @@
   <div class="screen-area">
     <canvas id="screen" width="320" height="224"></canvas>
   </div>
-  <div class="status-bar" id="statusBar">初期化中...</div>
+  <div class="status-bar"><span id="statusBar">初期化中...</span><span class="fps-meter" id="fpsMeter">更新 -- fps / 実行 -- fps</span></div>
 
   <script type="module">
-    import MdEmulator from './md-emulator.js';
+    import MdEmulator from './testplay-emulator.js';
 
     const WASM_JS_URL = new URL('./pkg/md_wasm.js', import.meta.url).href;
     const ACTION_TO_BUTTON = {
@@ -98,12 +99,14 @@
         vramTileLayout: '256x512',
       },
     };
+    const INPUT_POLL_MS = 1000 / 60;
 
     const params = new URLSearchParams(window.location.search);
     const romPath = params.get('romPath') || '';
 
     const canvas = document.getElementById('screen');
     const statusBar = document.getElementById('statusBar');
+    const fpsMeter = document.getElementById('fpsMeter');
     const romNameEl = document.getElementById('romName');
 
     let emu = null;
@@ -180,18 +183,18 @@
           lastInputMask = mask;
         }
       }
-      inputLoopId = requestAnimationFrame(tickInput);
     }
 
     function startInputLoop() {
       if (!inputLoopId) {
-        inputLoopId = requestAnimationFrame(tickInput);
+        tickInput();
+        inputLoopId = setInterval(tickInput, INPUT_POLL_MS);
       }
     }
 
     function stopInputLoop() {
       if (inputLoopId) {
-        cancelAnimationFrame(inputLoopId);
+        clearInterval(inputLoopId);
         inputLoopId = 0;
       }
       pressedKeys.clear();
@@ -224,6 +227,13 @@
         emu = new MdEmulator({ wasmJsUrl: WASM_JS_URL, audio: true, sram: true });
         emu.attachCanvas(canvas);
         emu.addEventListener('error', (ev) => setStatus(`エラー: ${ev?.detail?.message}`));
+        emu.addEventListener('performance', (ev) => {
+          const stats = ev.detail || {};
+          const clock = stats.clockMode === 'timer'
+            ? ` / VSync ${Number(stats.detectedVsyncFps || 0).toFixed(1)}`
+            : '';
+          fpsMeter.textContent = `更新 ${Number(stats.presentedFps || 0).toFixed(1)} fps / 実行 ${Number(stats.emulatedFps || 0).toFixed(1)} fps${clock}`;
+        });
         await emu.init();
 
         setStatus('ROM を読み込み中...');
@@ -338,6 +348,9 @@
           return { ok: false, error: String(err?.message || err) };
         }
       },
+      getPerformanceSnapshot: () => emu
+        ? { ok: true, ...emu.performanceSnapshot }
+        : { ok: false, error: 'emulator not ready' },
     };
   </script>
 </body>

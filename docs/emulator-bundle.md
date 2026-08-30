@@ -25,6 +25,34 @@ The bundled runtime lives in:
 The About dialog shows the package version, build version, source revision, and
 WASM binary SHA-256 so packaged builds remain traceable.
 
+## Test Play Frame Pacing
+
+The editor's Test Play page uses
+`plugins/standard-emulator/testplay-emulator.js` as a local adapter around the
+tracked `md-emulator.js` snapshot. It does not modify the captured wrapper or
+its hash:
+
+- a normal 60 Hz display uses `requestAnimationFrame`
+- each display update executes at most one Mega Drive frame, so missed frames
+  do not create a permanent multi-frame catch-up loop
+- if browser VSync remains below 50 Hz while one emulator frame is comfortably
+  below budget, Test Play switches to a drift-corrected 60 Hz timer
+- if emulator work itself exceeds the frame budget, frames are not skipped and
+  normal hardware-style slowdown remains visible
+- keyboard and gamepad state are sampled independently at 60 Hz
+
+The Test Play status bar reports update fps, emulation fps, and the detected
+VSync rate when the timer fallback is active. A physical display or remote
+desktop session below 60 Hz still cannot show 60 distinct scanouts, even though
+the game clock and canvas updates continue at 60 fps.
+
+Run the Electron/WASM pacing check against a built ROM with:
+
+```bash
+npm run verify:standard-emulator-fps -- path/to/rom.bin 5000
+npm run verify:standard-emulator-fps -- path/to/rom.bin 5000 --start
+```
+
 ## Refreshing The Bundle
 
 Build the emulator in the MD emulator repository first:
