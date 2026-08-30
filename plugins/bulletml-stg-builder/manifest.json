@@ -1,0 +1,14 @@
+{
+  "id": "bulletml-stg-builder",
+  "name": "BulletML STG Builder",
+  "description": "BMLB ABI v1 runtime、診断ROM、縦横mini-STGをSGDK 2.11向けに生成します。",
+  "version": "1.0.0",
+  "icon": "build",
+  "types": ["build"],
+  "generator": false,
+  "supportedCores": ["mega-drive"],
+  "permissions": ["project.read", "project.write", "build.configure"],
+  "dependencies": ["bulletml-stg-editor"],
+  "roles": [{ "id": "builder", "label": "ビルド", "exclusive": true, "order": 10 }],
+  "hooks": ["onBuildStart", "onBuildLog", "onBuildEnd", "onBuildError"]
+}

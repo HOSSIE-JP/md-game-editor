@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "horizontal-rank",
+  "name": "Horizontal Rank Scatter",
+  "type": "horizontal",
+  "rootActions": ["top"],
+  "definitions": [
+    {
+      "kind": "action",
+      "label": "top",
+      "commands": [
+        {
+          "op": "repeat",
+          "times": "999",
+          "action": {
+            "commands": [
+              { "op": "fire", "direction": { "type": "aim", "value": "-12+24*$rand" }, "speed": { "type": "absolute", "value": "1.2+1.1*$rank+0.3*$rand" }, "bullet": { "ref": "", "params": [], "inline": { "direction": null, "speed": null, "actions": [] } } },
+              { "op": "fire", "direction": { "type": "relative", "value": "18" }, "speed": { "type": "relative", "value": "0.2" }, "bullet": { "ref": "", "params": [], "inline": { "direction": null, "speed": null, "actions": [] } } },
+              { "op": "wait", "value": "55-15*$rank" }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "sprite": { "assetId": "bulletml_bullet", "source": "gfx/bulletml_bullet.png", "palette": "PAL3", "paletteFingerprint": "cce12cad8ccc47caa0c3eca35268bc94e066d3abb926c997913ffec55ec3f170", "frameWidth": 8, "frameHeight": 8, "frameCount": 1, "hardwarePieces": 1, "tileCount": 1 },
+  "hitbox": { "x": 0, "y": 0, "radius": 3 },
+  "lifetime": 600,
+  "margin": 32
+}

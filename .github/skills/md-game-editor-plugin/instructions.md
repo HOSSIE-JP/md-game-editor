@@ -351,6 +351,22 @@ renderer activationの`beforeBuild` / `beforeProjectSwitch`はmain process hook�
 
 ---
 
+## BulletML STG plugin
+
+- Stages Previewはproject境界付きmain sessionで全event／phaseのBMLB、自機弾、HP、衝突、残機、score、生成順表示予算を統合実行する。start／step／seek／stop hookをmanifestとmainApi.hooksの両方へ宣言する
+- `bulletml-stg-editor`と`bulletml-stg-builder`は旧`horizontal-stg-*`と分離する。Editorは`asset-manager`／`sprite-editor`だけへ依存し、BuilderからEditorへの一方向依存にする
+- `data/bulletml/`の安定ID IRを正本とし、revision、atomic replace、`.deleted`、draft保存、保存guardを維持する。Build/Test Playは不完全draftを拒否する
+- 構造化フロー／DOM＋SVG Graphは同じreducer、Preview／MDは同じcompiled `BMLB ABI v1`を使う。XMLはcanonical交換形式とhash付きMD sidecarへ分離する
+- XML parserは外部DTD／Entity、内部subset、未知要素、循環Ref、非対応式を近似せず拒否する。`accel`、動的除数／剰余、一般式、再帰Refはv1非対応
+- Builderは固定poolの整数C runtime、全C sourceの明示`SRC_C`、`rom_head.c`非上書きを守る。編集可能な共有弾PNGは上書きせず、indexed 16色、PAL3、frame／tile／palette fingerprintをBuild時に検証する
+- 弾animationは横1行sheetとして全frameを共有VRAMへ1回だけロードし、48個の弾Spriteはmanual tile indexを使う。SGDKのauto VRAM allocationで弾ごとにframe tileを複製しない
+- 縦横別の固定320×224 indexed背景をBG_Bへ描画し、縦横別BGMと射撃／被弾／撃破SFXをBuilderから同期する。これらと敵spriteは今回のEditor対象外とする
+- 27ケース負荷、generic縦横、stage、JS/C 10,000 frame CRC、SGDK 2.11 release ROM、同梱WASM proofを完了gateにする
+- `template_bulletml_stg`は`bulletml-stg-builder`と`standard-emulator` roleを選択済みにする
+- 仕様変更時は`docs/BULLETML_STG.md`、`docs/PLUGIN.md`、README、`tests/bulletml-stg-plugins.test.js`を同じ作業で更新する
+
+---
+
 ## OSS / ライセンス遵守
 
 - 生成するすべてのコードは **オリジナル実装** とする
@@ -359,7 +375,7 @@ renderer activationの`beforeBuild` / `beforeProjectSwitch`はmain process hook�
 - GPL/AGPL コードを参考に実装した場合は制御フローを変えて書き直す
 
 ---
-*Last Updated: 2026-08 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / MD Novel editor and builder / HInt-safe VDP transfers and incremental ResComp dependencies / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata*
+*Last Updated: 2026-08 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / BulletML STG Studio v1 / MD Novel editor and builder / HInt-safe VDP transfers and incremental ResComp dependencies / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata*
 
 
 ## MD/PCE split note

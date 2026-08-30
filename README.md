@@ -182,6 +182,14 @@ editor／builder v1.3.0では、12セグメントのチャージバーと機体�
 データ形式、アセット制約、生成物、ランタイム、検証手順は
 [`docs/HORIZONTAL_STG.md`](docs/HORIZONTAL_STG.md) を参照してください。
 
+### BulletML STG
+
+Stagesの統合Previewはmain側BMLB sessionを使い、全eventの弾、自機射撃、HP／Boss phase、衝突、score／残機、sprite／走査線予算を実行します。
+
+`bulletml-stg-editor` / `bulletml-stg-builder` と `template_bulletml_stg` を同梱しています。BulletML v0.21 subsetの構造化フロー／DOM＋SVG Graph、共通Inspector、canonical XML＋MD sidecar交換、MDと共通のBMLB bytecode Preview、縦横stage編集、縦横別の固定背景／BGMとSFXを持つSGDK 2.11診断ROMを提供します。Editorは`asset-manager`／`sprite-editor`だけへ依存し、BuilderがEditorへ一方向依存します。旧`horizontal-stg-*`は変更せず併存します。
+
+Build前にはrank・seed・自機経路の27ケースと縦横stageを自動負荷検証し、C self-test 10,000 frameとJS VMのCRC、ROM、同梱WASM通しプレイをproofへ記録できます。subset、保存／XML／sprite／runtime契約、操作、検証手順は[`docs/BULLETML_STG.md`](docs/BULLETML_STG.md)を参照してください。
+
 ---
 
 ## パッケージング (配布ビルド)
@@ -459,6 +467,7 @@ VSCode の `Terminal: Run Task` から次のタスクを選択します。
 - `tests/rescomp-manager.test.js`: `.res` 解析、生成、更新、削除、パストラバーサル拒否
 - `tests/novel-plugins.test.js`: PCE VN JSON互換、import、画像/PSG変換、preview、budget、builder staging/codegen
 - `tests/novel-editor-ui.test.js`: PCE型18 Command UI、Scene参照更新、inline/Full Preview interpreter、共有budget
+- `tests/bulletml-stg-plugins.test.js`: XML/IR、式、BMLB、compiled preview VM、保存競合、Graph/Undo、stage負荷、sprite資産契約、Builder/runtime生成
 - `tests/plugin-runtime-lifecycle.test.js` / `tests/build-lifecycle.test.js`: 未保存plugin lifecycle、Build前hook失敗時のtoolchain中断
 
 新しい Electron 側機能を追加した場合は、対象モジュールに近い `tests/*.test.js` にケースを追加してください。Electron の実ウィンドウを必要としないロジックは、既存の `tests/helpers/mock-electron.js` を使って `app` / `ipcRenderer` / `contextBridge` をモックします。

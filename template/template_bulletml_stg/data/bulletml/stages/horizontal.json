@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "orientation": "horizontal",
+  "name": "Horizontal Test Range",
+  "durationFrames": 3600,
+  "events": [
+    { "id": "h-wave-1", "spawnFrame": 60, "enemyType": "grunt", "boss": false, "hp": 5, "score": 200, "patternId": "horizontal-rank", "path": [{ "x": 304, "y": 40, "frame": 0 }, { "x": 236, "y": 64, "frame": 120 }, { "x": 160, "y": 40, "frame": 420 }], "phases": [] },
+    { "id": "h-wave-2", "spawnFrame": 420, "enemyType": "grunt", "boss": false, "hp": 5, "score": 200, "patternId": "horizontal-rank", "path": [{ "x": 304, "y": 184, "frame": 0 }, { "x": 236, "y": 160, "frame": 120 }, { "x": 160, "y": 184, "frame": 420 }], "phases": [] },
+    { "id": "h-turret-1", "spawnFrame": 780, "enemyType": "turret", "boss": false, "hp": 12, "score": 500, "patternId": "generic-aimed", "path": [{ "x": 304, "y": 64, "frame": 0 }, { "x": 248, "y": 64, "frame": 90 }, { "x": 248, "y": 64, "frame": 540 }], "phases": [] },
+    { "id": "h-turret-2", "spawnFrame": 1260, "enemyType": "turret", "boss": false, "hp": 12, "score": 500, "patternId": "generic-aimed", "path": [{ "x": 304, "y": 160, "frame": 0 }, { "x": 248, "y": 160, "frame": 90 }, { "x": 248, "y": 160, "frame": 540 }], "phases": [] },
+    { "id": "h-fan-1", "spawnFrame": 1740, "enemyType": "grunt", "boss": false, "hp": 8, "score": 300, "patternId": "vertical-fan", "path": [{ "x": 304, "y": 24, "frame": 0 }, { "x": 220, "y": 112, "frame": 240 }, { "x": 304, "y": 200, "frame": 480 }], "phases": [] },
+    { "id": "h-fan-2", "spawnFrame": 2100, "enemyType": "grunt", "boss": false, "hp": 8, "score": 300, "patternId": "vertical-fan", "path": [{ "x": 304, "y": 200, "frame": 0 }, { "x": 220, "y": 112, "frame": 240 }, { "x": 304, "y": 24, "frame": 480 }], "phases": [] },
+    { "id": "h-boss", "spawnFrame": 2760, "enemyType": "boss", "boss": true, "hp": 150, "score": 20000, "patternId": "boss-split", "path": [{ "x": 320, "y": 112, "frame": 0 }, { "x": 264, "y": 112, "frame": 120 }, { "x": 248, "y": 64, "frame": 360 }, { "x": 248, "y": 160, "frame": 600 }], "phases": [{ "threshold": 100, "patternId": "boss-split" }, { "threshold": 66, "patternId": "horizontal-rank" }, { "threshold": 33, "patternId": "vertical-fan" }] }
+  ]
+}

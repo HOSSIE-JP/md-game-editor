@@ -1131,6 +1131,35 @@ project-localの `data/horizontal-stg/` を正本として、ステージ、シ�
 
 ---
 
+### `bulletml-stg-editor` — BulletML STG Studio
+
+| 項目 | 値 |
+|---|---|
+| タイプ | `editor`, `asset` |
+| 対応 core | `mega-drive` |
+| バージョン | 1.0.0 |
+| 依存 | `asset-manager`, `sprite-editor` |
+| main hook | load/save/delete/restore、XML import/export、validate/compile、stage load/save、Stage Preview start/step/seek/stop |
+| renderer capability | `page`, `bulletml-stg-editor` |
+
+`data/bulletml/`の安定ID付きIRを正本にし、構造化フローとDOM＋SVG Graphが同じreducerを編集します。320×224 PreviewはIRを直接解釈せず、MDと同じbig-endian `BMLB ABI v1`を実行します。revision付きatomic save、`.deleted`退避、100段Undo/Redo、layout復元、保存guard、canonical BulletML XMLとhash付きMD sidecar、行・列付きの安全なXML診断を提供します。Stagesページは縦／横のevent、折線経路、3-phase Bossを編集します。
+
+### `bulletml-stg-builder` — BulletML STG Builder
+
+| 項目 | 値 |
+|---|---|
+| タイプ | `build` |
+| 対応 core | `mega-drive` |
+| バージョン | 1.0.0 |
+| 依存 | `bulletml-stg-editor` |
+| フック | `onBuildStart`, `onBuildLog`, `onBuildEnd`, `onBuildError` |
+| ロール | exclusive `builder` |
+| ジェネレータ | hook-only (`generator: false`) |
+
+保存済みIRをBMLBへcompileし、動的確保・浮動小数点・XML parserを持たない固定pool C runtime、縦横mini-STG、縦横別の固定背景／BGMとSFX、診断/self-test、生成catalog/RESを同期します。編集可能な共有弾PNGは初回だけ作成し、以後は上書きせずindexed 16色、PAL3、frame、tile、palette SHA-256を検証します。`src/boot/rom_head.c`は上書きせず、C sourceは`makeVariables.SRC_C`へ一意に列挙します。`template_bulletml_stg`はBuilderと標準WASM roleを選択済みです。詳細は[BULLETML_STG.md](BULLETML_STG.md)を参照してください。
+
+---
+
 ### `standard-emulator` — 標準エミュレーター（WASM）
 
 | 項目 | 値 |

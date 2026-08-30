@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-08 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / MD Novel editor and builder / HInt-safe VDP transfers and incremental ResComp dependencies / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata
+> § Last Updated: 2026-08 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / BulletML STG Studio v1 / MD Novel editor and builder / HInt-safe VDP transfers and incremental ResComp dependencies / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata
 
 ---
 
@@ -367,6 +367,8 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `md-novel-builder` | `build` | hook-only preflight/codegen、SGDK Novel runtime、XGM2/PCM変換、VRAM/scanline/ROM gate、builder role連携 |
 | `horizontal-stg-editor` | `editor` | 実画像320x224 preview、8x8背景stamp、system/enemy/boss sprite、BGM preview、弾幕、timeline配置、安定ID、検証 |
 | `horizontal-stg-builder` | `build` | 横STGランタイム同期、C/RES/event stream生成、18 tile icon HUD、MD密度の等倍8x8背景、title IMAGEとline-scrollロゴ、背景VRAM診断、builder role連携 |
+| `bulletml-stg-editor` | `editor`, `asset` | BulletML v0.21 subset、安定ID IR、構造化／Graph共通reducer、安全なXML＋sidecar、compiled BMLB preview、縦横stage |
+| `bulletml-stg-builder` | `build` | BMLB ABI v1、固定pool C runtime、27ケース負荷gate、縦横mini-STG、診断ROM、WASM proof、builder role連携 |
 | `standard-emulator` | `emulator` | WASM Mega Drive エミュレーター |
 | `standard-api-emulator` | `emulator`, `tool` | REST API Mega Drive エミュレーター |
 | `ai-control` | `editor`, `tool` | 外部 AI ツール向け localhost REST / MCP bridge |
@@ -400,6 +402,21 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 - 生成対象はconfig、Shift-JIS text、audio/render、enemy/boss/weapon/stage、event stream、RES、reportを一体で更新する
 - 新規projectには `template_horizontal_stg`、完成例には `template_geroneko_abyss_strike` を使う
 - 詳細契約と検証は `docs/HORIZONTAL_STG.md` を実装と同時に更新する
+
+### BulletML STG plugin規約
+
+- Stages統合Previewはmain側のproject境界付きBMLB sessionで全event／phaseを実行し、自機弾、HP、衝突、残機、score、生成順display budgetを同じtickへ統合する。rendererでpattern単体traceを貼り付けて近似しない
+- `bulletml-stg-editor`は`asset-manager`／`sprite-editor`だけへ依存し、`bulletml-stg-builder`がEditorへ一方向依存する。旧`horizontal-stg-*`へ個別分岐や移行処理を追加しない
+- 編集正本は`data/bulletml/project.json`、`patterns/<stable-id>.json`、`editor-state.json`、`stages/{vertical,horizontal}.json`。revision、atomic replace、`.deleted`、draft保存、`beforeBuild`／`beforeProjectSwitch` vetoを維持する
+- 構造化フローとDOM＋SVG Graphは同じIR reducerを編集し、PreviewはIRではなくMDと同じcompiled `BMLB ABI v1`を実行する
+- XMLはcanonical交換形式、MD情報はhash付き`.md-bullet.json`へ分離する。外部DTD／Entityと内部subset、未知要素、未解決／循環Ref、非対応式を近似せず行・列付きで拒否する
+- Builderは固定pool、整数／固定小数点だけのC runtimeを同期し、`src/boot/rom_head.c`を上書きせず、全C sourceを`makeVariables.SRC_C`へ明示する
+- 縦横別の固定320×224 indexed背景をBG_B、縦横別BGMと射撃／被弾／撃破SFXをBuilder同梱資産として同期する。背景／音声／敵素材のEditorは追加しない
+- `res/gfx/bulletml_bullet.png`は初回だけ生成し、以後は上書きしない。Build時に共有source／寸法／PAL3、indexed 16色、frame格子、1 hardware piece、128 tile、PLTE SHA-256を検証する
+- 弾animationは同寸法frameの横1行sheetとし、全frameを共有VRAMへ1回だけロードする。48個の弾Spriteでauto VRAM allocationを使ってframe tileを複製しない
+- rank 3種 × seed 3種 × 自機経路3種の27ケース、generic縦横、完全stage、JS/C 10,000 frame CRC、SGDK ROM／同梱WASM proofをgateにする
+- 新規projectは`template_bulletml_stg`を使い、Builderと`standard-emulator` roleを選択済みにする
+- 詳細契約と検証は`docs/BULLETML_STG.md`、集中テストは`tests/bulletml-stg-plugins.test.js`を実装と同時に更新する
 
 ### Dungeon game v1.1 素材セット規約
 

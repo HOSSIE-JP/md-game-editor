@@ -1,0 +1,15 @@
+{
+  "coreId": "mega-drive",
+  "title": "BULLETML STG LAB",
+  "author": "MD GAME EDITOR",
+  "serial": "GM BMLSTG00-00",
+  "region": "JUE",
+  "generatedAt": "2026-08-30T00:00:00.000Z",
+  "pluginRoles": {
+    "builder": "bulletml-stg-builder",
+    "testplay": "standard-emulator"
+  },
+  "pluginSettings": {
+    "sidebarOrder": ["bulletml-stg-editor", "asset-manager", "sprite-editor", "code-editor"]
+  }
+}

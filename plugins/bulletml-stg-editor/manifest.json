@@ -1,0 +1,62 @@
+{
+  "id": "bulletml-stg-editor",
+  "name": "BulletML STG Studio",
+  "description": "BulletML v0.21 subsetの弾幕、縦横ステージ、実機共通bytecode previewを編集します。",
+  "version": "1.0.0",
+  "icon": "sprite",
+  "types": ["editor", "asset"],
+  "supportedCores": ["mega-drive"],
+  "permissions": ["project.read", "project.write", "dialog.openFile", "dialog.saveFile", "res.read", "res.write", "main.invokeHook"],
+  "dependencies": ["asset-manager", "sprite-editor"],
+  "hooks": [
+    "getTab",
+    "onActivate",
+    "onDeactivate",
+    "loadBulletmlProject",
+    "saveBulletmlProject",
+    "saveBulletmlPattern",
+    "deleteBulletmlPattern",
+    "restoreBulletmlPattern",
+    "importBulletmlXml",
+    "exportBulletmlXml",
+    "validateBulletmlProject",
+    "compileBulletmlPattern",
+    "loadBulletmlStage",
+    "saveBulletmlStage",
+    "startBulletmlStagePreview",
+    "stepBulletmlStagePreview",
+    "seekBulletmlStagePreview",
+    "stopBulletmlStagePreview"
+  ],
+  "mainApi": {
+    "hooks": [
+      "loadBulletmlProject",
+      "saveBulletmlProject",
+      "saveBulletmlPattern",
+      "deleteBulletmlPattern",
+      "restoreBulletmlPattern",
+      "importBulletmlXml",
+      "exportBulletmlXml",
+      "validateBulletmlProject",
+      "compileBulletmlPattern",
+      "loadBulletmlStage",
+      "saveBulletmlStage",
+      "startBulletmlStagePreview",
+      "stepBulletmlStagePreview",
+      "seekBulletmlStagePreview",
+      "stopBulletmlStagePreview"
+    ]
+  },
+  "tab": {
+    "label": "BulletML STG",
+    "icon": "sprite",
+    "page": "bulletml-stg-editor",
+    "order": 6
+  },
+  "renderer": {
+    "entry": "renderer.js",
+    "styles": ["style.css"],
+    "page": "bulletml-stg-editor",
+    "capabilities": ["page", "bulletml-stg-editor"]
+  }
+}

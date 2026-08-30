@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "page": "patterns",
+  "selectedPatternId": "generic-aimed",
+  "selectedDefinition": "action:top",
+  "selectedCommandPath": "",
+  "view": "structured",
+  "panes": { "left": 260, "right": 340, "preview": 330 },
+  "graph": { "zoom": 1, "panX": 0, "panY": 0, "positions": {} }
+}

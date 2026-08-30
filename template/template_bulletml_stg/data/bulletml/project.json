@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "target": { "platform": "mega-drive", "sgdk": "2.11", "video": "NTSC", "width": 320, "height": 224, "hMode": "H40" },
+  "profile": {
+    "coordinateScale": 64,
+    "expressionFormat": "Q16.16",
+    "angleFormat": "u16-turn-clockwise-up",
+    "trigEntries": 1024,
+    "bulletLimit": 48,
+    "emitterLimit": 5,
+    "contextLimit": 106,
+    "spawnLimitPerFrame": 16,
+    "opcodeLimitPerFrame": 512,
+    "defaultLifetimeFrames": 600,
+    "defaultCullMargin": 32
+  },
+  "defaultSprite": {
+    "assetId": "bulletml_bullet",
+    "source": "gfx/bulletml_bullet.png",
+    "palette": "PAL3",
+    "paletteFingerprint": "cce12cad8ccc47caa0c3eca35268bc94e066d3abb926c997913ffec55ec3f170",
+    "frameWidth": 8,
+    "frameHeight": 8,
+    "frameCount": 1,
+    "hardwarePieces": 1,
+    "tileCount": 1
+  },
+  "patternOrder": ["generic-aimed", "vertical-fan", "horizontal-rank", "boss-split"],
+  "patternRoles": {
+    "verticalNormal": "generic-aimed",
+    "verticalBoss": "vertical-fan",
+    "horizontalNormal": "horizontal-rank",
+    "horizontalBoss": "boss-split"
+  }
+}
