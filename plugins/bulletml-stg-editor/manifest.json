@@ -2,7 +2,7 @@
   "id": "bulletml-stg-editor",
   "name": "BulletML STG Studio",
   "description": "BulletML v0.21 subsetの弾幕、縦横ステージ、実機共通bytecode previewを編集します。",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "icon": "sprite",
   "types": ["editor", "asset"],
   "supportedCores": ["mega-drive"],

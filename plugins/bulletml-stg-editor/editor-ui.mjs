@@ -19,9 +19,20 @@ export function buildShell() {
       <div class="bml-pattern-workspace" data-role="pattern-workspace">
         <aside class="bml-pane bml-left-pane">
           <div class="bml-pane-title"><strong>Patterns</strong><button data-action="new-pattern">＋</button></div>
-          <div class="bml-new-row"><select data-role="template"><option value="blank">空白</option><option value="aimed">狙い撃ち</option><option value="fan">扇</option><option value="rotation">回転</option><option value="rank">rank変化</option><option value="rand">rand散弾</option><option value="speed">速度変更</option><option value="turn">旋回</option><option value="split">子弾分裂</option></select></div>
+          <div class="bml-new-row"><select data-role="template"><option value="blank">空白</option><option value="aimed">狙い撃ち</option><option value="fan">扇</option><option value="rotation">回転</option><option value="rank">rank変化</option><option value="rand">rand散弾</option><option value="speed">速度変更</option><option value="turn">旋回</option><option value="split">子弾分裂</option><option value="reference">Ref接続サンプル</option></select></div>
+          <div class="bml-filter-row">
+            <input data-role="pattern-filter" type="search" placeholder="名前 / IDを絞り込み" aria-label="Patternを絞り込み">
+            <select data-role="pattern-type-filter" aria-label="Pattern typeで絞り込み"><option value="all">全type</option><option value="none">none</option><option value="vertical">vertical</option><option value="horizontal">horizontal</option></select>
+            <output data-role="pattern-count"></output>
+          </div>
           <div class="bml-pattern-list" data-role="pattern-list"></div>
+          <div class="bml-pattern-properties">
+            <label>選択Pattern名 <input data-role="pattern-name"></label>
+            <div><label>type <select data-role="pattern-type"><option value="none">none</option><option value="vertical">vertical</option><option value="horizontal">horizontal</option></select></label><button data-action="apply-pattern-metadata">名前・typeを反映</button></div>
+            <small>安定ID: <code data-role="pattern-id">-</code></small>
+          </div>
           <div class="bml-pane-title"><strong>Definitions</strong><div><button data-action="add-definition" data-kind="action">A＋</button><button data-action="add-definition" data-kind="fire">F＋</button><button data-action="add-definition" data-kind="bullet">B＋</button></div></div>
+          <div class="bml-definition-filter"><label>表示 <select data-role="definition-filter"><option value="all">すべて</option><option value="action">Action</option><option value="fire">Fire</option><option value="bullet">Bullet</option></select></label><output data-role="definition-count"></output><small>行をクリックすると編集対象が切り替わります</small></div>
           <div class="bml-definition-list" data-role="definition-list"></div>
           <details class="bml-deleted"><summary>削除済み</summary><div data-role="deleted-list"></div></details>
         </aside>
@@ -34,7 +45,7 @@ export function buildShell() {
           </section>
           <div class="bml-resizer horizontal" data-resize="preview" aria-label="Preview高さ"></div>
           <section class="bml-preview-pane">
-            <div class="bml-pane-title bml-preview-toolbar"><strong>Compiled BMLB Preview</strong><div><button data-action="preview-reset">|◀</button><button data-action="preview-step">▶|</button><button data-action="preview-play" data-role="play">▶</button><label>rank <input data-role="rank" type="range" min="0" max="1" step="0.05" value="0.5"></label><label>seed <input data-role="seed" value="0xACE1"></label><label>向き <select data-role="orientation"><option value="vertical">縦</option><option value="horizontal">横</option></select></label></div></div>
+            <div class="bml-pane-title bml-preview-toolbar"><strong>Compiled BMLB Preview</strong><div><button data-action="preview-reset">|◀</button><button data-action="preview-step">▶|</button><button data-action="preview-play" data-role="play">▶</button><label class="bml-toggle"><input data-role="preview-loop" type="checkbox" checked> loop</label><label>rank <input data-role="rank" type="range" min="0" max="1" step="0.05" value="0.5"></label><label>seed <input data-role="seed" value="0xACE1"></label><label>向き <select data-role="orientation"><option value="vertical">縦</option><option value="horizontal">横</option></select></label></div></div>
             <div class="bml-preview-body"><div class="bml-screen"><canvas width="320" height="224" data-role="preview"></canvas><span>emitter / playerをdrag</span></div><div class="bml-preview-info"><input data-role="frame" type="range" min="0" max="0" value="0"><div data-role="metrics"></div><canvas width="224" height="54" data-role="heatmap"></canvas></div></div>
           </section>
         </main>
@@ -43,6 +54,7 @@ export function buildShell() {
           <nav class="bml-side-tabs"><button data-side="inspector" class="active">Inspector</button><button data-side="diagnostics">診断</button><button data-side="xml">XML</button></nav>
           <section class="bml-side-section active" data-side-section="inspector">
             <div data-role="selection-label" class="bml-selection"></div>
+            <small class="bml-json-label">詳細JSON（選択中の項目）</small>
             <textarea data-role="inspector" spellcheck="false"></textarea>
             <button data-action="apply-inspector" class="primary">Inspectorを適用</button>
             <fieldset class="bml-expression"><legend>式フォーム</legend><label>対象 <select data-role="expression-path"></select></label><div class="bml-affine"><input data-role="expr-constant" type="number" step="0.01" value="0"><span>＋</span><input data-role="expr-coefficient" type="number" step="0.01" value="1"><span>×</span><select data-role="expr-variable"><option value="">なし</option><option>$rank</option><option>$rand</option><option>$1</option><option>$2</option><option>$3</option><option>$4</option></select></div><label>詳細式 <input data-role="expr-advanced"></label><button data-action="apply-expression">式を適用</button><output data-role="expr-diagnostic"></output></fieldset>
@@ -54,11 +66,11 @@ export function buildShell() {
       </div>
     </section>
     <section class="bml-page" data-section="stages">
-      <div class="bml-stage-toolbar"><button data-orientation="vertical" class="active">Vertical</button><button data-orientation="horizontal">Horizontal</button><button data-action="add-event">敵event＋</button><button data-action="add-boss">Boss＋</button><button data-action="save-stage" class="primary">Stage保存</button><span>最大64 event / 通常敵4 + Boss1 / 8 waypoint / 3 phase</span></div>
+      <div class="bml-stage-toolbar"><button data-orientation="vertical" class="active">Vertical</button><button data-orientation="horizontal">Horizontal</button><button data-action="add-event">敵event＋</button><button data-action="add-boss">Boss＋</button><button data-action="save-stage" class="primary">Stage保存</button><div class="bml-path-toggle"><small>経路</small><button data-path-mode="selected" class="active">選択のみ</button><button data-path-mode="all">すべて</button></div><span>最大64 event / 通常敵4 + Boss1 / 8 waypoint / 3 phase</span></div>
       <div class="bml-stage-workspace">
         <aside class="bml-pane"><div class="bml-pane-title"><strong>Events</strong></div><div data-role="event-list" class="bml-event-list"></div></aside>
         <main><div data-role="timeline" class="bml-timeline"></div><div class="bml-screen stage"><canvas width="320" height="224" data-role="stage-preview"></canvas></div><input data-role="stage-frame" type="range" min="0" max="3600" value="0"><div class="bml-stage-controls"><button data-action="stage-reset">|◀</button><button data-action="stage-step">▶|</button><button data-action="stage-play" data-role="stage-play">▶</button><label>難易度 <select data-role="stage-difficulty"><option value="0">Easy</option><option value="1" selected>Normal</option><option value="2">Hard</option></select></label><label>seed <input data-role="stage-seed" value="0xACE1"></label><span data-role="stage-metrics"></span><small>矢印 移動 / Z 射撃 / Shift 低速 / C 診断 / Enter pause</small></div></main>
-        <aside class="bml-pane"><div class="bml-pane-title"><strong>Event / Path / Phase</strong></div><textarea data-role="stage-inspector" spellcheck="false"></textarea><div class="bml-inline"><button data-action="apply-stage-inspector" class="primary">適用</button><button data-action="add-waypoint">waypoint＋</button><button data-action="add-phase">phase＋</button><button data-action="delete-event">削除</button></div><div data-role="stage-diagnostics"></div></aside>
+        <aside class="bml-pane"><div class="bml-pane-title"><strong>Event / Path / Phase</strong></div><textarea data-role="stage-inspector" spellcheck="false"></textarea><div class="bml-inline"><button data-action="apply-stage-inspector" class="primary">適用</button><button data-action="add-waypoint">waypoint＋</button><button data-action="remove-phase">phase−</button><button data-action="add-phase">phase＋</button><button data-action="delete-event">削除</button></div><div data-role="phase-summary" class="bml-phase-summary"></div><div data-role="stage-diagnostics"></div></aside>
       </div>
     </section>
     <footer class="bml-status" data-role="status">読込待ち</footer>

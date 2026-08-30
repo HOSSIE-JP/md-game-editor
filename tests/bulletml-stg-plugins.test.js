@@ -47,8 +47,11 @@ test('BulletML template selects the builder and standard emulator and satisfies 
   const project = JSON.parse(fs.readFileSync(path.join(starterTemplate, 'project.json'), 'utf8'));
   assert.deepEqual(project.pluginRoles, { builder: 'bulletml-stg-builder', testplay: 'standard-emulator' });
   const snapshot = service.readSnapshot(starterTemplate);
-  assert.equal(snapshot.patterns.length, 4);
+  assert.equal(snapshot.patterns.length, 5);
   assert.equal(snapshot.project.patternRoles.verticalNormal, 'generic-aimed');
+  const refShowcase = snapshot.patterns.find((pattern) => pattern.id === 'ref-showcase');
+  assert.ok(refShowcase);
+  assert.equal(schema.validatePattern(refShowcase).ok, true);
   for (const stage of snapshot.stages) {
     const validation = schema.validateStage(stage, new Set(snapshot.patterns.map((pattern) => pattern.id)));
     assert.equal(validation.ok, true, JSON.stringify(validation.diagnostics));
@@ -223,6 +226,47 @@ test('structured and graph edits share one reducer, preserve identical IR hashes
   assert.equal(structured.future.length, 100);
 });
 
+test('studio overhaul keeps filters separate from selection and edits names, nested refs, loop, paths, and phases deterministically', async () => {
+  const model = await import(pathToFileURL(path.join(editorRoot, 'editor-model.mjs')).href);
+  const reference = schema.createPatternTemplate('reference', 'reference');
+  const history = new model.PatternHistory(reference, 100);
+  history.dispatch({ type: 'setPatternMetadata', name: 'Renamed Pattern', patternType: 'horizontal' });
+  assert.equal(history.present.name, 'Renamed Pattern');
+  assert.equal(history.present.id, 'reference');
+  assert.equal(history.present.type, 'horizontal');
+
+  history.dispatch({ type: 'updateDefinitionMetadata', kind: 'action', label: 'volley', nextLabel: 'volley-main', root: false });
+  assert.equal(history.present.definitions[0].commands[0].action.ref, 'volley-main');
+  history.dispatch({ type: 'updateDefinitionMetadata', kind: 'fire', label: 'aimed-fire', nextLabel: 'aimed-shot' });
+  assert.equal(history.present.definitions.find((definition) => definition.label === 'volley-main').commands[0].ref, 'aimed-shot');
+  const volleyIndex = history.present.definitions.findIndex((definition) => definition.label === 'volley-main');
+  history.dispatch({ type: 'connectRefAt', path: ['definitions', volleyIndex, 'commands', 0], kind: 'fire', target: 'aimed-shot' });
+  assert.equal(history.present.definitions[volleyIndex].commands[0].ref, 'aimed-shot');
+
+  assert.deepEqual(model.filterPatterns([
+    { id: 'one', name: 'Aimed', type: 'none' },
+    { id: 'two', name: 'Fan', type: 'vertical' },
+  ], 'aim', 'all').map((pattern) => pattern.id), ['one']);
+  assert.deepEqual(model.filterPatterns([
+    { id: 'one', name: 'Aimed', type: 'none' },
+    { id: 'two', name: 'Fan', type: 'vertical' },
+  ], '', 'vertical').map((pattern) => pattern.id), ['two']);
+  assert.ok(model.filterDefinitions(history.present.definitions, 'fire').every((definition) => definition.kind === 'fire'));
+
+  const events = [{ id: 'a' }, { id: 'b' }];
+  assert.deepEqual(model.stagePathsForMode(events, 1, 'selected').map(({ event }) => event.id), ['b']);
+  assert.deepEqual(model.stagePathsForMode(events, 1, 'all').map(({ event }) => event.id), ['a', 'b']);
+  const phase1 = { boss: true, patternId: 'p', phases: [{ threshold: 100, patternId: 'p' }] };
+  const phase2 = model.addBossPhase(phase1);
+  const phase3 = model.addBossPhase(phase2);
+  assert.deepEqual(phase3.phases.map((phase) => phase.threshold), [100, 67, 34]);
+  assert.equal(model.addBossPhase(phase3).phases.length, 3);
+  assert.equal(model.removeBossPhase(phase3).phases.length, 2);
+
+  assert.deepEqual(model.advancePreviewFrame(8, 10, 2, true), { index: 0, playing: true, wrapped: true });
+  assert.deepEqual(model.advancePreviewFrame(8, 10, 2, false), { index: 9, playing: false, wrapped: false });
+});
+
 test('renderer keeps plugin UI and compiled preview inside its renderer module', () => {
   const renderer = fs.readFileSync(path.join(editorRoot, 'renderer-app.mjs'), 'utf8');
   const ui = fs.readFileSync(path.join(editorRoot, 'editor-ui.mjs'), 'utf8');
@@ -242,6 +286,16 @@ test('renderer keeps plugin UI and compiled preview inside its renderer module',
   assert.match(ui, /data-action="connect-ref"/);
   assert.match(ui, /data-action="move-command" data-delta="-1"/);
   assert.match(ui, /data-action="delete-command" title="選択命令を削除"/);
+  assert.match(ui, /data-role="pattern-filter"/);
+  assert.match(ui, /data-action="apply-pattern-metadata"/);
+  assert.match(ui, /data-role="preview-loop"/);
+  assert.match(ui, /data-path-mode="selected"/);
+  assert.match(ui, /data-action="remove-phase"/);
+  assert.match(renderer, /renderBulletDefinition/);
+  assert.match(renderer, /renderFireDefinition/);
+  assert.doesNotMatch(renderer, /formatJson\(definition\)/);
+  assert.match(renderer, /connectRefAt/);
+  assert.match(renderer, /advancePreviewFrame/);
 });
 
 test('stage validation matrix reserves host sprites and executes generic patterns in either orientation', () => {
@@ -374,7 +428,7 @@ test('builder generates deterministic BMLB, fixed mini-STG assets, explicit C so
     const proof = JSON.parse(fs.readFileSync(path.join(root, 'data', 'bulletml', 'proof.json'), 'utf8'));
     assert.equal(proof.sgdk, '2.11');
     assert.equal(proof.abi, 'BMLB ABI v1');
-    assert.equal(proof.patterns.length, 4);
+    assert.equal(proof.patterns.length, 5);
     assert.equal(proof.stages.length, 2);
     assert.ok(proof.stages.every((stage) => stage.cases.length === 27));
     assert.equal(proof.runtime.selfTestFrames, 10000);

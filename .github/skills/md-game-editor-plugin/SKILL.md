@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-08 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / BulletML STG Studio v1 / MD Novel editor and builder / HInt-safe VDP transfers and incremental ResComp dependencies / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata
+> § Last Updated: 2026-08 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / BulletML STG Studio v1.1 / MD Novel editor and builder / HInt-safe VDP transfers and incremental ResComp dependencies / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata
 
 ---
 
@@ -409,6 +409,8 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 - `bulletml-stg-editor`は`asset-manager`／`sprite-editor`だけへ依存し、`bulletml-stg-builder`がEditorへ一方向依存する。旧`horizontal-stg-*`へ個別分岐や移行処理を追加しない
 - 編集正本は`data/bulletml/project.json`、`patterns/<stable-id>.json`、`editor-state.json`、`stages/{vertical,horizontal}.json`。revision、atomic replace、`.deleted`、draft保存、`beforeBuild`／`beforeProjectSwitch` vetoを維持する
 - 構造化フローとDOM＋SVG Graphは同じIR reducerを編集し、PreviewはIRではなくMDと同じcompiled `BMLB ABI v1`を実行する
+- Pattern／Definition filterは表示だけを変え、選択はlist行操作として分離する。Pattern表示名は安定IDを変えず編集でき、Action／Fire／Bulletはすべて構造化フォームを持つ。ネストcommandのRef接続も同じIR path reducerへ通す
+- BMLB Preview loopは既定ONで切替可能とし、Stages経路overlayは既定で選択eventのみ、明示操作ですべてを表示する。Boss phase操作は1～3件の境界と無効理由をUIに出す
 - XMLはcanonical交換形式、MD情報はhash付き`.md-bullet.json`へ分離する。外部DTD／Entityと内部subset、未知要素、未解決／循環Ref、非対応式を近似せず行・列付きで拒否する
 - Builderは固定pool、整数／固定小数点だけのC runtimeを同期し、`src/boot/rom_head.c`を上書きせず、全C sourceを`makeVariables.SRC_C`へ明示する
 - 縦横別の固定320×224 indexed背景をBG_B、縦横別BGMと射撃／被弾／撃破SFXをBuilder同梱資産として同期する。背景／音声／敵素材のEditorは追加しない

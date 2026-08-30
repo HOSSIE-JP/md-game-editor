@@ -117,7 +117,7 @@ function loadProject(projectDir) {
   try {
     const snapshot = readSnapshot(projectDir);
     const validation = schema.validateProject(snapshot.project, snapshot.patterns, snapshot.stages);
-    const templates = Object.fromEntries(['blank', 'aimed', 'fan', 'rotation', 'rank', 'rand', 'speed', 'turn', 'split'].map((id) => [id, schema.createPatternTemplate(id, `pattern-${id}`)]));
+    const templates = Object.fromEntries(['blank', 'aimed', 'fan', 'rotation', 'rank', 'rand', 'speed', 'turn', 'split', 'reference'].map((id) => [id, schema.createPatternTemplate(id, `pattern-${id}`)]));
     return { ok: true, snapshot, validation, templates };
   } catch (error) { return { ok: false, error: String(error?.message || error) }; }
 }

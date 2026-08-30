@@ -357,6 +357,8 @@ renderer activationの`beforeBuild` / `beforeProjectSwitch`はmain process hook�
 - `bulletml-stg-editor`と`bulletml-stg-builder`は旧`horizontal-stg-*`と分離する。Editorは`asset-manager`／`sprite-editor`だけへ依存し、BuilderからEditorへの一方向依存にする
 - `data/bulletml/`の安定ID IRを正本とし、revision、atomic replace、`.deleted`、draft保存、保存guardを維持する。Build/Test Playは不完全draftを拒否する
 - 構造化フロー／DOM＋SVG Graphは同じreducer、Preview／MDは同じcompiled `BMLB ABI v1`を使う。XMLはcanonical交換形式とhash付きMD sidecarへ分離する
+- Pattern／Definitionの表示filterと編集対象選択を混同しない。Pattern名はstable IDを保持して専用フォームから変更し、Action／Fire／Bulletをraw JSON fallbackなしで構造化編集する。ネスト命令のRef接続はIR pathで選択し、starterに有効なRef sampleを置く
+- Pattern Preview loopは既定ONでON/OFF可能にする。Stage経路は選択eventのみを既定とし全表示へ切替可能にする。Boss phaseは1～3件で、追加／削除buttonの無効理由と現在数を表示する
 - XML parserは外部DTD／Entity、内部subset、未知要素、循環Ref、非対応式を近似せず拒否する。`accel`、動的除数／剰余、一般式、再帰Refはv1非対応
 - Builderは固定poolの整数C runtime、全C sourceの明示`SRC_C`、`rom_head.c`非上書きを守る。編集可能な共有弾PNGは上書きせず、indexed 16色、PAL3、frame／tile／palette fingerprintをBuild時に検証する
 - 弾animationは横1行sheetとして全frameを共有VRAMへ1回だけロードし、48個の弾Spriteはmanual tile indexを使う。SGDKのauto VRAM allocationで弾ごとにframe tileを複製しない
@@ -375,7 +377,7 @@ renderer activationの`beforeBuild` / `beforeProjectSwitch`はmain process hook�
 - GPL/AGPL コードを参考に実装した場合は制御フローを変えて書き直す
 
 ---
-*Last Updated: 2026-08 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / BulletML STG Studio v1 / MD Novel editor and builder / HInt-safe VDP transfers and incremental ResComp dependencies / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata*
+*Last Updated: 2026-08 / SGDK 2.11 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / BulletML STG Studio v1.1 / MD Novel editor and builder / HInt-safe VDP transfers and incremental ResComp dependencies / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata*
 
 
 ## MD/PCE split note

@@ -25,7 +25,7 @@
     "hardwarePieces": 1,
     "tileCount": 1
   },
-  "patternOrder": ["generic-aimed", "vertical-fan", "horizontal-rank", "boss-split"],
+  "patternOrder": ["generic-aimed", "vertical-fan", "horizontal-rank", "boss-split", "ref-showcase"],
   "patternRoles": {
     "verticalNormal": "generic-aimed",
     "verticalBoss": "vertical-fan",

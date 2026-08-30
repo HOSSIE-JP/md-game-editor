@@ -186,7 +186,7 @@ editor／builder v1.3.0では、12セグメントのチャージバーと機体�
 
 Stagesの統合Previewはmain側BMLB sessionを使い、全eventの弾、自機射撃、HP／Boss phase、衝突、score／残機、sprite／走査線予算を実行します。
 
-`bulletml-stg-editor` / `bulletml-stg-builder` と `template_bulletml_stg` を同梱しています。BulletML v0.21 subsetの構造化フロー／DOM＋SVG Graph、共通Inspector、canonical XML＋MD sidecar交換、MDと共通のBMLB bytecode Preview、縦横stage編集、縦横別の固定背景／BGMとSFXを持つSGDK 2.11診断ROMを提供します。Editorは`asset-manager`／`sprite-editor`だけへ依存し、BuilderがEditorへ一方向依存します。旧`horizontal-stg-*`は変更せず併存します。
+`bulletml-stg-editor` / `bulletml-stg-builder` と `template_bulletml_stg` を同梱しています。BulletML v0.21 subsetの構造化フロー／DOM＋SVG Graph、Pattern名と表示filter、Action／Fire／Bulletフォーム、ネストRef接続と`ref-showcase`、共通Inspector、canonical XML＋MD sidecar交換、loop切替可能なMD共通BMLB Preview、選択eventのみ／全eventを切り替える縦横stage経路表示、1～3 phase Boss編集、縦横別の固定背景／BGMとSFXを持つSGDK 2.11診断ROMを提供します。Editorは`asset-manager`／`sprite-editor`だけへ依存し、BuilderがEditorへ一方向依存します。旧`horizontal-stg-*`は変更せず併存します。
 
 Build前にはrank・seed・自機経路の27ケースと縦横stageを自動負荷検証し、C self-test 10,000 frameとJS VMのCRC、ROM、同梱WASM通しプレイをproofへ記録できます。subset、保存／XML／sprite／runtime契約、操作、検証手順は[`docs/BULLETML_STG.md`](docs/BULLETML_STG.md)を参照してください。
 

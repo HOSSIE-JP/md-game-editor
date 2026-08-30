@@ -36,7 +36,7 @@ data/bulletml/
 
 - `project.json`はschema version、固定profile、共有sprite、4つのpattern roleを持ちます。
 - pattern JSONは安定ID、定義、命令、式文字列、sprite、円hitbox、寿命、画面外余白を持ちます。
-- `editor-state.json`は選択、pane幅、最終view、graph座標、pan、zoomを保持します。
+- `editor-state.json`は選択、pane幅、最終view、graph座標、pan、zoom、Preview loop、Stage経路表示modeを保持します。
 - stage JSONは最大64 event、最大8 waypointの折線経路、Boss phaseを保持します。
 - draftは不完全でも保存できます。ただし診断errorを持つprojectはBuild/Test Playできません。
 
@@ -47,14 +47,16 @@ data/bulletml/
 Patternページは左のpattern／definition一覧、中央の構造化フローまたはノードGraphと320×224 Preview、右のInspector／診断／XMLで構成します。paneとPreview splitはドラッグでき、projectごとに復元します。
 
 - 構造化フローとDOM＋SVG Graphは同じIR reducerを編集します。
-- definition追加／削除、command追加／削除／並べ替え、Ref接続、共通Inspector編集を両viewで扱います。
+- Pattern一覧の名前／ID検索と`none`／`vertical`／`horizontal`絞り込みは表示だけを変更し、編集中Patternを暗黙に切り替えません。選択Patternの表示名とtypeは専用フォームで変更でき、安定IDは読み取り専用です。
+- Definitionの`Action`／`Fire`／`Bullet`絞り込みも表示filterです。行を選ぶと中央とInspectorの編集対象が切り替わり、構造化viewは3種類すべてをフォーム表示してraw JSONへfallbackしません。
+- definition追加／削除／label変更、command追加／削除／並べ替え、ネスト命令の選択、Ref接続、共通Inspector編集を同じIR reducerで扱います。label変更時は同種Refとtop action参照を一括更新します。
 - Graphはdefinitionを主要node、commandを折り畳みblock、Refをedgeとして表示し、階層自動配置、手動位置、pan、zoomを持ちます。
 - Undo／Redoは100段です。
-- 新規patternは空白、狙い撃ち、扇、回転、rank変化、rand散弾、速度変更、旋回、子弾分裂から作れます。
+- 新規patternは空白、狙い撃ち、扇、回転、rank変化、rand散弾、速度変更、旋回、子弾分裂、Ref接続サンプルから作れます。starterにも`ref-showcase`を同梱し、`actionRef`→`fireRef`→`bulletRef`の有効な接続を確認できます。
 - 式は通常フォームと詳細テキストを切り替え、compile診断と値域を表示します。
 - XML欄はcanonical生成結果の表示／コピーと、明示再取込だけを行います。JSONとXMLのライブ二重編集はしません。
 
-Previewは最後に成功したcompile結果を保持します。play／pause／step／reset、frame移動、発射元と自機のdrag、rank、seed、`type=none`の縦横切替、hitbox、弾数、context、opcode、spawn、drop、走査線piece／dot heatmapを表示します。
+Previewは最後に成功したcompile結果を保持します。play／pause／step／reset、既定ONのloop切替、frame移動、発射元と自機のdrag、rank、seed、`type=none`の縦横切替、hitbox、弾数、context、opcode、spawn、drop、走査線piece／dot heatmapを表示します。loop OFFでは最終trace frameで停止します。
 
 ## BulletML v0.21 subset
 
@@ -135,6 +137,8 @@ Build時に次を検証します。
 
 Stagesページは縦／横の独立stageを編集し、出現frame、enemy種別、HP、score、任意pattern、最大8 waypointと到達frame、Bossの最大3 phaseを扱います。通常敵は同時4、Bossは同時1です。4つのrole slotは新規eventの既定patternです。
 
+経路overlayは既定で選択中eventだけを表示し、toolbarの「すべて」で全eventへ切り替えます。Bossの`phase＋`／`phase−`は1～3件の範囲で動作し、通常敵、未選択、下限、上限ではbuttonを無効化して理由をtooltipとPhase要約へ表示します。既存starterのBossは3-phaseを維持し、新規Bossは1 phaseで作成して`phase＋`を試せます。
+
 Boss phase開始とBoss撃破では敵弾を全消去し、通常敵撃破では発射済み弾を残します。統合Previewは敵経路、BulletML、自機射撃、衝突、残機、score、表示予算を同じ固定profileで実行します。
 
 統合Previewはrenderer内の近似軌道ではなく、main側のproject境界付きsessionで全event／phaseのcompile済みBMLBを実行します。startBulletmlStagePreview／stepBulletmlStagePreview／seekBulletmlStagePreview／stopBulletmlStagePreviewを使い、敵HP、phase閾値、自機弾、Boss／通常敵ごとの弾消去規則、被弾無敵、生成順表示削除、80 sprite／20 piece／320 dot上限を1つの状態遷移で扱います。
@@ -169,6 +173,7 @@ node --check plugins/bulletml-stg-editor/bulletml-stage-preview.js
 node --check plugins/bulletml-stg-editor/renderer.js
 node --check plugins/bulletml-stg-builder/index.js
 node --test tests/bulletml-stg-plugins.test.js
+npm run verify:bulletml-studio-ui
 npm test
 
 # SGDK Build後の同梱WASM検証

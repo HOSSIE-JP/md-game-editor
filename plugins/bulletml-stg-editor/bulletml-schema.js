@@ -67,6 +67,8 @@ const DEFAULT_EDITOR_STATE = Object.freeze({
   selectedDefinition: '',
   selectedCommandPath: '',
   view: 'structured',
+  previewLoop: true,
+  stagePathMode: 'selected',
   panes: Object.freeze({ left: 260, right: 340, preview: 330 }),
   graph: Object.freeze({ zoom: 1, panX: 0, panY: 0, positions: Object.freeze({}) }),
 });
@@ -255,6 +257,12 @@ function createPatternTemplate(templateId = 'blank', requestedId = '') {
     speed: [makeAction('top', [fire({ type: 'aim', value: '0' }, '0.5', 'speed-bullet')]), { kind: 'bullet', label: 'speed-bullet', actions: [{ commands: [{ op: 'wait', value: '30' }, { op: 'changeSpeed', speed: { type: 'absolute', value: '3' }, term: '60' }, { op: 'wait', value: '120' }, { op: 'vanish' }] }] }],
     turn: [makeAction('top', [fire({ type: 'absolute', value: '0' }, '1.5', 'turn-bullet')]), { kind: 'bullet', label: 'turn-bullet', actions: [{ commands: [{ op: 'wait', value: '30' }, { op: 'changeDirection', direction: { type: 'aim', value: '0' }, term: '90' }, { op: 'wait', value: '180' }, { op: 'vanish' }] }] }],
     split: [makeAction('top', [fire({ type: 'aim', value: '0' }, '1.1', 'split-parent')]), { kind: 'bullet', label: 'split-parent', actions: [{ commands: [{ op: 'wait', value: '70' }, fire({ type: 'absolute', value: '-70' }, '1.8'), fire({ type: 'sequence', value: '35' }, '1.8'), fire({ type: 'sequence', value: '35' }, '1.8'), fire({ type: 'sequence', value: '35' }, '1.8'), fire({ type: 'sequence', value: '35' }, '1.8'), { op: 'vanish' }] }] }],
+    reference: [
+      makeAction('top', [{ op: 'repeat', times: '999', action: { ref: 'volley', params: [] } }]),
+      makeAction('volley', [{ op: 'fireRef', ref: 'aimed-fire', params: [] }, { op: 'wait', value: '45-15*$rank' }]),
+      { kind: 'fire', label: 'aimed-fire', direction: { type: 'aim', value: '0' }, speed: { type: 'absolute', value: '1.5+0.7*$rank' }, bullet: { ref: 'payload', params: [] } },
+      { kind: 'bullet', label: 'payload', direction: null, speed: null, actions: [{ commands: [{ op: 'wait', value: '180' }, { op: 'vanish' }] }] },
+    ],
   };
   return normalizePattern({ id, name: templateId === 'blank' ? 'New Pattern' : `Template: ${templateId}`, type: 'none', rootActions: ['top'], definitions: deepClone(patterns[templateId] || patterns.blank) }, id);
 }

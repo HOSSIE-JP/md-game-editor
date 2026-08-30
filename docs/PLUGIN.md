@@ -1137,12 +1137,12 @@ project-localの `data/horizontal-stg/` を正本として、ステージ、シ�
 |---|---|
 | タイプ | `editor`, `asset` |
 | 対応 core | `mega-drive` |
-| バージョン | 1.0.0 |
+| バージョン | 1.1.0 |
 | 依存 | `asset-manager`, `sprite-editor` |
 | main hook | load/save/delete/restore、XML import/export、validate/compile、stage load/save、Stage Preview start/step/seek/stop |
 | renderer capability | `page`, `bulletml-stg-editor` |
 
-`data/bulletml/`の安定ID付きIRを正本にし、構造化フローとDOM＋SVG Graphが同じreducerを編集します。320×224 PreviewはIRを直接解釈せず、MDと同じbig-endian `BMLB ABI v1`を実行します。revision付きatomic save、`.deleted`退避、100段Undo/Redo、layout復元、保存guard、canonical BulletML XMLとhash付きMD sidecar、行・列付きの安全なXML診断を提供します。Stagesページは縦／横のevent、折線経路、3-phase Bossを編集します。
+`data/bulletml/`の安定ID付きIRを正本にし、構造化フローとDOM＋SVG Graphが同じreducerを編集します。v1.1ではPattern名/type編集と明示的なPattern／Definition表示filter、Action／Fire／Bullet全種の構造化フォーム、ネスト命令Ref接続、Ref showcase、既定ONのBMLB Preview loopを提供します。320×224 PreviewはIRを直接解釈せず、MDと同じbig-endian `BMLB ABI v1`を実行します。revision付きatomic save、`.deleted`退避、100段Undo/Redo、layout復元、保存guard、canonical BulletML XMLとhash付きMD sidecar、行・列付きの安全なXML診断を提供します。Stagesページは縦／横のevent、折線経路、1～3 phase Bossを編集し、経路overlayを選択eventのみ／すべてで切り替えます。
 
 ### `bulletml-stg-builder` — BulletML STG Builder
 
