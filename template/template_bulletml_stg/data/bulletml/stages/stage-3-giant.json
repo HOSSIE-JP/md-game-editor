@@ -1,0 +1,265 @@
+{
+  "id": "stage-3-giant",
+  "name": "深淵核",
+  "orientation": "vertical",
+  "durationFrames": 4200,
+  "backgroundId": "giant-core",
+  "collisionMap": {
+    "symbol": "stage3_collision",
+    "type": "MAP",
+    "collisionLayer": "near"
+  },
+  "next": [],
+  "giantBoss": {
+    "bossId": "abyss-core",
+    "arenaPlane": "BG_B",
+    "bossPlane": "BG_A"
+  },
+  "events": [
+    {
+      "id": "bg-start",
+      "order": 0,
+      "trigger": {
+        "type": "frame",
+        "frame": 0,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "set_background",
+        "backgroundId": "giant-core",
+        "transition": "fade",
+        "enemyId": "",
+        "bossId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 0,
+      "enemyType": "grunt",
+      "boss": false,
+      "hp": 3,
+      "score": 100,
+      "patternId": "",
+      "movementId": "",
+      "dropItemId": "",
+      "path": [],
+      "phases": []
+    },
+    {
+      "id": "core",
+      "order": 480,
+      "trigger": {
+        "type": "frame",
+        "frame": 480,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_boss",
+        "bossId": "abyss-core",
+        "enemyId": "abyss-core",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 480,
+      "enemyType": "abyss-core",
+      "boss": true,
+      "hp": 168,
+      "score": 50000,
+      "patternId": "ref-showcase",
+      "path": [
+        {
+          "x": 160,
+          "y": -64,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 160,
+          "y": 70,
+          "frame": 360,
+          "interpolation": "linear"
+        }
+      ],
+      "phases": [
+        {
+          "threshold": 100,
+          "patternId": "ref-showcase",
+          "movementId": "",
+          "rankOverride": null,
+          "activeParts": [],
+          "backgroundId": "",
+          "wave": {
+            "preset": "none",
+            "start": 0,
+            "end": 223,
+            "amplitude": 0,
+            "wavelength": 64,
+            "speed": 0,
+            "fadeFrames": 0
+          },
+          "clearBullets": false
+        },
+        {
+          "threshold": 70,
+          "patternId": "vertical-fan",
+          "movementId": "",
+          "rankOverride": null,
+          "activeParts": [],
+          "backgroundId": "",
+          "wave": {
+            "preset": "none",
+            "start": 0,
+            "end": 223,
+            "amplitude": 0,
+            "wavelength": 64,
+            "speed": 0,
+            "fadeFrames": 0
+          },
+          "clearBullets": false
+        },
+        {
+          "threshold": 35,
+          "patternId": "boss-split",
+          "rankOverride": 1,
+          "movementId": "",
+          "activeParts": [],
+          "backgroundId": "",
+          "wave": {
+            "preset": "none",
+            "start": 0,
+            "end": 223,
+            "amplitude": 0,
+            "wavelength": 64,
+            "speed": 0,
+            "fadeFrames": 0
+          },
+          "clearBullets": false
+        }
+      ],
+      "dropItemId": "",
+      "movementId": ""
+    },
+    {
+      "id": "core-wave",
+      "order": 1600,
+      "trigger": {
+        "type": "condition",
+        "frame": 0,
+        "scroll": 0,
+        "flag": "core-open",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "set_wave",
+        "plane": "BG_A",
+        "wave": {
+          "preset": "ripple",
+          "start": 0,
+          "end": 223,
+          "amplitude": 6,
+          "wavelength": 48,
+          "speed": 2,
+          "fadeFrames": 30
+        },
+        "enemyId": "",
+        "bossId": "",
+        "backgroundId": "",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "flag": ""
+      },
+      "spawnFrame": 0,
+      "enemyType": "grunt",
+      "boss": false,
+      "hp": 3,
+      "score": 100,
+      "patternId": "",
+      "movementId": "",
+      "dropItemId": "",
+      "path": [],
+      "phases": []
+    },
+    {
+      "id": "clear",
+      "order": 4199,
+      "trigger": {
+        "type": "condition",
+        "frame": 0,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": "abyss-core"
+      },
+      "action": {
+        "type": "stage_clear",
+        "enemyId": "",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 0,
+      "enemyType": "grunt",
+      "boss": false,
+      "hp": 3,
+      "score": 100,
+      "patternId": "",
+      "movementId": "",
+      "dropItemId": "",
+      "path": [],
+      "phases": []
+    }
+  ],
+  "schemaVersion": 2,
+  "mainScroll": {
+    "speed": 1,
+    "axis": "y"
+  }
+}

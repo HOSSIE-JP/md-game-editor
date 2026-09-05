@@ -106,7 +106,7 @@ typedef struct {
 static BML_EmitterState emitters[BML_MAX_EMITTERS];
 static BML_BulletState bullets[BML_MAX_BULLETS];
 static BML_Bullet bulletData[BML_MAX_BULLETS];
-static BML_Context contexts[BML_MAX_CONTEXTS];
+static BML_Context *contexts;
 static u8 bulletOrder[BML_MAX_BULLETS];
 static BML_Metrics metrics;
 static s16 playerX64;
@@ -392,6 +392,7 @@ static s16 freeBulletSlot(void) {
 
 static s16 freeContextSlot(void) {
     u16 index;
+    if (!contexts) return -1;
     for (index = 0; index < BML_MAX_CONTEXTS; index++) if (!contexts[index].active) return (s16) index;
     return -1;
 }
@@ -1011,11 +1012,12 @@ static u16 orderActiveBullets(void) {
 }
 
 void BML_init(void) {
+    if (!contexts) contexts = MEM_alloc(sizeof(BML_Context) * BML_MAX_CONTEXTS);
     memset(emitters, 0, sizeof(emitters));
     memset(bullets, 0, sizeof(bullets));
     memset(bulletData, 0, sizeof(bulletData));
     memset(bulletOrder, 0, sizeof(bulletOrder));
-    memset(contexts, 0, sizeof(contexts));
+    if (contexts) memset(contexts, 0, sizeof(BML_Context) * BML_MAX_CONTEXTS);
     memset(bulletPieces, 0, sizeof(bulletPieces));
     memset(bulletDots, 0, sizeof(bulletDots));
     activeContextSlotCount = 0;
@@ -1031,12 +1033,16 @@ void BML_init(void) {
     nextContextId = 1;
 }
 
+bool BML_isReady(void) {
+    return contexts != NULL;
+}
+
 s16 BML_startEmitter(const u8 *program, u16 programLength, s16 x64, s16 y64, u16 direction, u16 seed, u16 rankQ16) {
     u8 rootCount;
     u8 index;
     s16 slot = -1;
     s32 params[4] = { 0, 0, 0, 0 };
-    if (!validProgram(program, programLength) || activeEmitterCount() >= BML_MAX_EMITTERS) return -1;
+    if (!contexts || !validProgram(program, programLength) || activeEmitterCount() >= BML_MAX_EMITTERS) return -1;
     for (index = 0; index < BML_MAX_EMITTERS; index++) if (!emitters[index].allocated) { slot = index; break; }
     if (slot < 0) return -1;
     memset(&emitters[slot], 0, sizeof(emitters[slot]));
@@ -1101,6 +1107,7 @@ void BML_tick(void) {
     u16 orderCount = activeContextSlotCount;
     BML_BulletState *bullet;
     BML_Bullet *view;
+    if (!contexts) return;
     metrics.frame++;
     metrics.spawnedThisFrame = 0;
     metrics.opcodesThisFrame = 0;
@@ -1145,7 +1152,7 @@ void BML_tick(void) {
     updateHighWater();
 }
 
-u16 BML_applyDisplayBudget(u16 reservedGlobalSprites, const u8 *reservedPiecesByScanline, const u16 *reservedDotsByScanline) {
+static u16 applyDisplayBudget(u16 reservedGlobalSprites, const u8 *reservedPiecesByScanline, const u16 *reservedDotsByScanline, bool sparse, u16 reservedMaxPieces, u16 reservedMaxDots) {
     u16 global = reservedGlobalSprites > BML_GLOBAL_SPRITES ? BML_GLOBAL_SPRITES : reservedGlobalSprites;
     u8 *pieceBudget = budgetPieces;
     u16 *dotBudget = budgetDots;
@@ -1154,8 +1161,8 @@ u16 BML_applyDisplayBudget(u16 reservedGlobalSprites, const u8 *reservedPiecesBy
     u16 orderedCount;
     u16 onScreen = 0;
     u16 removed = 0;
-    u16 maxPieces = 0;
-    u16 maxDots = 0;
+    u16 maxPieces = sparse ? reservedMaxPieces : 0;
+    u16 maxDots = sparse ? reservedMaxDots : 0;
     bool allFit = TRUE;
     BML_BulletState *displayBullet;
     BML_Bullet *displayView;
@@ -1169,7 +1176,20 @@ u16 BML_applyDisplayBudget(u16 reservedGlobalSprites, const u8 *reservedPiecesBy
         displayView++;
     }
     if (global + onScreen > BML_GLOBAL_SPRITES) allFit = FALSE;
-    if (reservedPiecesByScanline && reservedDotsByScanline) {
+    if (sparse && reservedPiecesByScanline && reservedDotsByScanline) {
+        displayBullet = bullets;
+        for (handled = 0; handled < orderedCount; handled++, displayBullet++) if (displayBullet->occupancyTracked) {
+            for (scanline = (u16) displayBullet->occupancyTop; scanline <= (u16) displayBullet->occupancyBottom; scanline++) {
+                u16 pieces = reservedPiecesByScanline[scanline] + bulletPieces[scanline];
+                u16 dots = reservedDotsByScanline[scanline] + bulletDots[scanline];
+                pieceBudget[scanline] = (u8) pieces;
+                dotBudget[scanline] = dots;
+                if (pieces > maxPieces) maxPieces = pieces;
+                if (dots > maxDots) maxDots = dots;
+                if (pieces > BML_SCANLINE_PIECES || dots > BML_SCANLINE_DOTS) allFit = FALSE;
+            }
+        }
+    } else if (reservedPiecesByScanline && reservedDotsByScanline) {
         for (scanline = 0; scanline < BML_SCANLINES; scanline++) {
             u16 pieces = reservedPiecesByScanline[scanline] + bulletPieces[scanline];
             u16 dots = reservedDotsByScanline[scanline] + bulletDots[scanline];
@@ -1196,13 +1216,23 @@ u16 BML_applyDisplayBudget(u16 reservedGlobalSprites, const u8 *reservedPiecesBy
         metrics.maxDotsThisFrame = maxDots;
         return 0;
     }
-    maxPieces = 0;
-    maxDots = 0;
-    for (scanline = 0; scanline < BML_SCANLINES; scanline++) {
-        pieceBudget[scanline] -= bulletPieces[scanline];
-        dotBudget[scanline] -= bulletDots[scanline];
-        if (pieceBudget[scanline] > maxPieces) maxPieces = pieceBudget[scanline];
-        if (dotBudget[scanline] > maxDots) maxDots = dotBudget[scanline];
+    maxPieces = sparse ? reservedMaxPieces : 0;
+    maxDots = sparse ? reservedMaxDots : 0;
+    if (sparse && reservedPiecesByScanline && reservedDotsByScanline) {
+        displayBullet = bullets;
+        for (handled = 0; handled < orderedCount; handled++, displayBullet++) if (displayBullet->occupancyTracked) {
+            for (scanline = (u16) displayBullet->occupancyTop; scanline <= (u16) displayBullet->occupancyBottom; scanline++) {
+                pieceBudget[scanline] = reservedPiecesByScanline[scanline];
+                dotBudget[scanline] = reservedDotsByScanline[scanline];
+            }
+        }
+    } else {
+        for (scanline = 0; scanline < BML_SCANLINES; scanline++) {
+            pieceBudget[scanline] -= bulletPieces[scanline];
+            dotBudget[scanline] -= bulletDots[scanline];
+            if (pieceBudget[scanline] > maxPieces) maxPieces = pieceBudget[scanline];
+            if (dotBudget[scanline] > maxDots) maxDots = dotBudget[scanline];
+        }
     }
     memset(displayDelete, 0, sizeof(displayDelete));
     for (handled = 0; handled < orderedCount; handled++) {
@@ -1249,13 +1279,30 @@ u16 BML_applyDisplayBudget(u16 reservedGlobalSprites, const u8 *reservedPiecesBy
     return removed;
 }
 
+u16 BML_applyDisplayBudget(u16 reservedGlobalSprites, const u8 *reservedPiecesByScanline, const u16 *reservedDotsByScanline) {
+    return applyDisplayBudget(reservedGlobalSprites, reservedPiecesByScanline, reservedDotsByScanline, FALSE, 0, 0);
+}
+
+u16 BML_applyDisplayBudgetSparse(u16 reservedGlobalSprites, const u8 *reservedPiecesByScanline, const u16 *reservedDotsByScanline, u16 reservedMaxPieces, u16 reservedMaxDots) {
+    if (!reservedPiecesByScanline || !reservedDotsByScanline) return BML_applyDisplayBudget(reservedGlobalSprites, reservedPiecesByScanline, reservedDotsByScanline);
+    return applyDisplayBudget(reservedGlobalSprites, reservedPiecesByScanline, reservedDotsByScanline, TRUE, reservedMaxPieces, reservedMaxDots);
+}
+
 const BML_Bullet *BML_getBullets(u16 *count) {
     if (count) *count = activeBulletSlotCount;
     return bulletData;
 }
 
+bool BML_removeBullet(u16 index) {
+    if (index >= activeBulletSlotCount) return FALSE;
+    deactivateBullet(&bullets[index]);
+    updateHighWater();
+    return TRUE;
+}
+
 void BML_clearAll(void) {
     u16 index;
+    if (!contexts) return;
     while (activeBulletSlotCount) deactivateBullet(&bullets[activeBulletSlotCount - 1]);
     index = 0;
     while (index < activeContextSlotCount) {
@@ -1265,6 +1312,16 @@ void BML_clearAll(void) {
     }
     releaseEmitters();
     updateHighWater();
+}
+
+void BML_shutdown(void) {
+    if (!contexts) return;
+    BML_clearAll();
+    MEM_free(contexts);
+    contexts = NULL;
+    activeContextSlotCount = 0;
+    activeBulletSlotCount = 0;
+    activeEmitterSlotCount = 0;
 }
 
 const BML_Metrics *BML_getMetrics(void) {

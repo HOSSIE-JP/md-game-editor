@@ -14,7 +14,7 @@ description: Create, modify, or review MD Game Editor plugins in the Electron ap
 > - Plugin Runtime のメジャーバージョンが上がった
 > 更新後は「§ Last Updated」セクションの日付とバージョンを書き換えること。
 >
-> § Last Updated: 2026-08 / Plugin Runtime v2.5 / Core Plugin / PCE asset/audio/font plugins / AI Control API / TileMap collision / Rhythm game plugins / Dungeon game plugins v1.3 / Horizontal STG editor and builder v1.3 / BulletML STG Studio v1.1 / MD Novel editor and builder / HInt-safe VDP transfers and incremental ResComp dependencies / Async save and build abort lifecycle / Stable STG IDs and SGDK event streams / Graphical STG HUD / final-resolution tile backgrounds and line-warped title art / GERONEKO five-stage template / Editor UX guardrails / Bundled WASM SRAM and split metadata
+> § Last Updated: 2026-08 / Plugin Runtime v2.5 / BulletML STG Studio v2.0 / ResComp Asset Picker / shared MD VN and TMX foundations / deprecated Horizontal STG templates / SGDK 2.11 Campaign-Caravan-SRAM runtime / release ROM and bundled WASM proof
 
 ---
 
@@ -351,9 +351,9 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 |---|---|---|
 | `slideshow` | `build` | imageXXX アセットのスライドショー生成 |
 | `code-editor` | `editor` | src/ ファイルツリー + コードエディタ |
-| `asset-manager` | `editor`, `asset` | resources.res アセット管理 |
-| `sprite-editor` | `editor`, `asset` | SPRITE 定義編集 + スプライトシート/フレームプレビュー。ROW 有効フレーム数は `time` 行列長で表現し、preview は animation / `time=0` 停止 / collision overlay を反映する |
-| `tilemap-editor` | `editor`, `asset` | Tiled 互換 TMX/TSX サブセット編集 + SGDK TILESET/MAP/TILEMAP 登録 + tile collision data 生成 |
+| `asset-manager` | `editor`, `asset` | resources.res アセット管理 + 毎回再読込する`rescomp-asset-picker`（SPRITE animation/audio/image/map preview） |
+| `sprite-editor` | `editor`, `asset` | SPRITE 定義編集 + `openSprite({ symbol })`。ROW 有効フレーム数は `time` 行列長で表現し、preview は animation / `time=0` 停止 / collision overlay を反映する |
+| `tilemap-editor` | `editor`, `asset` | Tiled互換TMX/TSX編集 + `openMap({ symbol, collisionLayer })` + 共有parser core |
 | `image-resize-converter` | `converter` | 8px 境界リサイズ |
 | `image-quantize-converter` | `converter` | 16 色減色変換 |
 | `audio-converter` | `converter` | WAV/MP3/OGG 変換と音声変換 UI |
@@ -365,10 +365,10 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 | `dungeon-game-builder` | `build` | 素材セット別 `DunViewSet` 切替、固定BG_Bの床/天井と透明BG_Aの壁/扉、共通Priorityデシジョンテーブル、低Priority自動VRAMビルボード、移動/旋回/階段/LOS/暗闇/ミニマップ、builder roleによるROMビルド連携 |
 | `md-novel-editor` | `editor`, `asset` | PCE VN JSON v2の非破壊編集/import、palette割当と224x136 BG source確認wizard、MD target sidecar、runtime相当320x224 preview、診断、async保存guard |
 | `md-novel-builder` | `build` | hook-only preflight/codegen、SGDK Novel runtime、XGM2/PCM変換、VRAM/scanline/ROM gate、builder role連携 |
-| `horizontal-stg-editor` | `editor` | 実画像320x224 preview、8x8背景stamp、system/enemy/boss sprite、BGM preview、弾幕、timeline配置、安定ID、検証 |
-| `horizontal-stg-builder` | `build` | 横STGランタイム同期、C/RES/event stream生成、18 tile icon HUD、MD密度の等倍8x8背景、title IMAGEとline-scrollロゴ、背景VRAM診断、builder role連携 |
-| `bulletml-stg-editor` | `editor`, `asset` | BulletML v0.21 subset、安定ID IR、構造化／Graph共通reducer、安全なXML＋sidecar、compiled BMLB preview、縦横stage |
-| `bulletml-stg-builder` | `build` | BMLB ABI v1、固定pool C runtime、27ケース負荷gate、縦横mini-STG、診断ROM、WASM proof、builder role連携 |
+| `horizontal-stg-editor` | `editor` | 開発終了。既存project編集互換のみ維持 |
+| `horizontal-stg-builder` | `build` | 開発終了。既存project Build互換のみ維持 |
+| `bulletml-stg-editor` | `editor`, `asset` | v2の13 tab、stable-ID documents、Player/Weapon/Item/Enemy/Boss/背景/Stage/Demo、compiled BMLB preview |
+| `bulletml-stg-builder` | `build` | BMLB ABI v1、Campaign/Caravan、SRAM、shared VN/TMX、SGDK release ROM/WASM proof |
 | `standard-emulator` | `emulator` | WASM Mega Drive エミュレーター |
 | `standard-api-emulator` | `emulator`, `tool` | REST API Mega Drive エミュレーター |
 | `ai-control` | `editor`, `tool` | 外部 AI ツール向け localhost REST / MCP bridge |
@@ -377,6 +377,7 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 
 ### MD Novel plugin規約
 
+- scene schema、editor component、preview、font、image、compilerの実装正本は`plugins/shared/md-vn/`に置く。既存MD Novel pathは互換wrapperにし、共有moduleからpluginへ逆依存させない。BulletML Demosもcanonical `assets/pce-vn-scenes.json`を共有する
 - script正本は`assets/pce-vn-scenes.json`。未知fieldを保持し、MD物理設定を`data/md-novel/target-profile.json`、asset対応を`asset-bindings.json`へ分離する
 - `md-novel-editor`のUI/import/palette割当modal/previewはplugin renderer内に置き、main処理はmanifestの`hooks`と`mainApi.hooks`を一致させてserviceへ委譲する。背景source modalはlarge panelとcontainer-responsive layoutを使い、可視行だけ自動previewし、非同期結果の世代を照合する。Full PreviewはBG fade、typewriter、page cursor、WAIT/INPUT割込、Move、SpriteText blink、生成subset fontをruntimeと同期する
 - 保存はrevision照合、project root/realpath検査、atomic replace、transaction hashを使う。`beforeBuild` / `beforeProjectSwitch`は保存完了までawaitし、失敗時にvetoする
@@ -391,6 +392,7 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 
 ### Horizontal STG plugin規約
 
+- `horizontal-stg-*`は開発終了。既存projectの編集・Buildコードと回帰テストだけを維持し、templateは`templateDeprecated: true`で新規作成一覧から除外する。新機能を追加せずBulletML STG Studio v2を推奨する
 - 編集正本は `data/horizontal-stg/`。entityは安定ID、runtime IDは1～255、0はNONEに予約する
 - 保存はrevision照合とatomic replaceを使い、削除は `.deleted` へ退避する。安定IDは専用UIで読取専用、collectionは選択entityだけをupsertして他定義を保持する
 - 専用rendererに実BG_A/B・spriteの320x224 preview、敵／item／boss timeline、弾幕preview、8x8 stamp／eyedropper／undo、画像pipeline、VGM previewを置く。関連pluginへは汎用`api.pages.open()`で遷移する
@@ -405,19 +407,21 @@ TYPE   name   "ファイルパス"   [追加パラメータ...]
 
 ### BulletML STG plugin規約
 
-- Stages統合Previewはmain側のproject境界付きBMLB sessionで全event／phaseを実行し、自機弾、HP、衝突、残機、score、生成順display budgetを同じtickへ統合する。rendererでpattern単体traceを貼り付けて近似しない
-- `bulletml-stg-editor`は`asset-manager`／`sprite-editor`だけへ依存し、`bulletml-stg-builder`がEditorへ一方向依存する。旧`horizontal-stg-*`へ個別分岐や移行処理を追加しない
-- 編集正本は`data/bulletml/project.json`、`patterns/<stable-id>.json`、`editor-state.json`、`stages/{vertical,horizontal}.json`。revision、atomic replace、`.deleted`、draft保存、`beforeBuild`／`beforeProjectSwitch` vetoを維持する
+- `bulletml-stg-editor`／`bulletml-stg-builder`は同じIDの2.0破壊的更新。schema v1は移行せず明示errorにし、旧`horizontal-stg-*`へ移行処理を追加しない
+- Editorは`asset-manager`／`sprite-editor`／`tilemap-editor`へ依存し、BuilderがEditorへ一方向依存する。Asset参照は`{ symbol, type }`とSPRITE `animationRow`／MAP `collisionLayer`だけを保存し、missing/type mismatch/duplicate/物理pathを保存・Build errorにする
+- 編集正本は`data/bulletml/`のProject/pool/game-flow/input/save/playerと型別catalog、`patterns/<stable-id>.json`、`stages/<stable-id>.json`、Demo binding、runtime ID registry。catalog別runtime IDは1～255、0はNONE。全documentにrevision、atomic replace、`.deleted`、dirty guard、`beforeBuild`／`beforeProjectSwitch` vetoを適用する
 - 構造化フローとDOM＋SVG Graphは同じIR reducerを編集し、PreviewはIRではなくMDと同じcompiled `BMLB ABI v1`を実行する
 - Pattern／Definition filterは表示だけを変え、選択はlist行操作として分離する。Pattern表示名は安定IDを変えず編集でき、Action／Fire／Bulletはすべて構造化フォームを持つ。ネストcommandのRef接続も同じIR path reducerへ通す
-- BMLB Preview loopは既定ONで切替可能とし、Stages経路overlayは既定で選択eventのみ、明示操作ですべてを表示する。Boss phase操作は1～3件の境界と無効理由をUIに出す
+- BMLB Preview loopは既定ON。Stages統合Previewはmain側project境界付きsessionでPlayer shot/Bomb/drop/Movement/collision/scoreと全event/phaseを実行する。Boss phase操作は1～8件の境界と無効理由をUIに出す
 - XMLはcanonical交換形式、MD情報はhash付き`.md-bullet.json`へ分離する。外部DTD／Entityと内部subset、未知要素、未解決／循環Ref、非対応式を近似せず行・列付きで拒否する
-- Builderは固定pool、整数／固定小数点だけのC runtimeを同期し、`src/boot/rom_head.c`を上書きせず、全C sourceを`makeVariables.SRC_C`へ明示する
-- 縦横別の固定320×224 indexed背景をBG_B、縦横別BGMと射撃／被弾／撃破SFXをBuilder同梱資産として同期する。背景／音声／敵素材のEditorは追加しない
+- Player/Weapon/Item/Effect/Explosion/Movement/Enemy/Boss/Background/Collision/Stageを構造化編集し、Stage方向の混在、1～8 Boss phase/Parts、BG_A/B最大8 band、wave preset、scroll tween、背景切替、破壊entity、巨大BossをJS/Cで同期する
+- Campaign/Caravanを同一ROMへ収録し、rankはProject固定、Boss phaseだけ上書きする。A/B/C割当、3段速度、Top10/name/checkpointをchecksum付きSRAMへ保存する
+- Demosは`plugins/shared/md-vn/`を使い、Stage資産解放後の専用Modeで実行する。canonical sceneにopening/Stage前後/ending bindingだけを持ち、VN flagをStage graphへ渡す
+- Builderは固定pool、整数／固定小数点のC runtimeとshared TMX collision/VN compilerを同期し、`src/boot/rom_head.c`を上書きせず、全C sourceを`makeVariables.SRC_C`へ明示する
 - `res/gfx/bulletml_bullet.png`は初回だけ生成し、以後は上書きしない。Build時に共有source／寸法／PAL3、indexed 16色、frame格子、1 hardware piece、128 tile、PLTE SHA-256を検証する
 - 弾animationは同寸法frameの横1行sheetとし、全frameを共有VRAMへ1回だけロードする。48個の弾Spriteでauto VRAM allocationを使ってframe tileを複製しない
-- rank 3種 × seed 3種 × 自機経路3種の27ケース、generic縦横、完全stage、JS/C 10,000 frame CRC、SGDK ROM／同梱WASM proofをgateにする
-- 新規projectは`template_bulletml_stg`を使い、Builderと`standard-emulator` roleを選択済みにする
+- rank 3種×seed 3種×自機経路3種の27ケース、generic縦横、全Stage、JS/C fixture/CRC、asset/palette/collision/VN/DAG、sprite/scanline/VRAM/RAM/DMA/PCM/4 MiBをgateにする
+- `template_bulletml_stg`は3面Campaign＋専用Caravanの完成Showcase「GERONEKO -ABYSS STRIKE-」とし、最小Starterは作らない。Builderと`standard-emulator` roleを選択済みにする
 - 詳細契約と検証は`docs/BULLETML_STG.md`、集中テストは`tests/bulletml-stg-plugins.test.js`を実装と同時に更新する
 
 ### Dungeon game v1.1 素材セット規約

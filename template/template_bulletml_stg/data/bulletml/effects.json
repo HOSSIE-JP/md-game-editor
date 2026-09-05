@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 2,
+  "kind": "effects",
+  "entries": [
+    {
+      "id": "small-burst",
+      "name": "Small Burst",
+      "sprite": {
+        "symbol": "effect_explosion",
+        "type": "SPRITE",
+        "animationRow": 0
+      },
+      "durationFrames": 24,
+      "se": {
+        "symbol": "bml_sfx_destroy",
+        "type": "WAV"
+      }
+    },
+    {
+      "id": "gold-burst",
+      "name": "Gold Burst",
+      "sprite": {
+        "symbol": "effect_explosion",
+        "type": "SPRITE",
+        "animationRow": 0
+      },
+      "durationFrames": 32,
+      "se": {
+        "symbol": "bml_sfx_destroy",
+        "type": "WAV"
+      }
+    },
+    {
+      "id": "bomb-wave",
+      "name": "Bomb Wave",
+      "sprite": {
+        "symbol": "effect_explosion",
+        "type": "SPRITE",
+        "animationRow": 0
+      },
+      "durationFrames": 60,
+      "se": {
+        "symbol": "sfx_bomb",
+        "type": "WAV"
+      }
+    }
+  ]
+}

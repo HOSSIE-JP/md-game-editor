@@ -157,6 +157,12 @@ test('project list separates bundled templates from normal projects', () => {
     title: 'Block Template',
     pluginRoles: { builder: 'block-game-builder' },
   }, null, 2), 'utf-8');
+  fs.mkdirSync(path.join(templateRoot, 'template_deprecated_stg'), { recursive: true });
+  fs.writeFileSync(path.join(templateRoot, 'template_deprecated_stg', 'project.json'), JSON.stringify({
+    title: 'Deprecated STG',
+    templateDeprecated: true,
+    pluginRoles: { builder: 'horizontal-stg-builder' },
+  }, null, 2), 'utf-8');
   fs.mkdirSync(path.join(projectsRoot, 'real_game'), { recursive: true });
   fs.writeFileSync(path.join(projectsRoot, 'real_game', 'project.json'), JSON.stringify({ title: 'Real Game' }, null, 2), 'utf-8');
   fs.mkdirSync(path.join(projectsRoot, 'sample_legacy'), { recursive: true });

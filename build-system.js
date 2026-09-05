@@ -415,8 +415,10 @@ function listProjectTemplates() {
         projectName: entry.name,
         title: config.title || config.romName || entry.name,
         builderPlugin: pluginRoles.builder || null,
+        deprecated: config.templateDeprecated === true,
       };
     })
+    .filter((template) => !template.deprecated)
     .sort((left, right) => left.projectName.localeCompare(right.projectName, 'ja'));
 }
 

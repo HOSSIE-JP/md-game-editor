@@ -126,7 +126,7 @@ static const NovelChoice *activeChoice;
 static u8 choiceIndex;
 
 static SpriteTextState spriteTexts[NOVEL_SPRITE_TEXT_SLOTS];
-static OverlayTile overlayTiles[NOVEL_OVERLAY_MAX_TILES];
+static OverlayTile *overlayTiles;
 static u16 overlayTileCount;
 static u16 previousOverlayCells[NOVEL_OVERLAY_MAX_TILES];
 static u16 previousOverlayCount;
@@ -504,10 +504,35 @@ static void hideMessageSprites(void)
     messageSpriteActive = 0;
 }
 
+static u8 actorSpriteObjectCount(void)
+{
+    u8 count = 0;
+    u8 slot;
+    for (slot = 0; slot < NOVEL_SPRITE_SLOTS; slot++)
+        if (actorSprites[slot] != NULL) count++;
+    return count;
+}
+
+static void reserveActorSpriteObject(void)
+{
+    const u8 capacity = NOVEL_MESSAGE_SPRITES - actorSpriteObjectCount() - 1;
+    while (messageSpriteAllocated > capacity)
+    {
+        messageSpriteAllocated--;
+        if (messageSprites[messageSpriteAllocated] != NULL)
+        {
+            SPR_releaseSprite(messageSprites[messageSpriteAllocated]);
+            messageSprites[messageSpriteAllocated] = NULL;
+        }
+    }
+    if (messageSpriteActive > capacity) messageSpriteActive = capacity;
+}
+
 static void emitMessageSprite(const SpriteDefinition *definition, s16 x, s16 y, u16 tile)
 {
     Sprite *sprite;
-    if (messageSpriteActive >= NOVEL_MESSAGE_SPRITES) return;
+    const u8 capacity = NOVEL_MESSAGE_SPRITES - actorSpriteObjectCount();
+    if (messageSpriteActive >= capacity) return;
     sprite = messageSprites[messageSpriteActive];
     if (sprite == NULL)
     {
@@ -1090,7 +1115,10 @@ static void setActor(const NovelCommand *command)
     if (!(command->flags & NOV_FLAG_VISIBLE) || (command->target < 0))
     {
         if (actorSprites[slot] != NULL)
-            SPR_setVisibility(actorSprites[slot], HIDDEN);
+        {
+            SPR_releaseSprite(actorSprites[slot]);
+            actorSprites[slot] = NULL;
+        }
         releasePaletteOwner(actorPalettes[slot]);
         actorPalettes[slot] = NOVEL_PALETTE_NONE;
         actorResources[slot] = -1;
@@ -1105,7 +1133,10 @@ static void setActor(const NovelCommand *command)
     paletteId = novelDataSpritePaletteId((u16)command->target);
     loadPhysicalPalette(palette, definition->palette->data, paletteId);
     if (actorSprites[slot] == NULL)
+    {
+        reserveActorSpriteObject();
         actorSprites[slot] = SPR_addSpriteEx(definition, effectiveX(command->x), command->y, TILE_ATTR(palette, FALSE, FALSE, FALSE), SPR_FLAG_AUTO_VISIBILITY | SPR_FLAG_AUTO_VRAM_ALLOC | SPR_FLAG_AUTO_TILE_UPLOAD);
+    }
     else if (actorResources[slot] != command->target)
         SPR_setDefinition(actorSprites[slot], definition);
     if (actorSprites[slot] == NULL)
@@ -1515,6 +1546,13 @@ void novelInit(const NovelProject *project)
     u8 slot;
     u16 index;
     runtimeProject = project;
+    overlayTiles = MEM_alloc(sizeof(OverlayTile) * NOVEL_OVERLAY_MAX_TILES);
+    if (overlayTiles == NULL)
+    {
+        runtimeProject = NULL;
+        runtimeMode = MODE_HALT;
+        return;
+    }
     currentScene = -1;
     currentPc = 0;
     runtimeMode = MODE_RUN;
@@ -1568,6 +1606,70 @@ void novelInit(const NovelProject *project)
     SYS_setHIntCallback(NULL);
     enterScene(project->startScene);
 }
+
+void novelStartScene(u16 sceneIndex)
+{
+    if (runtimeProject == NULL) return;
+    enterScene((s16) sceneIndex);
+}
+
+bool novelIsRunning(void)
+{
+    return (runtimeProject != NULL) && (runtimeMode != MODE_HALT);
+}
+
+s16 novelGetVariable(u16 index)
+{
+    return index < variableCount ? variables[index] : 0;
+}
+
+void novelSetVariable(u16 index, s16 value)
+{
+    if (index < variableCount) setVariable((s16) index, value);
+}
+
+void novelShutdown(void)
+{
+    u8 slot;
+    hideWindow();
+    clearSpriteTexts();
+    for (slot = 0; slot < NOVEL_MESSAGE_SPRITES; slot++)
+    {
+        if (messageSprites[slot] != NULL)
+        {
+            SPR_releaseSprite(messageSprites[slot]);
+            messageSprites[slot] = NULL;
+        }
+    }
+    for (slot = 0; slot < NOVEL_SPRITE_SLOTS; slot++)
+    {
+        if (actorSprites[slot] != NULL)
+        {
+            SPR_releaseSprite(actorSprites[slot]);
+            actorSprites[slot] = NULL;
+        }
+        releasePaletteOwner(actorPalettes[slot]);
+        actorPalettes[slot] = NOVEL_PALETTE_NONE;
+        actorResources[slot] = -1;
+        actorMoves[slot].active = FALSE;
+    }
+    SPR_update();
+    SPR_end();
+    XGM2_stop();
+    XGM2_stopPCM(SOUND_PCM_CH2);
+    VDP_setHilightShadow(FALSE);
+    VDP_setHInterrupt(FALSE);
+    SYS_setVIntCallback(NULL);
+    SYS_setHIntCallback(NULL);
+    if (overlayTiles != NULL)
+    {
+        MEM_free(overlayTiles);
+        overlayTiles = NULL;
+    }
+    runtimeMode = MODE_HALT;
+    runtimeProject = NULL;
+}
+
 void novelUpdate(void)
 {
     u16 joy = JOY_readJoypad(JOY_1);

@@ -4,6 +4,9 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const schema = require('./bulletml-schema');
+const host = require('./stg-schema-v2');
+const documentService = require('./stg-document-service');
+const vnService = require('./stg-vn-service');
 const xml = require('./bulletml-xml');
 const compiler = require('./bulletml-compiler');
 const simulator = require('./bulletml-simulator');
@@ -72,6 +75,8 @@ function atomicWriteFile(filePath, contents) {
 
 function writeJsonFile(filePath, value) { atomicWriteFile(filePath, schema.stableStringify(value)); }
 
+const documentIo = Object.freeze({ resolveProjectPath, readJsonFile, writeJsonFile });
+
 function listPatternFiles(projectDir) {
   const root = resolveProjectPath(projectDir, PATTERN_ROOT);
   if (!fs.existsSync(root)) return [];
@@ -88,37 +93,110 @@ function readDeleted(projectDir) {
     .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
     .map((entry) => {
       const filePath = path.join(root, entry.name);
-      const pattern = schema.normalizePattern(readJsonFile(filePath, {}), entry.name.replace(/-\d{8}T\d{6}.*$/, '').replace(/\.json$/, ''));
+      const raw = documentService.assertVersion(readJsonFile(filePath, {}), filePath);
+      const pattern = schema.normalizePattern(raw, entry.name.replace(/-\d{8}T\d{6}.*$/, '').replace(/\.json$/, ''));
       return { fileName: entry.name, pattern, deletedAt: fs.statSync(filePath).mtime.toISOString() };
     });
 }
 
+function readDeletedStages(projectDir) {
+  const root = resolveProjectPath(projectDir, path.join(STAGE_ROOT, '.deleted'));
+  if (!fs.existsSync(root)) return [];
+  return fs.readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => {
+      const filePath = path.join(root, entry.name);
+      const raw = documentService.assertVersion(readJsonFile(filePath, {}), filePath);
+      const stage = schema.normalizeStage(raw, entry.name.replace(/-\d{8}T\d{6}.*$/, '').replace(/\.json$/, ''));
+      return { fileName: entry.name, stage, deletedAt: fs.statSync(filePath).mtime.toISOString() };
+    })
+    .sort((left, right) => right.deletedAt.localeCompare(left.deletedAt, 'en'));
+}
+
 function readSnapshot(projectDir) {
   const root = assertProjectDir(projectDir);
-  const project = schema.normalizeProject(readJsonFile(resolveProjectPath(root, PROJECT_PATH), schema.DEFAULT_PROJECT));
-  const editorState = schema.normalizeEditorState(readJsonFile(resolveProjectPath(root, EDITOR_STATE_PATH), schema.DEFAULT_EDITOR_STATE));
-  const patterns = listPatternFiles(root).map((filePath) => schema.normalizePattern(readJsonFile(filePath, {}), path.basename(filePath, '.json')));
+  const documents = documentService.readDocuments(root, documentIo, schema.DEFAULT_EDITOR_STATE);
+  const project = schema.normalizeProject(documents.project);
+  const editorState = schema.normalizeEditorState(documents.editorState);
+  const patterns = documentService.readPatterns(root, documentIo, schema.normalizePattern);
   const byId = new Map(patterns.map((pattern) => [pattern.id, pattern]));
   const ordered = [
     ...project.patternOrder.map((id) => byId.get(id)).filter(Boolean),
     ...patterns.filter((pattern) => !project.patternOrder.includes(pattern.id)).sort((left, right) => left.id.localeCompare(right.id, 'en')),
   ];
-  const stages = ['vertical', 'horizontal'].map((orientation) => schema.normalizeStage(readJsonFile(resolveProjectPath(root, path.join(STAGE_ROOT, `${orientation}.json`)), {}), orientation));
+  const stages = documentService.readStages(root, documentIo);
+  const documentRevisions = documentService.documentRevisionMap({ ...documents, project, editorState }, schema.revisionFor);
   const revisions = {
-    project: schema.revisionFor(project),
-    editorState: schema.revisionFor(editorState),
+    ...documentRevisions,
     patterns: Object.fromEntries(ordered.map((pattern) => [pattern.id, schema.revisionFor(pattern)])),
-    stages: Object.fromEntries(stages.map((stage) => [stage.orientation, schema.revisionFor(stage)])),
+    stages: Object.fromEntries(stages.flatMap((stage) => [[stage.id, schema.revisionFor(stage)], [stage.orientation, schema.revisionFor(stage)]])),
   };
-  return { project, editorState, patterns: ordered, stages, deleted: readDeleted(root), revisions };
+  return {
+    project,
+    pools: documents.pools,
+    gameFlow: documents.gameFlow,
+    input: documents.input,
+    save: documents.save,
+    player: documents.player,
+    demoBindings: documents.demoBindings,
+    runtimeIds: documents.runtimeIds,
+    collections: documents.collections,
+    ...Object.fromEntries(host.COLLECTION_KINDS.map((kind) => [kind, documents.collections[kind]])),
+    editorState,
+    patterns: ordered,
+    stages,
+    deleted: readDeleted(root),
+    deletedStages: readDeletedStages(root),
+    deletedDocuments: documentService.readDeletedEntries(root, documentIo),
+    revisions,
+  };
+}
+
+function assetIndexFor(projectDir) {
+  try { return documentService.buildAssetIndex(projectDir).index; }
+  catch (_error) { return new Map(); }
+}
+
+function validateSnapshot(snapshot, options = {}) {
+  const bulletml = schema.validateProject(snapshot.project, snapshot.patterns, snapshot.stages);
+  const hostValidation = host.validateSnapshot(snapshot, options.assets === false ? null : assetIndexFor(options.projectDir || ''));
+  const vn = options.projectDir ? vnService.validateDemoBindings(options.projectDir, snapshot) : { ok: true, diagnostics: [] };
+  const diagnostics = [...bulletml.diagnostics, ...hostValidation.diagnostics, ...vn.diagnostics];
+  return {
+    ok: !diagnostics.some((item) => item.severity === 'error'),
+    diagnostics,
+    errors: diagnostics.filter((item) => item.severity === 'error'),
+    warnings: diagnostics.filter((item) => item.severity === 'warning'),
+    bulletml,
+    host: hostValidation,
+    vn,
+  };
+}
+
+function syncRuntimeIds(projectDir) {
+  const snapshot = readSnapshot(projectDir);
+  const next = host.reconcileRuntimeIds(snapshot, snapshot.runtimeIds);
+  if (schema.revisionFor(next) !== schema.revisionFor(snapshot.runtimeIds)) {
+    documentService.writeRuntimeIds(projectDir, { ...snapshot, runtimeIds: next }, documentIo);
+  }
+  return readSnapshot(projectDir);
 }
 
 function loadProject(projectDir) {
   try {
     const snapshot = readSnapshot(projectDir);
-    const validation = schema.validateProject(snapshot.project, snapshot.patterns, snapshot.stages);
+    const validation = validateSnapshot(snapshot, { projectDir });
+    const canonical = vnService.readCanonicalSceneDocument(projectDir, snapshot.demoBindings);
     const templates = Object.fromEntries(['blank', 'aimed', 'fan', 'rotation', 'rank', 'rand', 'speed', 'turn', 'split', 'reference'].map((id) => [id, schema.createPatternTemplate(id, `pattern-${id}`)]));
-    return { ok: true, snapshot, validation, templates };
+    const demoEditor = {
+      sceneDocument: canonical.sceneDocument,
+      bindings: snapshot.demoBindings,
+      revisions: {
+        sceneDocument: schema.revisionFor(canonical.sceneDocument),
+        bindings: snapshot.revisions.demoBindings,
+      },
+    };
+    return { ok: true, snapshot, validation, templates, demoEditor, schemaVersion: host.SCHEMA_VERSION };
   } catch (error) { return { ok: false, error: String(error?.message || error) }; }
 }
 
@@ -146,8 +224,8 @@ function saveProject(projectDir, payload = {}) {
     const editorState = payload.editorState ? schema.normalizeEditorState(payload.editorState) : current.editorState;
     if (payload.project) writeJsonFile(resolveProjectPath(root, PROJECT_PATH), project);
     if (payload.editorState) writeJsonFile(resolveProjectPath(root, EDITOR_STATE_PATH), editorState);
-    const snapshot = readSnapshot(root);
-    return { ok: true, snapshot, validation: schema.validateProject(snapshot.project, snapshot.patterns, snapshot.stages) };
+    const snapshot = syncRuntimeIds(root);
+    return { ok: true, snapshot, validation: validateSnapshot(snapshot, { projectDir: root }) };
   });
 }
 
@@ -164,7 +242,7 @@ function savePattern(projectDir, payload = {}) {
       current.project.patternOrder.push(pattern.id);
       writeJsonFile(resolveProjectPath(root, PROJECT_PATH), current.project);
     }
-    const snapshot = readSnapshot(root);
+    const snapshot = syncRuntimeIds(root);
     const validation = schema.validatePattern(pattern);
     let compiled = null;
     if (validation.ok) {
@@ -194,7 +272,7 @@ function deletePattern(projectDir, payload = {}) {
     current.project.patternOrder = current.project.patternOrder.filter((item) => item !== id);
     for (const role of schema.PATTERN_ROLES) if (current.project.patternRoles[role] === id) current.project.patternRoles[role] = '';
     writeJsonFile(resolveProjectPath(root, PROJECT_PATH), current.project);
-    const snapshot = readSnapshot(root);
+    const snapshot = syncRuntimeIds(root);
     return { ok: true, backup: path.relative(root, destination).replace(/\\/g, '/'), snapshot };
   });
 }
@@ -206,13 +284,13 @@ function restorePattern(projectDir, payload = {}) {
     if (!fileName.endsWith('.json') || fileName !== payload.fileName) throw new Error('deleted file名が不正です');
     const source = resolveProjectPath(root, path.join(PATTERN_ROOT, '.deleted', fileName));
     if (!fs.existsSync(source)) throw new Error(`${fileName} がありません`);
-    const pattern = schema.normalizePattern(readJsonFile(source, {}), 'restored-pattern');
+    const pattern = schema.normalizePattern(documentService.assertVersion(readJsonFile(source, {}), source), 'restored-pattern');
     const destination = resolveProjectPath(root, path.join(PATTERN_ROOT, `${pattern.id}.json`));
     if (fs.existsSync(destination)) throw new Error(`pattern ${pattern.id} は既に存在します`);
     fs.renameSync(source, destination);
     const current = readSnapshot(root);
     if (!current.project.patternOrder.includes(pattern.id)) { current.project.patternOrder.push(pattern.id); writeJsonFile(resolveProjectPath(root, PROJECT_PATH), current.project); }
-    return { ok: true, snapshot: readSnapshot(root) };
+    return { ok: true, snapshot: syncRuntimeIds(root) };
   });
 }
 
@@ -289,7 +367,7 @@ function compilePattern(projectDir, payload = {}) {
 function validateProject(projectDir, payload = {}) {
   return withConflict(() => {
     const snapshot = readSnapshot(projectDir);
-    const validation = schema.validateProject(snapshot.project, snapshot.patterns, snapshot.stages);
+    const validation = validateSnapshot(snapshot, { projectDir });
     const compiled = [];
     const programs = new Map();
     const stageMatrices = [];
@@ -304,8 +382,8 @@ function validateProject(projectDir, payload = {}) {
       if (payload.stress && !validation.diagnostics.some((item) => item.severity === 'error')) {
         for (const stage of snapshot.stages) {
           const matrix = simulator.runStageValidationMatrix(stage, programs, { frames: payload.frames || stage.durationFrames });
-          stageMatrices.push({ orientation: stage.orientation, ...matrix });
-          if (!matrix.ok) validation.diagnostics.push({ severity: 'error', code: 'BML_STAGE_STRESS_DROP', path: `stages.${stage.orientation}`, message: `${matrix.failures.length}ケースでstage resource dropが発生しました` });
+          stageMatrices.push({ id: stage.id, orientation: stage.orientation, ...matrix });
+          if (!matrix.ok) validation.diagnostics.push({ severity: 'error', code: 'BML_STAGE_STRESS_DROP', path: `stages.${stage.id}`, message: `${matrix.failures.length}ケースでstage resource dropが発生しました` });
         }
       }
     }
@@ -317,22 +395,201 @@ function validateProject(projectDir, payload = {}) {
 
 function loadStage(projectDir, payload = {}) {
   return withConflict(() => {
-    const orientation = payload.orientation === 'horizontal' ? 'horizontal' : 'vertical';
     const snapshot = readSnapshot(projectDir);
-    const stage = snapshot.stages.find((item) => item.orientation === orientation);
-    return { ok: true, stage, revision: snapshot.revisions.stages[orientation], validation: schema.validateStage(stage, new Set(snapshot.patterns.map((item) => item.id))) };
+    const requestedId = String(payload.id || payload.stageId || '');
+    const orientation = payload.orientation === 'horizontal' ? 'horizontal' : 'vertical';
+    const stage = snapshot.stages.find((item) => requestedId ? item.id === requestedId : item.orientation === orientation);
+    if (!stage) throw new Error(`Stageがありません: ${requestedId || orientation}`);
+    return { ok: true, stage, revision: snapshot.revisions.stages[stage.id], validation: schema.validateStage(stage, new Set(snapshot.patterns.map((item) => item.id))) };
   });
 }
 
 function saveStage(projectDir, payload = {}) {
   return withConflict(() => {
-    const orientation = payload.orientation === 'horizontal' ? 'horizontal' : 'vertical';
     const current = readSnapshot(projectDir);
-    checkRevision(current.revisions.stages[orientation], payload.baseRevision, `${orientation}.json`);
-    const stage = schema.normalizeStage(payload.stage || payload.data, orientation);
-    writeJsonFile(resolveProjectPath(projectDir, path.join(STAGE_ROOT, `${orientation}.json`)), stage);
-    const snapshot = readSnapshot(projectDir);
-    return { ok: true, stage: snapshot.stages.find((item) => item.orientation === orientation), revision: snapshot.revisions.stages[orientation], validation: schema.validateStage(stage, new Set(snapshot.patterns.map((item) => item.id))) };
+    const input = payload.stage || payload.data || {};
+    const requestedId = String(payload.id || payload.stageId || input.id || '');
+    const orientation = input.orientation || (payload.orientation === 'horizontal' ? 'horizontal' : 'vertical');
+    const stage = schema.normalizeStage({ ...input, id: requestedId || input.id }, requestedId || `stage-${orientation}`);
+    const existing = current.stages.find((item) => item.id === stage.id);
+    checkRevision(existing ? current.revisions.stages[stage.id] : '', payload.baseRevision, `${stage.id}.json`);
+    writeJsonFile(resolveProjectPath(projectDir, path.join(STAGE_ROOT, `${stage.id}.json`)), stage);
+    const snapshot = syncRuntimeIds(projectDir);
+    return { ok: true, stage: snapshot.stages.find((item) => item.id === stage.id), revision: snapshot.revisions.stages[stage.id], snapshot, validation: schema.validateStage(stage, new Set(snapshot.patterns.map((item) => item.id))) };
+  });
+}
+
+function deleteStage(projectDir, payload = {}) {
+  return withConflict(() => {
+    const root = assertProjectDir(projectDir);
+    const id = host.safeId(payload.id);
+    if (!id || id !== payload.id) throw new Error('stage IDが不正です');
+    const current = readSnapshot(root);
+    const stage = current.stages.find((item) => item.id === id);
+    if (!stage) throw new Error(`Stage ${id} がありません`);
+    checkRevision(current.revisions.stages[id], payload.baseRevision, `${id}.json`);
+    const source = resolveProjectPath(root, path.join(STAGE_ROOT, `${id}.json`));
+    if (!fs.existsSync(source)) throw new Error(`Stage fileがありません: ${id}.json`);
+    const deletedRoot = resolveProjectPath(root, path.join(STAGE_ROOT, '.deleted'));
+    ensureDir(deletedRoot);
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    const destination = path.join(deletedRoot, `${id}-${stamp}.json`);
+    if (fs.existsSync(destination)) throw new Error('同名の削除backupが既にあります');
+    fs.renameSync(source, destination);
+    const snapshot = syncRuntimeIds(root);
+    return {
+      ok: true,
+      id,
+      backup: path.relative(root, destination).replace(/\\/g, '/'),
+      snapshot,
+      validation: validateSnapshot(snapshot, { projectDir: root }),
+    };
+  });
+}
+
+function restoreStage(projectDir, payload = {}) {
+  return withConflict(() => {
+    const root = assertProjectDir(projectDir);
+    const fileName = path.basename(String(payload.fileName || ''));
+    if (!fileName.endsWith('.json') || fileName !== payload.fileName) throw new Error('deleted file名が不正です');
+    const source = resolveProjectPath(root, path.join(STAGE_ROOT, '.deleted', fileName));
+    if (!fs.existsSync(source)) throw new Error(`${fileName} がありません`);
+    const raw = documentService.assertVersion(readJsonFile(source, {}), source);
+    const stage = schema.normalizeStage(raw, 'restored-stage');
+    const destination = resolveProjectPath(root, path.join(STAGE_ROOT, `${stage.id}.json`));
+    if (fs.existsSync(destination)) throw new Error(`Stage ${stage.id} は既に存在します`);
+    fs.renameSync(source, destination);
+    const snapshot = syncRuntimeIds(root);
+    return {
+      ok: true,
+      stage: snapshot.stages.find((item) => item.id === stage.id),
+      snapshot,
+      validation: validateSnapshot(snapshot, { projectDir: root }),
+    };
+  });
+}
+
+function snapshotValueForKind(snapshot, kind) {
+  if (host.COLLECTION_KINDS.includes(kind)) return snapshot.collections[kind];
+  if (kind === 'game-flow') return snapshot.gameFlow;
+  if (kind === 'demo-bindings') return snapshot.demoBindings;
+  if (kind === 'runtime-ids') return snapshot.runtimeIds;
+  return snapshot[kind];
+}
+
+function revisionForKind(snapshot, kind) {
+  if (host.COLLECTION_KINDS.includes(kind)) return snapshot.revisions[kind];
+  const aliases = { 'game-flow': 'gameFlow', 'demo-bindings': 'demoBindings', 'runtime-ids': 'runtimeIds' };
+  return snapshot.revisions[aliases[kind] || kind];
+}
+
+function assertAssetReferencesResolvable(projectDir, value) {
+  const { index } = documentService.buildAssetIndex(projectDir);
+  for (const [symbol, entries] of index.entries()) {
+    if (entries.length > 1) throw new Error(`ResComp symbolが重複しています: ${symbol}`);
+  }
+  for (const reference of host.collectAssetRefs(value)) {
+    const symbol = String(reference.value.symbol || '');
+    if (!symbol) continue;
+    const entries = index.get(symbol) || [];
+    if (!entries.length) throw new Error(`ResComp assetがありません: ${symbol} (${reference.path})`);
+    const actual = String(entries[0].type || '').toUpperCase();
+    const expected = String(reference.value.type || '').toUpperCase();
+    if (actual !== expected) throw new Error(`ResComp asset型が違います: ${symbol} は ${actual}、要求は ${expected}`);
+  }
+}
+
+function saveDocument(projectDir, payload = {}) {
+  return withConflict(() => {
+    const root = assertProjectDir(projectDir);
+    const kind = String(payload.kind || '');
+    if (kind === 'runtime-ids') throw new Error('runtime-ids.jsonはstable ID serviceが管理します');
+    if (![...host.COLLECTION_KINDS, 'pools', 'game-flow', 'input', 'save', 'player', 'demo-bindings'].includes(kind)) throw new Error(`document kindが不正です: ${kind}`);
+    const current = readSnapshot(root);
+    checkRevision(revisionForKind(current, kind), payload.baseRevision, `${kind}.json`);
+    const normalized = host.normalizeDocument(kind, payload.document || payload.data || {});
+    assertAssetReferencesResolvable(root, normalized);
+    documentService.writeDocument(root, kind, normalized, documentIo);
+    const snapshot = syncRuntimeIds(root);
+    return { ok: true, kind, document: snapshotValueForKind(snapshot, kind), revision: revisionForKind(snapshot, kind), snapshot, validation: validateSnapshot(snapshot, { projectDir: root }) };
+  });
+}
+
+function saveDemo(projectDir, payload = {}) {
+  return withConflict(() => {
+    const root = assertProjectDir(projectDir);
+    const current = readSnapshot(root);
+    const canonical = vnService.readCanonicalSceneDocument(root, current.demoBindings);
+    checkRevision(schema.revisionFor(canonical.sceneDocument), payload.baseRevisions?.sceneDocument, 'assets/pce-vn-scenes.json');
+    checkRevision(current.revisions.demoBindings, payload.baseRevisions?.bindings, 'demo-bindings.json');
+    const sceneDocument = schema.deepClone(payload.sceneDocument || canonical.sceneDocument);
+    const sceneValidation = vnService.validateSceneDocument(sceneDocument);
+    if (!sceneValidation.ok) {
+      const error = new Error(`VN scene documentに${sceneValidation.diagnostics.filter((item) => item.severity === 'error').length}件のエラーがあります`);
+      error.diagnostics = sceneValidation.diagnostics;
+      throw error;
+    }
+    const bindings = host.normalizeDemoBindings(payload.bindings || current.demoBindings);
+    assertAssetReferencesResolvable(root, sceneDocument);
+    atomicWriteFile(canonical.target, schema.stableStringify(sceneDocument));
+    documentService.writeDocument(root, 'demo-bindings', bindings, documentIo);
+    const snapshot = syncRuntimeIds(root);
+    const validation = validateSnapshot(snapshot, { projectDir: root });
+    return {
+      ok: true,
+      snapshot,
+      validation,
+      demoEditor: {
+        sceneDocument,
+        bindings: snapshot.demoBindings,
+        revisions: {
+          sceneDocument: schema.revisionFor(sceneDocument),
+          bindings: snapshot.revisions.demoBindings,
+        },
+      },
+    };
+  });
+}
+
+function deleteDocumentEntry(projectDir, payload = {}) {
+  return withConflict(() => {
+    const root = assertProjectDir(projectDir);
+    const kind = String(payload.kind || '');
+    if (!host.COLLECTION_KINDS.includes(kind)) throw new Error(`collection kindが不正です: ${kind}`);
+    const id = host.safeId(payload.id);
+    if (!id || id !== payload.id) throw new Error('stable IDが不正です');
+    const current = readSnapshot(root);
+    checkRevision(current.revisions[kind], payload.baseRevision, `${kind}.json`);
+    const collection = host.clone(current.collections[kind]);
+    const index = collection.entries.findIndex((entry) => entry.id === id);
+    if (index < 0) throw new Error(`${kind} ${id} がありません`);
+    const [entry] = collection.entries.splice(index, 1);
+    const backup = documentService.backupDeletedEntry(root, kind, entry, documentIo);
+    documentService.writeDocument(root, kind, collection, documentIo);
+    const snapshot = syncRuntimeIds(root);
+    return { ok: true, kind, id, backup: backup.relativePath, snapshot };
+  });
+}
+
+function restoreDocumentEntry(projectDir, payload = {}) {
+  return withConflict(() => {
+    const root = assertProjectDir(projectDir);
+    const kind = String(payload.kind || '');
+    if (!host.COLLECTION_KINDS.includes(kind)) throw new Error(`collection kindが不正です: ${kind}`);
+    const fileName = path.basename(String(payload.fileName || ''));
+    if (!fileName.endsWith('.json') || fileName !== payload.fileName) throw new Error('deleted file名が不正です');
+    const source = resolveProjectPath(root, path.join(DATA_ROOT, '.deleted', kind, fileName));
+    if (!fs.existsSync(source)) throw new Error(`${fileName} がありません`);
+    const raw = documentService.assertVersion(readJsonFile(source, {}), source);
+    const current = readSnapshot(root);
+    checkRevision(current.revisions[kind], payload.baseRevision, `${kind}.json`);
+    if (current.collections[kind].entries.some((entry) => entry.id === raw.entry?.id)) throw new Error(`${kind} ${raw.entry.id} は既に存在します`);
+    const collection = host.normalizeCollection(kind, { entries: [...current.collections[kind].entries, raw.entry] });
+    assertAssetReferencesResolvable(root, collection);
+    documentService.writeDocument(root, kind, collection, documentIo);
+    fs.unlinkSync(source);
+    const snapshot = syncRuntimeIds(root);
+    return { ok: true, kind, entry: collection.entries.find((entry) => entry.id === raw.entry.id), snapshot };
   });
 }
 
@@ -346,20 +603,20 @@ function stagePreviewSession(projectDir, sessionId) {
 function startStagePreview(projectDir, payload = {}) {
   return withConflict(() => {
     const root = assertProjectDir(projectDir);
-    const snapshot = readSnapshot(root);
+    const snapshot = syncRuntimeIds(root);
     const byId = new Map(snapshot.patterns.map((pattern) => [pattern.id, pattern]));
     for (const input of Array.isArray(payload.patterns) ? payload.patterns : []) {
       const pattern = schema.normalizePattern(input, input?.id);
       byId.set(pattern.id, pattern);
     }
     const orientation = payload.orientation === 'horizontal' || payload.stage?.orientation === 'horizontal' ? 'horizontal' : 'vertical';
-    const stored = snapshot.stages.find((item) => item.orientation === orientation);
-    const stage = schema.normalizeStage(payload.stage || stored || {}, orientation);
+    const stored = snapshot.stages.find((item) => payload.stageId ? item.id === payload.stageId : item.orientation === orientation);
+    const stage = schema.normalizeStage(payload.stage || stored || {}, payload.stageId || stored?.id || `stage-${orientation}`);
     const firstPatternId = snapshot.project.patternOrder.find((id) => byId.has(id)) || byId.keys().next().value || '';
     const normalRole = snapshot.project.patternRoles[orientation + 'Normal'] || firstPatternId;
     const bossRole = snapshot.project.patternRoles[orientation + 'Boss'] || normalRole;
     for (const event of stage.events) {
-      event.patternId ||= event.boss ? bossRole : normalRole;
+      if (['spawn_enemy', 'spawn_boss', 'spawn_destructible'].includes(event.action?.type)) event.patternId ||= event.boss ? bossRole : normalRole;
       for (const phase of event.phases) phase.patternId ||= event.patternId;
     }
     const validation = schema.validateStage(stage, new Set(byId.keys()));
@@ -368,6 +625,11 @@ function startStagePreview(projectDir, payload = {}) {
     for (const event of stage.events) {
       if (event.patternId) referenced.add(event.patternId);
       for (const phase of event.phases) if (phase.patternId) referenced.add(phase.patternId);
+      const collectionKind = event.action?.type === 'spawn_boss' ? 'bosses' : ['spawn_enemy', 'spawn_destructible'].includes(event.action?.type) ? 'enemies' : '';
+      const definitionId = collectionKind === 'bosses' ? event.action?.bossId : event.action?.enemyId;
+      const definition = collectionKind ? snapshot.collections?.[collectionKind]?.entries?.find((item) => item.id === definitionId) : null;
+      if (definition?.patternId) referenced.add(definition.patternId);
+      for (const phase of definition?.phases || []) if (phase.patternId) referenced.add(phase.patternId);
     }
     const programs = new Map();
     for (const id of referenced) {
@@ -378,9 +640,10 @@ function startStagePreview(projectDir, payload = {}) {
       programs.set(id, compiler.compilePattern(pattern).bytes);
     }
     const session = new StagePreviewSession(stage, programs, {
-      difficulty: payload.difficulty,
-      rank: payload.rank,
+      rank: snapshot.project.rank,
       seed: payload.seed,
+      snapshot,
+      mode: payload.mode || (stage.id === snapshot.project.caravan.stageId ? 'caravan' : 'campaign'),
     });
     const sessionId = crypto.randomBytes(12).toString('hex');
     stagePreviewSessions.set(sessionId, { projectDir: root, session });
@@ -421,7 +684,7 @@ function stopStagePreview(projectDir, payload = {}) {
 
 function exportBuild(projectDir, options = {}) {
   const snapshot = readSnapshot(projectDir);
-  const validation = schema.validateProject(snapshot.project, snapshot.patterns, snapshot.stages);
+  const validation = validateSnapshot(snapshot, { projectDir });
   if (!validation.ok) return { ok: false, error: 'BulletML project validation failed', diagnostics: validation.diagnostics };
   const generated = {};
   const proofPatterns = [];
@@ -439,23 +702,37 @@ function exportBuild(projectDir, options = {}) {
   }
   const stageMatrices = [];
   for (const stage of snapshot.stages) {
-    const matrix = simulator.runStageValidationMatrix(stage, programs, { frames: options.frames || stage.durationFrames });
-    stageMatrices.push({ orientation: stage.orientation, ...matrix });
+    const validationStage = schema.deepClone(stage);
+    for (const event of validationStage.events) {
+      const kind = event.action?.type === 'spawn_boss' ? 'bosses' : ['spawn_enemy', 'spawn_destructible'].includes(event.action?.type) ? 'enemies' : '';
+      const id = kind === 'bosses' ? event.action?.bossId : event.action?.enemyId;
+      const definition = kind ? snapshot.collections?.[kind]?.entries?.find((entry) => entry.id === id) : null;
+      if (definition) {
+        event.patternId ||= definition.patternId;
+        event.movementId ||= definition.movementId;
+        event.dropItemId ||= definition.drop?.itemId;
+        if (kind === 'bosses' && (!event.phases || !event.phases.length)) event.phases = schema.deepClone(definition.phases || []);
+      }
+    }
+    const matrix = simulator.runStageValidationMatrix(validationStage, programs, { frames: options.frames || stage.durationFrames });
+    stageMatrices.push({ id: stage.id, orientation: stage.orientation, ...matrix });
     if (!matrix.ok) return { ok: false, error: `${stage.orientation} stage: 自動負荷検証でresource dropが発生しました`, diagnostics: matrix.failures };
   }
   const symbols = snapshot.patterns.map((pattern) => `BIN bmlb_${pattern.id.replace(/-/g, '_')} "bulletml/generated/${pattern.id}.bmlb"`).join('\n');
   generated['res/bulletml.res'] = `${symbols}\n`;
   const proof = {
-    schemaVersion: 1,
+    schemaVersion: host.SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
     sgdk: '2.11',
     abi: 'BMLB ABI v1',
+    rank: snapshot.project.rank,
     profile: snapshot.project.profile,
     projectSha256: schema.revisionFor(snapshot.project),
     patterns: proofPatterns,
     stages: snapshot.stages.map((stage) => {
-      const matrix = stageMatrices.find((item) => item.orientation === stage.orientation);
+      const matrix = stageMatrices.find((item) => item.id === stage.id);
       return {
+        id: stage.id,
         orientation: stage.orientation,
         sha256: schema.revisionFor(stage),
         events: stage.events.length,
@@ -479,8 +756,14 @@ module.exports = {
   atomicWriteFile,
   readJsonFile,
   readSnapshot,
+  validateSnapshot,
+  syncRuntimeIds,
   loadProject,
   saveProject,
+  saveDocument,
+  saveDemo,
+  deleteDocumentEntry,
+  restoreDocumentEntry,
   savePattern,
   deletePattern,
   restorePattern,
@@ -490,6 +773,8 @@ module.exports = {
   validateProject,
   loadStage,
   saveStage,
+  deleteStage,
+  restoreStage,
   startStagePreview,
   stepStagePreview,
   seekStagePreview,

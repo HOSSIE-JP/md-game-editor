@@ -2,7 +2,7 @@
   "id": "sprite-editor",
   "name": "SPRITE エディタ",
   "description": "RESCOMP の SPRITE 定義を一覧、追加、編集、削除し、スプライトシートとフレームをプレビューします。",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "icon": "sprite",
   "types": ["editor", "asset"],
   "permissions": ["project.read", "project.write", "dialog.openFile", "res.read", "res.write"],

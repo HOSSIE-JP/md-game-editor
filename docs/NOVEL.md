@@ -1,6 +1,6 @@
 # MDノベルエディター / ビルダー
 
-`md-novel-editor` と `md-novel-builder` は、PCE Game Editor の Visual Novel JSON v2 を正本のまま読み書きし、Mega Drive / SGDK 2.11 向けの画像、音声、C runtime、ResComp 定義へ変換します。
+`md-novel-editor` と `md-novel-builder` は、PCE Game Editor の Visual Novel JSON v2 を正本のまま読み書きし、Mega Drive / SGDK 2.11 向けの画像、音声、C runtime、ResComp 定義へ変換します。scene schema、editor component、preview、font/image処理、compilerの実装正本は`plugins/shared/md-vn/`にあり、BulletML STG Studio v2のDemos tabも同じ基盤を利用します。
 
 互換対象は `assets/pce-vn-scenes.json` の JSON、コマンド名、分岐、変数、入力、待機、scene state の意味論です。PCE の scene-pack binary、save-state binary、VDC/SATB/VRAM address、System Card font、CD transport、ADPCM/CD-DA ABI は互換対象ではありません。
 
@@ -10,10 +10,28 @@
 |---|---|
 | `md-novel-editor` | PCE project import、Script/System/Font/Assets/診断、320x224 preview、revision付き保存 |
 | `md-novel-builder` | validation、budget preflight、SGDK runtime/RES/C生成、builder role、ROM size gate |
+| `plugins/shared/md-vn/` | scene schema、editor component、preview、font、image、compilerの共有実装 |
 | `template_md_novel` | 画像、立ち絵、分岐、PSG BGM/SFXを含む、そのままBuild/Test Playできるstarter |
 | `standard-emulator` | 生成ROMのWASM Test Play |
 
 builder は hook-only です。`manifest.json` の `generator` は `false` で、検証と生成は `onBuildStart` に一元化します。
+
+## 共有VN基盤
+
+共有実装は次のmoduleが所有します。
+
+| module | 役割 |
+|---|---|
+| `scene-schema.js` | canonical scene schema、正規化、validation、stable stringify/revision |
+| `editor-component.mjs` | MD NovelとBulletML Demosで共有するscene/binding editor mount |
+| `preview.mjs` | typewriter、BG、actor、Move、SpriteText、WAIT/INPUT、choice/flag preview |
+| `font.js` | 日本語＋ASCIIの16×16使用glyph subset生成・検証 |
+| `image.js` | MD向け画像/palette処理 |
+| `compiler.js` | SGDK VN command/resource compiler |
+
+`plugins/md-novel-editor/novel-schema.js`、`novel-font.js`、`novel-image.js`、`preview-core.mjs`と`plugins/md-novel-builder/codegen.js`は既存importを壊さない互換wrapperで、共有moduleと同じexportを返します。共有moduleからMD Novel pluginへ逆依存させません。
+
+BulletML側でもcanonical documentは`assets/pce-vn-scenes.json`です。BulletML projectはopening、Stage前後、rescue/destroy ending、ending selectorだけを`data/bulletml/demo-bindings.json`へ保存し、Builderが自分のROMへcompileします。Demoはgameplay overlayではなく専用Modeで実行し、Stage資産とVN資産を同時常駐させません。VN flagはCampaignの次Stage選択とStage event conditionへ引き渡します。
 
 ## PCE型エディターUI
 

@@ -1,6 +1,7 @@
 {
   "coreId": "mega-drive",
   "title": "HORIZONTAL STG STARTER",
+  "templateDeprecated": true,
   "author": "MD GAME EDITOR",
   "serial": "GM HSTG0000-00",
   "region": "JUE",

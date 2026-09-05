@@ -818,12 +818,14 @@ window.electronAPI.onPluginLog((payload) => {
 | 項目 | 値 |
 |---|---|
 | タイプ | `editor`, `asset` |
-| バージョン | 1.0.0 |
-| 依存 | `image-resize-converter`, `image-quantize-converter`, `audio-converter` |
-| renderer capability | `page`, `asset-manager` |
+| バージョン | 1.1.0 |
+| 依存 | `image-resize-converter`, `image-quantize-converter`, `audio-converter`, `midi-converter` |
+| renderer capability | `page`, `asset-manager`, `rescomp-asset-picker`, `asset-type-provider`, `asset-import-handler`, `image-import-pipeline` |
 
 `resources.res` のアセット一覧・編集・登録を担うメインエディタプラグインです。  
 画像アセットのリサイズ・減色変換、音声変換 UI を依存 converter capability 経由で呼び出します。
+
+`rescomp-asset-picker`は`list({ types })`、`resolve({ symbol, type })`、`openPicker({ types, selectedSymbol, allowNone, title })`、`mountPreview(...)`を公開します。Pickerは開くたびにResComp定義を再読込し、SPRITE animation/ROW、XGM2/XGM/VGM、WAV、IMAGE、MAP/TILEMAPをプレビューします。候補の選択時に自動で`mountPreview`し、確認専用の「Preview」ボタンを要求しません。利用側は物理pathやResComp行番号を保存せず、`{ symbol, type }`とSPRITEの`animationRow`、MAPの`collisionLayer`だけを正本へ保存します。
 
 ---
 
@@ -869,13 +871,15 @@ PCE 用の画像/音声 import を capability として提供します。実変�
 | 項目 | 値 |
 |---|---|
 | タイプ | `editor`, `asset` |
-| バージョン | 0.1.0 |
+| バージョン | 0.2.0 |
 | 依存 | `asset-manager`, `image-resize-converter`, `image-quantize-converter` |
 | renderer capability | `page`, `sprite-editor` |
 
 RESCOMP の `SPRITE` 定義を `.res` ファイル単位でツリー表示し、スプライトシートのフレーム分割、アニメーション行、フレーム時間、SPRITE パラメータを編集します。画像追加時は標準の画像 import pipeline を使い、8px 境界リサイズと 16 色減色の既存フローに揃えます。
 
 ROW ごとの有効フレーム数は plugin 独自メタデータではなく、RESCOMP 標準の `time` 行列長で表現します。`time=0` は SGDK の挙動に合わせて「そのフレームで再生停止」として preview でも扱い、Sprite Sheet 上には各フレームの time 値を重ねて表示します。Asset Manager 側の SPRITE preview も、スプライトシート全体ではなく定義済みアニメーションを再生確認できる UI にします。
+
+renderer capabilityは`openSprite({ symbol })`を公開し、ゲーム固有Editorの選択済みSPRITEを同じsymbolのまま直接開きます。
 
 ---
 
@@ -884,7 +888,7 @@ ROW ごとの有効フレーム数は plugin 独自メタデータではなく�
 | 項目 | 値 |
 |---|---|
 | タイプ | `editor`, `asset` |
-| バージョン | 0.1.0 |
+| バージョン | 0.2.0 |
 | 依存 | `asset-manager`, `image-resize-converter`, `image-quantize-converter` |
 | renderer capability | `page`, `tilemap-editor` |
 
@@ -892,7 +896,7 @@ Tiled 互換の `.tmx` / `.tsx` サブセットを編集し、SGDK ResComp の `
 
 TMX 入力の `MAP` / `TILEMAP` 定義では、ResComp 構文に合わせて Asset Manager の `tileset_id` 欄を `layer_id` として扱います。画像入力の `MAP` / `TILEMAP` では従来どおり `tileset_id` です。
 
-collision は `Collision` / `Collision:<name>` という TMX tile layer に CSV 値として保存します。ResComp の描画対象 layer_id には使わず、TileMap エディタ保存時に `inc/tilemap_collision.h` / `src/tilemap_collision.c` を生成してゲーム側の判定ロジックから参照します。
+collision は `Collision` / `Collision:<name>` という TMX tile layer に CSV 値として保存します。ResComp の描画対象 layer_id には使いません。renderer capabilityは`openMap({ symbol, collisionLayer })`を公開します。TMX/TSX parser coreは共有moduleへ分離され、BulletML BuilderはBuild時に選択layerを再読込して圧縮collision catalogを生成します。この経路はTileMap Editorが以前生成した`inc/tilemap_collision.h` / `src/tilemap_collision.c`へ依存しません。
 
 ---
 
@@ -1101,6 +1105,8 @@ PCE command意味論をSGDK runtimeへ変換し、ResComp/C source、XGM2/PCM bi
 
 ### `horizontal-stg-editor` — 横スクロールSTGエディター
 
+> 開発終了。既存projectの編集・Build互換と回帰テストのみ維持します。deprecated templateは新規作成一覧に表示しません。
+
 | 項目 | 値 |
 |---|---|
 | タイプ | `editor` |
@@ -1125,7 +1131,7 @@ project-localの `data/horizontal-stg/` を正本として、ステージ、シ�
 共通SGDKランタイムを同期し、保存済みJSONから `game_config`、Shift-JISテキスト、audio/render定義、
 敵／ボス／武器／ステージ定義と各面event stream、`res/common.res`、生成reportを出力します。
 `src/boot/rom_head.c` は上書きせず、Cソースは `makeVariables.SRC_C` で明示します。固定順18 tileの`ts_hud_icons`（`NONE NONE`）を背景より先に予約し、12 segment charge gaugeと機体／強化／速度／bomb／core iconをWINDOWへ描画します。v1.3.0のGERONEKO 5面背景は最終解像度へ直接置く多層8x8語彙へ更新し、BG_B 364～602、BG_A 73～342、HUD込み455～958 effective patternでMD向けの構造密度と1500 tile上限を両立します。タイトルはボス対峙の320x224一枚絵と透明ロゴを別`IMAGE`で表示します。背景804＋ロゴ120＝924 patternを実上限1005 tile以内へ収め、実行時展開を不要にする`NONE ALL`でロードし、ロゴ範囲だけをSGDKの`HSCROLL_LINE`で可読性を保つ半振幅の走査線変形にします。
-`template_horizontal_stg` と5面完成版 `template_geroneko_abyss_strike` を同梱します。
+`template_horizontal_stg` と5面完成版 `template_geroneko_abyss_strike` は既存project互換用に同梱しますが、両templateはdeprecatedです。
 詳細なデータ契約、アセット寸法、ランタイム仕様、検証手順は
 [HORIZONTAL_STG.md](HORIZONTAL_STG.md) を参照してください。
 
@@ -1137,12 +1143,14 @@ project-localの `data/horizontal-stg/` を正本として、ステージ、シ�
 |---|---|
 | タイプ | `editor`, `asset` |
 | 対応 core | `mega-drive` |
-| バージョン | 1.1.0 |
-| 依存 | `asset-manager`, `sprite-editor` |
-| main hook | load/save/delete/restore、XML import/export、validate/compile、stage load/save、Stage Preview start/step/seek/stop |
+| バージョン | 2.0.0 |
+| 依存 | `asset-manager`, `sprite-editor`, `tilemap-editor` |
+| main hook | v2 document/Demo/pattern/stage load/save/delete/restore、XML import/export、validate/compile、Stage Preview start/step/seek/stop |
 | renderer capability | `page`, `bulletml-stg-editor` |
 
-`data/bulletml/`の安定ID付きIRを正本にし、構造化フローとDOM＋SVG Graphが同じreducerを編集します。v1.1ではPattern名/type編集と明示的なPattern／Definition表示filter、Action／Fire／Bullet全種の構造化フォーム、ネスト命令Ref接続、Ref showcase、既定ONのBMLB Preview loopを提供します。320×224 PreviewはIRを直接解釈せず、MDと同じbig-endian `BMLB ABI v1`を実行します。revision付きatomic save、`.deleted`退避、100段Undo/Redo、layout復元、保存guard、canonical BulletML XMLとhash付きMD sidecar、行・列付きの安全なXML診断を提供します。Stagesページは縦／横のevent、折線経路、1～3 phase Bossを編集し、経路overlayを選択eventのみ／すべてで切り替えます。
+data/bulletml/ schema v2を正本にし、Project、Player、Weapons、Items、Effects、Movement、Enemies、Bosses、Backgrounds、Stages、Demos、Patterns、Diagnosticsの13 tabをplugin renderer内にmountします。通常編集項目は日本語ラベル、説明tooltip、型付きinput/select、入れ子object、配列CRUD/並べ替え、任意objectの有効化/解除を持つGUIで編集し、JSON textareaは上級者向けの確認・一括修正用にだけ残します。Patternの弾sprite/hitbox/lifetime、Stage基本設定とStage自体の追加・削除・復元、Demo bindingもGUI対象です。自動生成profile/runtime IDは通常フォームから隠します。Pattern/Stageはstable ID単位、他catalogは型別collection、runtime IDはcatalogごとに1～255で0をNONEへ予約します。revision付きatomic replace、.deleted、100段Undo/Redo、dirty guard、beforeBuild/beforeProjectSwitch vetoを全documentへ適用します。schema v1は移行せず明示errorです。
+
+Patternの構造化flowとDOM＋SVG Graphは同じreducerを編集し、PreviewはMDと同じbig-endian BMLB ABI v1を実行します。Pattern spriteとStage collision MAPはResComp選択時に自動プレビューし、確認専用のPreviewボタンを置きません。選択済みassetはSprite/TileMap Editorへ直接開けます。Stage PreviewはPlayer shot、3段速度、Bomb、drop、Movement、Enemy、1～8 phase Boss/Parts、破壊背景、BG band/wave、collision、score/livesを統合実行します。Demos tabはplugins/shared/md-vn/のeditor componentをmountし、canonical assets/pce-vn-scenes.jsonとBulletML側bindingを分離して保存します。
 
 ### `bulletml-stg-builder` — BulletML STG Builder
 
@@ -1150,13 +1158,13 @@ project-localの `data/horizontal-stg/` を正本として、ステージ、シ�
 |---|---|
 | タイプ | `build` |
 | 対応 core | `mega-drive` |
-| バージョン | 1.0.0 |
+| バージョン | 2.0.0 |
 | 依存 | `bulletml-stg-editor` |
 | フック | `onBuildStart`, `onBuildLog`, `onBuildEnd`, `onBuildError` |
 | ロール | exclusive `builder` |
 | ジェネレータ | hook-only (`generator: false`) |
 
-保存済みIRをBMLBへcompileし、動的確保・浮動小数点・XML parserを持たない固定pool C runtime、縦横mini-STG、縦横別の固定背景／BGMとSFX、診断/self-test、生成catalog/RESを同期します。編集可能な共有弾PNGは初回だけ作成し、以後は上書きせずindexed 16色、PAL3、frame、tile、palette SHA-256を検証します。`src/boot/rom_head.c`は上書きせず、C sourceは`makeVariables.SRC_C`へ一意に列挙します。`template_bulletml_stg`はBuilderと標準WASM roleを選択済みです。詳細は[BULLETML_STG.md](BULLETML_STG.md)を参照してください。
+schema v2からBMLB、汎用STG C runtime、Campaign/Caravan、SRAM Top10/checkpoint、TMX collision RLE、MD VN runtime/font、RES/catalog/proofを生成します。敵BulletML VMの`BMLB ABI v1`は維持し、Player shotは独立poolです。asset missing/type/duplicate、DAG、event、palette、sprite/scanline、VRAM/RAM/DMA/PCM、4 MiBをhard errorにします。`src/boot/rom_head.c`は上書きせず、C sourceは`makeVariables.SRC_C`へ一意に列挙します。`template_bulletml_stg`は3面Campaign＋専用Caravanの完成Showcase「GERONEKO -ABYSS STRIKE-」で、Builderと標準WASM roleを選択済みです。詳細は[BULLETML_STG.md](BULLETML_STG.md)を参照してください。
 
 ---
 

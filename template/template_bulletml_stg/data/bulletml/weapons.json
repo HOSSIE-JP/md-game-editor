@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 2,
+  "kind": "weapons",
+  "entries": [
+    {
+      "id": "needle",
+      "name": "NEEDLE",
+      "sprite": {
+        "symbol": "player_shot",
+        "type": "SPRITE"
+      },
+      "intervalFrames": 5,
+      "damage": 2,
+      "speed": 6,
+      "angle": 0,
+      "simultaneous": 6,
+      "duplicateScore": 1000,
+      "emitters": [
+        {
+          "x": -4,
+          "y": -8,
+          "angle": 0
+        },
+        {
+          "x": 4,
+          "y": -8,
+          "angle": 0
+        }
+      ]
+    },
+    {
+      "id": "spread",
+      "name": "FAN",
+      "sprite": {
+        "symbol": "player_spread",
+        "type": "SPRITE"
+      },
+      "intervalFrames": 8,
+      "damage": 1,
+      "speed": 5,
+      "angle": 0,
+      "simultaneous": 9,
+      "duplicateScore": 1500,
+      "emitters": [
+        {
+          "x": 0,
+          "y": -8,
+          "angle": -18
+        },
+        {
+          "x": 0,
+          "y": -8,
+          "angle": 0
+        },
+        {
+          "x": 0,
+          "y": -8,
+          "angle": 18
+        }
+      ]
+    },
+    {
+      "id": "laser",
+      "name": "ARC LASER",
+      "sprite": {
+        "symbol": "player_laser",
+        "type": "SPRITE"
+      },
+      "intervalFrames": 3,
+      "damage": 3,
+      "speed": 8,
+      "angle": 0,
+      "simultaneous": 4,
+      "duplicateScore": 2000,
+      "emitters": [
+        {
+          "x": 0,
+          "y": -10,
+          "angle": 0
+        }
+      ]
+    }
+  ]
+}

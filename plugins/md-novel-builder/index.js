@@ -4,19 +4,15 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const manifest = require('./manifest.json');
-const codegen = require('./codegen');
+const codegen = require('../shared/md-vn/compiler');
+const runtimeAssets = require('../shared/md-vn/runtime-assets');
 const service = require('../md-novel-editor/novel-service');
-const { FONT_FORMAT_VERSION } = require('../md-novel-editor/novel-font');
+const { FONT_FORMAT_VERSION } = require('../shared/md-vn/font');
 
 const GENERATED_MANIFEST = 'data/md-novel/generated-manifest.json';
 const GENERATED_MANIFEST_VERSION = 4;
-const MESSAGE_SHAPE_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAABlBMVEUAAAD///+l2Z/dAAAAAnRSTlMA/1uRIrUAAAAWSURBVHjaY2AkABhGFYwqGFUwUhUAAESYBAF9lrJwAAAAAElFTkSuQmCC', 'base64');
-
-
 const STATIC_FILES = Object.freeze({
   'src/main.c': 'src/main.c',
-  'src/novel_runtime/novel_runtime.c': 'src/novel_runtime/novel_runtime.c',
-  'inc/novel_runtime/novel_runtime.h': 'inc/novel_runtime/novel_runtime.h',
   'src/boot/sega.s': 'src/boot/sega.s',
   'res/novel/font/JF-Dot-Shinonome16.ttf': 'res/novel/font/JF-Dot-Shinonome16.ttf',
   'res/novel/font/JF-Dot-Shinonome16-README.txt': 'res/novel/font/JF-Dot-Shinonome16-README.txt',
@@ -40,7 +36,7 @@ function fileHash(buffer) {
 function collectStaticFiles() {
   return {
     ...Object.fromEntries(Object.entries(STATIC_FILES).map(([target, source]) => [target, fs.readFileSync(path.join(templateRoot(), source))])),
-    'res/novel/system/message-shapes.png': MESSAGE_SHAPE_PNG,
+    ...runtimeAssets.collectRuntimeFiles(),
   };
 }
 

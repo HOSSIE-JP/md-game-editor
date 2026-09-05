@@ -143,6 +143,11 @@ typedef struct
 } NovelProject;
 
 void novelInit(const NovelProject *project);
+void novelStartScene(u16 sceneIndex);
 void novelUpdate(void);
+bool novelIsRunning(void);
+s16 novelGetVariable(u16 index);
+void novelSetVariable(u16 index, s16 value);
+void novelShutdown(void);
 
 #endif

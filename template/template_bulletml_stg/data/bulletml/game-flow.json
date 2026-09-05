@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "screens": [
+    "title",
+    "mode-select",
+    "options",
+    "gameplay",
+    "pause",
+    "result",
+    "continue",
+    "game-over",
+    "name-entry",
+    "ranking"
+  ],
+  "titleFrames": 180,
+  "continueFrames": 600,
+  "nameLength": 3,
+  "autoSave": "after-post-stage-demo-before-next-stage"
+}

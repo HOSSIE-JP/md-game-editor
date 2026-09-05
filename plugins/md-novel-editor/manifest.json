@@ -57,6 +57,6 @@
     "entry": "renderer.js",
     "styles": ["style.css"],
     "page": "md-novel-editor",
-    "capabilities": ["page", "md-novel-editor"]
+    "capabilities": ["page", "md-novel-editor", "md-vn-common"]
   }
 }

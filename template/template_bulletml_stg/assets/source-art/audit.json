@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "title": "GERONEKO -ABYSS STRIKE- original concept source",
+  "provenance": {
+    "generator": "OpenAI image generation",
+    "generatedAt": "2026-08-31",
+    "copyrightPolicy": "Original work; no external game assets or copyrighted character references were used.",
+    "artDirection": "Cobalt/navy stellar-remains engine, restrained gold circuitry, hard-edged mechanical ruins, cat-eared player craft, separable giant background boss parts."
+  },
+  "source": {
+    "file": "geroneko-abyss-strike-concept.png",
+    "width": 1672,
+    "height": 941,
+    "bytes": 2152310,
+    "sha256": "df104d4d3da849855db7e15761a4a757619be56ee514f7939ffbaddd9d71ed52"
+  },
+  "megaDriveReference": {
+    "file": "geroneko-abyss-strike-md-reference.png",
+    "width": 320,
+    "height": 224,
+    "bytes": 24153,
+    "sha256": "9882cb6553a5e19bf18c980c258cb1308a2802032fe5d62a82b4ede44082593c",
+    "indexedBitDepth": 8,
+    "paletteEntries": 16,
+    "uniqueRgb333Colors": 12,
+    "paletteFingerprint": "ea4c1cca9645f9a168defe606892c33b43ecf28808b73a7eb33edafe29e74329",
+    "tileAligned": true,
+    "conversion": "ffmpeg 320x224 Lanczos fit + 16-color Bayer palette; PLTE normalized and snapped to Mega Drive RGB333"
+  }
+}

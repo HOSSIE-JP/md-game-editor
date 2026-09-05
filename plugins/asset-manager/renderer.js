@@ -7,6 +7,7 @@ import {
   inferTypeFromExtension,
   normalizeSymbolName,
 } from './asset-utils.mjs';
+import { createRescompAssetPicker } from './rescomp-asset-picker.mjs';
 
 const DEFAULT_TYPES = ['PALETTE', 'IMAGE', 'BITMAP', 'SPRITE', 'XGM', 'XGM2', 'WAV', 'MAP', 'TILEMAP', 'TILESET'];
 
@@ -16,6 +17,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   }
 
   const autoReload = setupAutoReloadOnOpen({ root, api, logger });
+  const assetPicker = createRescompAssetPicker({ plugin, api, logger });
 
   registerCapability('asset-manager', {
     pluginId: plugin.id,
@@ -23,6 +25,14 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     buildPreviewPalette({ dataUrl, fallbackColors, maxColors } = {}) {
       return buildPreviewPaletteFromDataUrl(dataUrl, fallbackColors, { maxColors });
     },
+  });
+
+  registerCapability('rescomp-asset-picker', {
+    pluginId: plugin.id,
+    list: assetPicker.list,
+    resolve: assetPicker.resolve,
+    openPicker: assetPicker.openPicker,
+    mountPreview: assetPicker.mountPreview,
   });
 
   registerCapability('asset-type-provider', {
@@ -234,6 +244,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
   logger.debug('asset-manager renderer activated');
   return {
     deactivate() {
+      assetPicker.stopPreview();
       autoReload?.disconnect?.();
       if (root?.dataset.pluginOwner === plugin.id) {
         delete root.dataset.pluginOwner;

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 2,
+  "enemyBullets": 48,
+  "emitters": 5,
+  "vmContexts": 106,
+  "opcodesPerFrame": 512,
+  "bulletSpawnsPerFrame": 16,
+  "playerShots": 24,
+  "enemies": 12,
+  "items": 8,
+  "effects": 20,
+  "bossParts": 24,
+  "dmaWordsPerFrame": 7168,
+  "pcmChannels": 4
+}

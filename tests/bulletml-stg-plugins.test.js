@@ -35,7 +35,8 @@ test('BulletML plugins declare one-way dependencies and matching main hooks', ()
   const builderManifest = require(path.join(builderRoot, 'manifest.json'));
   assert.deepEqual(manifest.types, ['editor', 'asset']);
   assert.deepEqual(manifest.supportedCores, ['mega-drive']);
-  assert.deepEqual(manifest.dependencies, ['asset-manager', 'sprite-editor']);
+  assert.equal(manifest.version, '2.0.0');
+  assert.deepEqual(manifest.dependencies, ['asset-manager', 'sprite-editor', 'tilemap-editor']);
   assert.ok(!manifest.dependencies.includes('bulletml-stg-builder'));
   assert.deepEqual(manifest.mainApi.hooks, manifest.hooks.filter((hook) => !['getTab', 'onActivate', 'onDeactivate'].includes(hook)));
   assert.deepEqual(builderManifest.dependencies, ['bulletml-stg-editor']);
@@ -43,11 +44,17 @@ test('BulletML plugins declare one-way dependencies and matching main hooks', ()
   assert.equal(builderManifest.generator, false);
 });
 
-test('BulletML template selects the builder and standard emulator and satisfies both stage contracts', () => {
+test('BulletML v2 Showcase selects the builder and mixes Campaign/Caravan stage orientations', () => {
   const project = JSON.parse(fs.readFileSync(path.join(starterTemplate, 'project.json'), 'utf8'));
   assert.deepEqual(project.pluginRoles, { builder: 'bulletml-stg-builder', testplay: 'standard-emulator' });
   const snapshot = service.readSnapshot(starterTemplate);
+  assert.equal(snapshot.project.schemaVersion, 2);
+  assert.equal(snapshot.project.title, 'GERONEKO -ABYSS STRIKE-');
   assert.equal(snapshot.patterns.length, 5);
+  assert.equal(snapshot.stages.length, 4);
+  assert.deepEqual(snapshot.stages.filter((stage) => stage.id.startsWith('stage-')).map((stage) => stage.orientation), ['vertical', 'horizontal', 'vertical']);
+  assert.equal(snapshot.project.caravan.stageId, 'caravan-abyss');
+  assert.equal(snapshot.project.caravan.timeLimitFrames, 7200);
   assert.equal(snapshot.project.patternRoles.verticalNormal, 'generic-aimed');
   const refShowcase = snapshot.patterns.find((pattern) => pattern.id === 'ref-showcase');
   assert.ok(refShowcase);
@@ -55,11 +62,13 @@ test('BulletML template selects the builder and standard emulator and satisfies 
   for (const stage of snapshot.stages) {
     const validation = schema.validateStage(stage, new Set(snapshot.patterns.map((pattern) => pattern.id)));
     assert.equal(validation.ok, true, JSON.stringify(validation.diagnostics));
-    assert.equal(stage.events.length, 7);
-    assert.equal(stage.events.filter((event) => event.boss).length, 1);
-    assert.equal(stage.events.find((event) => event.boss).phases.length, 3);
-    assert.ok(stage.events.every((event) => event.path.length >= 1 && event.path.length <= 8));
+    assert.ok(stage.events.length >= 4);
+    assert.ok(stage.events.some((event) => event.action.type === 'stage_clear'));
+    assert.deepEqual(stage.events.map((event) => event.order), [...stage.events].map((event) => event.order).sort((a, b) => a - b));
   }
+  for (const stage of snapshot.stages.filter((entry) => entry.id.startsWith('stage-'))) assert.equal(stage.events.filter((event) => event.action.type === 'spawn_boss').length, 1);
+  const validation = service.validateSnapshot(snapshot, { projectDir: starterTemplate });
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
 
 test('affine expression parser folds constants, consumes rand left-to-right, and rejects general expressions', () => {
@@ -259,17 +268,20 @@ test('studio overhaul keeps filters separate from selection and edits names, nes
   const phase1 = { boss: true, patternId: 'p', phases: [{ threshold: 100, patternId: 'p' }] };
   const phase2 = model.addBossPhase(phase1);
   const phase3 = model.addBossPhase(phase2);
-  assert.deepEqual(phase3.phases.map((phase) => phase.threshold), [100, 67, 34]);
-  assert.equal(model.addBossPhase(phase3).phases.length, 3);
-  assert.equal(model.removeBossPhase(phase3).phases.length, 2);
+  assert.deepEqual(phase3.phases.map((phase) => phase.threshold), [100, 75, 60]);
+  const phase8 = Array.from({ length: 5 }).reduce((event) => model.addBossPhase(event), phase3);
+  assert.deepEqual(phase8.phases.map((phase) => phase.threshold), [100, 75, 60, 45, 30, 20, 10, 1]);
+  assert.equal(model.addBossPhase(phase8).phases.length, 8);
+  assert.equal(model.removeBossPhase(phase8).phases.length, 7);
 
   assert.deepEqual(model.advancePreviewFrame(8, 10, 2, true), { index: 0, playing: true, wrapped: true });
   assert.deepEqual(model.advancePreviewFrame(8, 10, 2, false), { index: 9, playing: false, wrapped: false });
 });
 
-test('renderer keeps plugin UI and compiled preview inside its renderer module', () => {
+test('renderer keeps plugin UI and compiled preview inside its renderer module', async () => {
   const renderer = fs.readFileSync(path.join(editorRoot, 'renderer-app.mjs'), 'utf8');
   const ui = fs.readFileSync(path.join(editorRoot, 'editor-ui.mjs'), 'utf8');
+  const uiHtml = (await import(pathToFileURL(path.join(editorRoot, 'editor-ui.mjs')).href)).buildShell();
   assert.match(renderer, /beforeBuild\(\)/);
   assert.match(renderer, /beforeProjectSwitch\(\)/);
   assert.match(renderer, /compileBulletmlPattern/);
@@ -282,7 +294,14 @@ test('renderer keeps plugin UI and compiled preview inside its renderer module',
   assert.match(renderer, /stepBulletmlStagePreview/);
   assert.match(renderer, /preview\?\.bullets/);
   assert.match(renderer, /connectSelectedRef/);
-  assert.match(ui, /data-role="stage-difficulty"/);
+  for (const page of ['project', 'player', 'weapons', 'items', 'effects', 'movement', 'enemies', 'bosses', 'backgrounds', 'stages', 'demos', 'patterns', 'diagnostics']) assert.match(uiHtml, new RegExp(`data-page="${page}"`));
+  assert.match(uiHtml, /ステージ間デモ/);
+  assert.match(uiHtml, /作品設定/);
+  assert.match(uiHtml, /上級者向け：内部JSON/);
+  assert.match(uiHtml, /data-role="stage-form"/);
+  assert.match(uiHtml, /data-role="command-form"/);
+  assert.match(renderer, /renderStructuredForm/);
+  assert.match(renderer, /scope: 'pattern-command'/);
   assert.match(ui, /data-action="connect-ref"/);
   assert.match(ui, /data-action="move-command" data-delta="-1"/);
   assert.match(ui, /data-action="delete-command" title="選択命令を削除"/);
@@ -319,12 +338,21 @@ test('integrated Stage Preview runs BMLB patterns, player shots, boss phases, co
     orientation: 'vertical',
     durationFrames: 180,
     events: [{
-      id: 'boss', spawnFrame: 0, enemyType: 'boss', boss: true, hp: 3, score: 500, patternId: pattern.id,
+      id: 'boss', order: 0, trigger: { type: 'frame', frame: 0 }, action: { type: 'spawn_boss', bossId: 'test-boss' }, hp: 3, score: 500, patternId: pattern.id,
       path: [{ x: 160, y: 80, frame: 0 }],
       phases: [{ threshold: 100, patternId: pattern.id }, { threshold: 66, patternId: pattern.id }, { threshold: 33, patternId: pattern.id }],
     }],
   }, 'vertical');
-  const session = new StagePreviewSession(bossStage, programs, { difficulty: 1, seed: 0xace1 });
+  const previewSnapshot = {
+    project: { rank: .5, bomb: {} },
+    player: { initial: { lives: 3, bombs: 3, weaponId: 'test-shot', speed: 'normal' }, speeds: { slow: 96, normal: 160, fast: 224 }, animation: { vertical: { negative: 0, neutral: 1, positive: 2 }, horizontal: { negative: 3, neutral: 4, positive: 5 } } },
+    pools: { playerShots: 24, enemies: 12, items: 8, effects: 20 },
+    collections: {
+      weapons: { entries: [{ id: 'test-shot', intervalFrames: 1, damage: 1, speed: 8, angle: 0, simultaneous: 24, emitters: [{ x: 0, y: -8, angle: 0 }] }] },
+      bosses: { entries: [{ id: 'test-boss', hp: 3, score: 500, patternId: pattern.id, phases: bossStage.events[0].phases }] },
+    },
+  };
+  const session = new StagePreviewSession(bossStage, programs, { snapshot: previewSnapshot, seed: 0xace1 });
   const defeated = session.step({ fire: true }, 80);
   assert.equal(defeated.score, 500);
   assert.equal(defeated.enemies.length, 0);
@@ -338,29 +366,30 @@ test('integrated Stage Preview runs BMLB patterns, player shots, boss phases, co
   assert.equal(sought.frame, 10);
   assert.equal(sought.score, 0);
   const dragged = session.step({ player: { x: 123, y: 145 } }, 0);
-  assert.deepEqual(dragged.player, { x: 123, y: 145 });
+  assert.deepEqual({ x: dragged.player.x, y: dragged.player.y }, { x: 123, y: 145 });
+  assert.equal(dragged.player.weaponId, 'test-shot');
 
   const collisionStage = schema.normalizeStage({
     orientation: 'vertical',
     durationFrames: 30,
     events: [{
-      id: 'contact', spawnFrame: 0, enemyType: 'turret', boss: false, hp: 99, score: 0, patternId: pattern.id,
+      id: 'contact', order: 0, trigger: { type: 'frame', frame: 0 }, action: { type: 'spawn_enemy', enemyId: 'turret' }, hp: 99, score: 0, patternId: pattern.id,
       path: [{ x: 160, y: 196, frame: 0 }], phases: [],
     }],
   }, 'vertical');
-  const collision = new StagePreviewSession(collisionStage, programs, { difficulty: 2, seed: 1 }).step({}, 1);
+  const collision = new StagePreviewSession(collisionStage, programs, { snapshot: previewSnapshot, seed: 1 }).step({}, 1);
   assert.equal(collision.lives, 2);
   assert.equal(collision.metrics.hits, 1);
   assert.equal(collision.bullets.length, 0);
-  assert.equal(collision.invincible, 300);
+  assert.equal(collision.invincible, 120);
 });
 
-test('Stage Preview service sessions are project-scoped and support start, step, seek, and stop', () => {
-  const started = service.startStagePreview(starterTemplate, { orientation: 'horizontal', difficulty: 2, seed: 0xffff });
+test('Stage Preview service sessions use Project-fixed rank and are project-scoped', () => {
+  const started = service.startStagePreview(starterTemplate, { stageId: 'stage-2-horizontal', rank: 1, seed: 0xffff });
   assert.equal(started.ok, true, started.error);
   assert.match(started.sessionId, /^[0-9a-f]{24}$/);
   assert.equal(started.preview.orientation, 'horizontal');
-  assert.equal(started.preview.rank, 1);
+  assert.equal(started.preview.rank, 0.5);
   const stepped = service.stepStagePreview(starterTemplate, { sessionId: started.sessionId, frames: 12, input: { fire: true, right: true } });
   assert.equal(stepped.ok, true, stepped.error);
   assert.equal(stepped.preview.frame, 12);
@@ -385,6 +414,59 @@ test('builder generates deterministic BMLB, fixed mini-STG assets, explicit C so
     const romHead = path.join(root, 'src', 'boot', 'rom_head.c');
     fs.mkdirSync(path.dirname(romHead), { recursive: true });
     fs.writeFileSync(romHead, '/* keep me */\n');
+    {
+      const bulletPath = path.join(root, 'res', 'gfx', 'bml_bullet.png');
+      const bulletBefore = fs.readFileSync(bulletPath);
+      const v2Result = builder.onBuildStart({ projectDir: root }, { projectDir: root, assets: [], bulletmlValidationFrames: 180 });
+      assert.equal(v2Result.ok, true, v2Result.error);
+      assert.equal(fs.readFileSync(romHead, 'utf8'), '/* keep me */\n');
+      assert.deepEqual(v2Result.makeVariables.SRC_C.split(' '), builder.SOURCE_FILES);
+      assert.equal(new Set(builder.SOURCE_FILES).size, builder.SOURCE_FILES.length);
+      assert.equal(builder.SOURCE_FILES.some((source) => /rom_head|sega\.s/.test(source)), false);
+      for (const source of builder.SOURCE_FILES) assert.equal(fs.existsSync(path.join(root, source)), true, source);
+      assert.deepEqual(fs.readFileSync(bulletPath), bulletBefore, 'Build must preserve registered ResComp assets');
+
+      const proof = JSON.parse(fs.readFileSync(path.join(root, 'data', 'bulletml', 'proof.json'), 'utf8'));
+      assert.equal(proof.schemaVersion, 2);
+      assert.equal(proof.sgdk, '2.11');
+      assert.equal(proof.abi, 'BMLB ABI v1');
+      assert.equal(proof.patterns.length, 5);
+      assert.equal(proof.stages.length, 4);
+      assert.ok(proof.stages.every((stage) => stage.cases.length === 27));
+      assert.equal(proof.runtime.loadProbe.ok, true);
+      assert.deepEqual(proof.runtime.catalogs, { patterns: 5, stages: 4, weapons: 3, items: 5, effects: 3, explosions: 2, movements: 4, enemies: 3, bosses: 3, backgrounds: 4, materials: 3, collisions: 4, demoScenes: 11, demoFlags: 4 });
+      assert.equal(proof.runtime.demo.scenes, 11);
+      assert.equal(proof.runtime.demo.glyphs, 179);
+      assert.equal(proof.runtime.vram.staticGameplayTiles, 513);
+      assert.equal(proof.runtime.vram.demoMaxTiles, 878);
+      assert.equal(proof.runtime.vram.withinBudget, true);
+      assert.equal(proof.runtime.collision.length, 4);
+      assert.ok(proof.runtime.collision.every((entry) => entry.rleBytes < entry.rawBytes));
+
+      const gameRuntime = fs.readFileSync(path.join(root, 'src', 'bulletml', 'bulletml_game.c'), 'utf8');
+      for (const contract of [
+        /MAP_create/, /MAP_scrollTo/, /PAL_fadeOutAll/, /BML_removeBullet/, /enterHighScoreName/,
+        /ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/, /saveCrc/, /SRAM_writeByte/, /checkpointValid/,
+        /novelStartScene/, /novelShutdown/, /activePartMask/, /activeWaveStartFrame/,
+        /material->mask & 1/, /material->mask & 2/, /material->mask & 4/, /material->mask & 8/,
+      ]) assert.match(gameRuntime, contract);
+      assert.doesNotMatch(gameRuntime, /EASY|NORMAL RANK|HARD/);
+      const runtime = fs.readFileSync(path.join(root, 'src', 'bulletml', 'bulletml_runtime.c'), 'utf8');
+      assert.doesNotMatch(runtime, /\b(?:malloc|calloc|realloc|free)\s*\(/);
+      assert.doesNotMatch(runtime, /\b(?:float|double)\b/);
+      assert.match(runtime, /bool BML_removeBullet\(u16 index\)/);
+
+      for (const relative of ['res/novel.res', 'res/novel/font/generated.png', 'src/generated/novel_data.c', 'src/novel_runtime/novel_runtime.c', 'inc/generated/novel_data.h']) assert.ok(fs.statSync(path.join(root, relative)).size > 32, relative);
+      const catalog = fs.readFileSync(path.join(root, 'src', 'generated', 'bulletml_catalog.c'), 'utf8');
+      assert.match(catalog, /stage-1-vertical/);
+      assert.match(catalog, /stage-2-horizontal/);
+      assert.match(catalog, /stage-3-giant/);
+      assert.match(catalog, /caravan-abyss/);
+      assert.match(catalog, /abyss_tiles/);
+      assert.match(catalog, /bml_sfx_hit, sizeof\(bml_sfx_hit\), FALSE \}/);
+      assert.match(catalog, /bml_sfx_destroy, sizeof\(bml_sfx_destroy\), \{/);
+      return;
+    }
     const result = builder.onBuildStart({ projectDir: root }, { projectDir: root, assets: [], bulletmlValidationFrames: 180 });
     assert.equal(result.ok, true, result.error);
     assert.equal(fs.readFileSync(romHead, 'utf8'), '/* keep me */\n');
@@ -410,7 +492,7 @@ test('builder generates deterministic BMLB, fixed mini-STG assets, explicit C so
     const gameResources = fs.readFileSync(path.join(root, 'res', 'bulletml_game.res'), 'utf8');
     assert.match(gameResources, /IMAGE bml_bg_vertical "gfx\/bml_bg_vertical\.png" NONE ALL 0/);
     assert.match(gameResources, /IMAGE bml_bg_horizontal "gfx\/bml_bg_horizontal\.png" NONE ALL 0/);
-    const bulletPath = path.join(root, 'res', 'gfx', 'bulletml_bullet.png');
+    const bulletPath = path.join(root, 'res', 'gfx', 'bml_bullet.png');
     const userEditedBullet = builder.staticAssets()['res/gfx/bml_player_shot.png'];
     fs.writeFileSync(bulletPath, userEditedBullet);
     const rebuilt = builder.onBuildStart({ projectDir: root }, { projectDir: root, assets: [], bulletmlValidationFrames: 30 });
@@ -511,7 +593,7 @@ test('builder rejects malformed or non-indexed editable bullet sprite assets wit
     fs.cpSync(starterTemplate, root, { recursive: true });
     const first = builder.onBuildStart({ projectDir: root }, { projectDir: root, assets: [], bulletmlValidationFrames: 30 });
     assert.equal(first.ok, true, first.error);
-    const bulletPath = path.join(root, 'res', 'gfx', 'bulletml_bullet.png');
+    const bulletPath = path.join(root, 'res', 'gfx', 'bml_bullet.png');
     const malformed = Buffer.from('not-a-png');
     fs.writeFileSync(bulletPath, malformed);
     const rejected = builder.onBuildStart({ projectDir: root }, { projectDir: root, assets: [], bulletmlValidationFrames: 30 });
@@ -527,7 +609,8 @@ test('builder accepts a 32px one-piece asset contract while runtime shares its t
     fs.cpSync(starterTemplate, root, { recursive: true });
     const first = builder.onBuildStart({ projectDir: root }, { projectDir: root, assets: [], bulletmlValidationFrames: 30 });
     assert.equal(first.ok, true, first.error);
-    const sprite = { frameWidth: 32, frameHeight: 32, frameCount: 1, hardwarePieces: 1, tileCount: 16 };
+    const replacement = builder.staticAssets()['res/gfx/bml_boss.png'];
+    const sprite = { frameWidth: 32, frameHeight: 32, frameCount: 1, hardwarePieces: 1, tileCount: 16, paletteFingerprint: builder.parseIndexedPng(replacement).paletteFingerprint };
     const projectPath = path.join(root, 'data', 'bulletml', 'project.json');
     const project = JSON.parse(fs.readFileSync(projectPath, 'utf8'));
     Object.assign(project.defaultSprite, sprite);
@@ -539,17 +622,17 @@ test('builder accepts a 32px one-piece asset contract while runtime shares its t
       Object.assign(pattern.sprite, sprite);
       fs.writeFileSync(target, `${JSON.stringify(pattern, null, 2)}\n`);
     }
-    fs.writeFileSync(path.join(root, 'res', 'gfx', 'bulletml_bullet.png'), builder.staticAssets()['res/gfx/bml_boss.png']);
+    fs.writeFileSync(path.join(root, 'res', 'gfx', 'bml_bullet.png'), replacement);
     const loaded = service.loadProject(root);
     assert.equal(loaded.ok, true, loaded.error);
-    const config = builder.bulletSpriteConfig(loaded.snapshot);
+    const config = builder.bulletSpriteConfig(loaded.snapshot, root);
     const asset = builder.validateBulletSpriteAsset(root, loaded.snapshot, config);
     assert.equal(asset.frameWidth, 32);
     assert.equal(asset.frameHeight, 32);
     assert.equal(asset.tileCount, 16);
     const runtime = fs.readFileSync(path.join(root, 'src', 'bulletml', 'bulletml_game.c'), 'utf8');
-    assert.match(runtime, /SPR_addSpriteEx\(&bml_bullet/);
-    assert.doesNotMatch(runtime, /bulletSprites\[index\] = SPR_addSprite\(&bml_bullet/);
+    assert.match(runtime, /SPR_addSpriteEx\(&BML_BULLET_SPRITE/);
+    assert.doesNotMatch(runtime, /bulletSprites\[index\] = SPR_addSprite\(/);
   } finally { cleanup(root); }
 });
 

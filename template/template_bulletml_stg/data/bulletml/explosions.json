@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 2,
+  "kind": "explosions",
+  "entries": [
+    {
+      "id": "single",
+      "name": "Single",
+      "placements": [
+        {
+          "frame": 0,
+          "effectId": "small-burst",
+          "x": 0,
+          "y": 0
+        }
+      ]
+    },
+    {
+      "id": "boss-chain",
+      "name": "Boss Chain",
+      "placements": [
+        {
+          "frame": 0,
+          "effectId": "small-burst",
+          "x": -20,
+          "y": 0
+        },
+        {
+          "frame": 8,
+          "effectId": "small-burst",
+          "x": 18,
+          "y": -12
+        },
+        {
+          "frame": 16,
+          "effectId": "gold-burst",
+          "x": 0,
+          "y": 8
+        },
+        {
+          "frame": 24,
+          "effectId": "gold-burst",
+          "x": -8,
+          "y": -18
+        }
+      ]
+    }
+  ]
+}

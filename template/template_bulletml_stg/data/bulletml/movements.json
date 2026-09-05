@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 2,
+  "kind": "movements",
+  "entries": [
+    {
+      "id": "swoop",
+      "name": "Swoop",
+      "loop": false,
+      "waypoints": [
+        {
+          "x": 160,
+          "y": -16,
+          "durationFrames": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 120,
+          "y": 72,
+          "durationFrames": 90,
+          "interpolation": "smoothstep"
+        },
+        {
+          "x": 200,
+          "y": 140,
+          "durationFrames": 120,
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "id": "side-patrol",
+      "name": "Side Patrol",
+      "loop": true,
+      "waypoints": [
+        {
+          "x": 336,
+          "y": 64,
+          "durationFrames": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 220,
+          "y": 72,
+          "durationFrames": 90,
+          "interpolation": "smoothstep"
+        },
+        {
+          "x": 220,
+          "y": 150,
+          "durationFrames": 120,
+          "interpolation": "smoothstep"
+        }
+      ]
+    },
+    {
+      "id": "boss-hover",
+      "name": "Boss Hover",
+      "loop": true,
+      "waypoints": [
+        {
+          "x": 120,
+          "y": 64,
+          "durationFrames": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 200,
+          "y": 72,
+          "durationFrames": 120,
+          "interpolation": "smoothstep"
+        }
+      ]
+    },
+    {
+      "id": "giant-bg-drift",
+      "name": "Giant BG Drift",
+      "loop": false,
+      "waypoints": [
+        {
+          "x": 0,
+          "y": -128,
+          "durationFrames": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 0,
+          "y": 0,
+          "durationFrames": 360,
+          "interpolation": "smoothstep"
+        }
+      ]
+    }
+  ]
+}

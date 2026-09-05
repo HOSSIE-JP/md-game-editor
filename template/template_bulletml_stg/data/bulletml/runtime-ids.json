@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 2,
+  "none": 0,
+  "catalogs": {
+    "weapons": {
+      "laser": 1,
+      "needle": 2,
+      "spread": 3
+    },
+    "items": {
+      "bomb-cell": 1,
+      "score-gold": 2,
+      "weapon-laser": 3,
+      "weapon-needle": 4,
+      "weapon-spread": 5
+    },
+    "effects": {
+      "bomb-wave": 1,
+      "gold-burst": 2,
+      "small-burst": 3
+    },
+    "explosions": {
+      "boss-chain": 1,
+      "single": 2
+    },
+    "movements": {
+      "boss-hover": 1,
+      "giant-bg-drift": 2,
+      "side-patrol": 3,
+      "swoop": 4
+    },
+    "enemies": {
+      "destructible-ruin": 1,
+      "scout": 2,
+      "turret": 3
+    },
+    "bosses": {
+      "abyss-core": 1,
+      "astral-gate": 2,
+      "golden-engine": 3
+    },
+    "backgrounds": {
+      "caravan-depth": 1,
+      "giant-core": 2,
+      "horizontal-foundry": 3,
+      "vertical-ruins": 4
+    },
+    "collision-materials": {
+      "damage": 1,
+      "none": 2,
+      "solid": 3
+    },
+    "patterns": {
+      "boss-split": 1,
+      "generic-aimed": 2,
+      "horizontal-rank": 3,
+      "ref-showcase": 4,
+      "vertical-fan": 5
+    },
+    "stages": {
+      "caravan-abyss": 1,
+      "stage-1-vertical": 2,
+      "stage-2-horizontal": 3,
+      "stage-3-giant": 4
+    }
+  },
+  "retired": {
+    "weapons": {},
+    "items": {},
+    "effects": {},
+    "explosions": {},
+    "movements": {},
+    "enemies": {},
+    "bosses": {},
+    "backgrounds": {},
+    "collision-materials": {},
+    "patterns": {},
+    "stages": {}
+  }
+}

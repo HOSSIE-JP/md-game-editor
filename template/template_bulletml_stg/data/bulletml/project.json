@@ -1,35 +1,86 @@
 {
-  "schemaVersion": 1,
-  "target": { "platform": "mega-drive", "sgdk": "2.11", "video": "NTSC", "width": 320, "height": 224, "hMode": "H40" },
-  "profile": {
-    "coordinateScale": 64,
-    "expressionFormat": "Q16.16",
-    "angleFormat": "u16-turn-clockwise-up",
-    "trigEntries": 1024,
-    "bulletLimit": 48,
-    "emitterLimit": 5,
-    "contextLimit": 106,
-    "spawnLimitPerFrame": 16,
-    "opcodeLimitPerFrame": 512,
-    "defaultLifetimeFrames": 600,
-    "defaultCullMargin": 32
+  "schemaVersion": 2,
+  "id": "geroneko-abyss-strike",
+  "title": "GERONEKO -ABYSS STRIKE-",
+  "target": {
+    "platform": "mega-drive",
+    "sgdk": "2.11",
+    "video": "NTSC",
+    "width": 320,
+    "height": 224,
+    "hMode": "H40",
+    "players": 1,
+    "romBytes": 4194304
   },
-  "defaultSprite": {
-    "assetId": "bulletml_bullet",
-    "source": "gfx/bulletml_bullet.png",
-    "palette": "PAL3",
-    "paletteFingerprint": "cce12cad8ccc47caa0c3eca35268bc94e066d3abb926c997913ffec55ec3f170",
-    "frameWidth": 8,
-    "frameHeight": 8,
-    "frameCount": 1,
-    "hardwarePieces": 1,
-    "tileCount": 1
+  "rank": 0.5,
+  "modes": {
+    "campaign": true,
+    "caravan": true
   },
-  "patternOrder": ["generic-aimed", "vertical-fan", "horizontal-rank", "boss-split", "ref-showcase"],
+  "campaign": {
+    "startStageId": "stage-1-vertical",
+    "continues": 3,
+    "carry": [
+      "score",
+      "lives",
+      "bombs",
+      "weapon",
+      "speed"
+    ],
+    "continueScore": 0
+  },
+  "caravan": {
+    "stageId": "caravan-abyss",
+    "timeLimitFrames": 7200
+  },
+  "resetOnHit": {
+    "weapon": "retain",
+    "speed": "normal",
+    "bombs": "initial"
+  },
+  "palettes": {
+    "PAL0": "bg-b-hud",
+    "PAL1": "bg-a",
+    "PAL2": "player-item",
+    "PAL3": "enemy-bullet-effect"
+  },
+  "patternOrder": [
+    "generic-aimed",
+    "vertical-fan",
+    "horizontal-rank",
+    "boss-split",
+    "ref-showcase"
+  ],
   "patternRoles": {
     "verticalNormal": "generic-aimed",
     "verticalBoss": "vertical-fan",
     "horizontalNormal": "horizontal-rank",
     "horizontalBoss": "boss-split"
+  },
+  "bomb": {
+    "initialStock": 3,
+    "maxStock": 9,
+    "damage": 40,
+    "clearEnemyBullets": true,
+    "invincibleFrames": 180,
+    "effectId": "bomb-wave",
+    "se": {
+      "symbol": "sfx_bomb",
+      "type": "WAV"
+    }
+  },
+  "defaultSprite": {
+    "asset": {
+      "symbol": "bml_bullet",
+      "type": "SPRITE",
+      "animationRow": 0
+    },
+    "palette": "PAL3",
+    "paletteFingerprint": "d2c337040ccb5e2f1dc18f46b7e063f3bbcc329fef6832dd4ae4a67b29a3e297",
+    "frameWidth": 8,
+    "frameHeight": 8,
+    "frameCount": 1,
+    "hardwarePieces": 1,
+    "tileCount": 1
   }
 }

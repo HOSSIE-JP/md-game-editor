@@ -21,6 +21,10 @@ function onDeactivate(_payload, context = {}) { context.logger?.info?.('BulletML
 
 const loadBulletmlProject = guarded((root) => service.loadProject(root));
 const saveBulletmlProject = guarded((root, payload) => service.saveProject(root, payload));
+const saveBulletmlDocument = guarded((root, payload) => service.saveDocument(root, payload));
+const saveBulletmlDemo = guarded((root, payload) => service.saveDemo(root, payload));
+const deleteBulletmlDocumentEntry = guarded((root, payload) => service.deleteDocumentEntry(root, payload));
+const restoreBulletmlDocumentEntry = guarded((root, payload) => service.restoreDocumentEntry(root, payload));
 const saveBulletmlPattern = guarded((root, payload) => service.savePattern(root, payload));
 const deleteBulletmlPattern = guarded((root, payload) => service.deletePattern(root, payload));
 const restoreBulletmlPattern = guarded((root, payload) => service.restorePattern(root, payload));
@@ -30,6 +34,8 @@ const validateBulletmlProject = guarded((root, payload) => service.validateProje
 const compileBulletmlPattern = guarded((root, payload) => service.compilePattern(root, payload));
 const loadBulletmlStage = guarded((root, payload) => service.loadStage(root, payload));
 const saveBulletmlStage = guarded((root, payload) => service.saveStage(root, payload));
+const deleteBulletmlStage = guarded((root, payload) => service.deleteStage(root, payload));
+const restoreBulletmlStage = guarded((root, payload) => service.restoreStage(root, payload));
 const startBulletmlStagePreview = guarded((root, payload) => service.startStagePreview(root, payload));
 const stepBulletmlStagePreview = guarded((root, payload) => service.stepStagePreview(root, payload));
 const seekBulletmlStagePreview = guarded((root, payload) => service.seekStagePreview(root, payload));
@@ -42,6 +48,10 @@ module.exports = {
   onDeactivate,
   loadBulletmlProject,
   saveBulletmlProject,
+  saveBulletmlDocument,
+  saveBulletmlDemo,
+  deleteBulletmlDocumentEntry,
+  restoreBulletmlDocumentEntry,
   saveBulletmlPattern,
   deleteBulletmlPattern,
   restoreBulletmlPattern,
@@ -51,6 +61,8 @@ module.exports = {
   compileBulletmlPattern,
   loadBulletmlStage,
   saveBulletmlStage,
+  deleteBulletmlStage,
+  restoreBulletmlStage,
   startBulletmlStagePreview,
   stepBulletmlStagePreview,
   seekBulletmlStagePreview,

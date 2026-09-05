@@ -1340,6 +1340,13 @@ test('runtime guards the y=128 H interrupt and uses low-priority index 14 messag
   assert.match(runtime, /shadowHIntCount\+\+;[\s\S]*?shadowHIntCount >= 64/);
   assert.match(runtime, /VDP_setHilightShadow\(shadowHIntCount >= 64\)/);
   assert.match(runtime, /SPR_FLAG_INSERT_HEAD \| SPR_FLAG_AUTO_VISIBILITY/);
+  assert.match(runtime, /if \(actorSprites\[slot\] != NULL\)\s*\{\s*SPR_releaseSprite\(actorSprites\[slot\]\);\s*actorSprites\[slot\] = NULL;\s*\}/);
+  assert.match(runtime, /const u8 capacity = NOVEL_MESSAGE_SPRITES - actorSpriteObjectCount\(\);\s*if \(messageSpriteActive >= capacity\) return;/);
+  assert.match(runtime, /reserveActorSpriteObject\(\);\s*actorSprites\[slot\] = SPR_addSpriteEx/);
+  assert.match(runtime, /static OverlayTile \*overlayTiles;/);
+  assert.match(runtime, /overlayTiles = MEM_alloc\(sizeof\(OverlayTile\) \* NOVEL_OVERLAY_MAX_TILES\)/);
+  assert.match(runtime, /MEM_free\(overlayTiles\);\s*overlayTiles = NULL;/);
+  assert.match(runtime, /SPR_update\(\);\s*SPR_end\(\);\s*XGM2_stop\(\);/);
   const messageEmitter = runtime.slice(runtime.indexOf('static void emitMessageSprite'), runtime.indexOf('static void finishMessageSprites'));
   assert.doesNotMatch(messageEmitter, /SPR_FLAG_AUTO_VRAM_ALLOC/);
   assert.match(runtime, /SPR_setAlwaysOnTop\(sprite\)/);

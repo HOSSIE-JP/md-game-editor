@@ -1,9 +1,11 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "generic-aimed",
   "name": "Generic Aimed",
   "type": "none",
-  "rootActions": ["top"],
+  "rootActions": [
+    "top"
+  ],
   "definitions": [
     {
       "kind": "action",
@@ -13,17 +15,58 @@
           "op": "repeat",
           "times": "999",
           "action": {
+            "ref": "",
+            "params": [],
             "commands": [
-              { "op": "fire", "direction": { "type": "aim", "value": "0" }, "speed": { "type": "absolute", "value": "1.5+0.7*$rank" }, "bullet": { "ref": "", "params": [], "inline": { "direction": null, "speed": null, "actions": [] } } },
-              { "op": "wait", "value": "45-15*$rank" }
+              {
+                "op": "fire",
+                "direction": {
+                  "type": "aim",
+                  "value": "0"
+                },
+                "speed": {
+                  "type": "absolute",
+                  "value": "1.5+0.7*$rank"
+                },
+                "bullet": {
+                  "ref": "",
+                  "params": [],
+                  "inline": {
+                    "direction": null,
+                    "speed": null,
+                    "actions": []
+                  }
+                }
+              },
+              {
+                "op": "wait",
+                "value": "45-15*$rank"
+              }
             ]
           }
         }
       ]
     }
   ],
-  "sprite": { "assetId": "bulletml_bullet", "source": "gfx/bulletml_bullet.png", "palette": "PAL3", "paletteFingerprint": "cce12cad8ccc47caa0c3eca35268bc94e066d3abb926c997913ffec55ec3f170", "frameWidth": 8, "frameHeight": 8, "frameCount": 1, "hardwarePieces": 1, "tileCount": 1 },
-  "hitbox": { "x": 0, "y": 0, "radius": 3 },
+  "sprite": {
+    "asset": {
+      "symbol": "bml_bullet",
+      "type": "SPRITE",
+      "animationRow": 0
+    },
+    "palette": "PAL3",
+    "paletteFingerprint": "d2c337040ccb5e2f1dc18f46b7e063f3bbcc329fef6832dd4ae4a67b29a3e297",
+    "frameWidth": 8,
+    "frameHeight": 8,
+    "frameCount": 1,
+    "hardwarePieces": 1,
+    "tileCount": 1
+  },
+  "hitbox": {
+    "x": 0,
+    "y": 0,
+    "radius": 3
+  },
   "lifetime": 600,
   "margin": 32
 }

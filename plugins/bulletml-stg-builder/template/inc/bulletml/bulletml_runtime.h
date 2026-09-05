@@ -51,13 +51,17 @@ typedef struct {
 } BML_Metrics;
 
 void BML_init(void);
+bool BML_isReady(void);
+void BML_shutdown(void);
 s16 BML_startEmitter(const u8 *program, u16 programLength, s16 x64, s16 y64, u16 direction, u16 seed, u16 rankQ16);
 bool BML_updateEmitter(s16 emitterId, s16 x64, s16 y64, u16 direction);
 bool BML_stopEmitter(s16 emitterId);
 void BML_setPlayer(s16 x64, s16 y64);
 void BML_tick(void);
 u16 BML_applyDisplayBudget(u16 reservedGlobalSprites, const u8 *reservedPiecesByScanline, const u16 *reservedDotsByScanline);
+u16 BML_applyDisplayBudgetSparse(u16 reservedGlobalSprites, const u8 *reservedPiecesByScanline, const u16 *reservedDotsByScanline, u16 reservedMaxPieces, u16 reservedMaxDots);
 const BML_Bullet *BML_getBullets(u16 *count);
+bool BML_removeBullet(u16 index);
 void BML_clearAll(void);
 const BML_Metrics *BML_getMetrics(void);
 u32 BML_stateCrc(u32 previous);

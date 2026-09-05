@@ -1,0 +1,378 @@
+{
+  "id": "stage-2-horizontal",
+  "name": "金色機関回廊",
+  "orientation": "horizontal",
+  "durationFrames": 3900,
+  "backgroundId": "horizontal-foundry",
+  "collisionMap": {
+    "symbol": "stage2_collision",
+    "type": "MAP",
+    "collisionLayer": "near"
+  },
+  "next": [
+    {
+      "stageId": "stage-3-giant",
+      "flag": "",
+      "equals": true
+    }
+  ],
+  "events": [
+    {
+      "id": "bg-start",
+      "order": 0,
+      "trigger": {
+        "type": "frame",
+        "frame": 0,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "set_background",
+        "backgroundId": "horizontal-foundry",
+        "transition": "cut",
+        "enemyId": "",
+        "bossId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 0,
+      "enemyType": "grunt",
+      "boss": false,
+      "hp": 3,
+      "score": 100,
+      "patternId": "",
+      "movementId": "",
+      "dropItemId": "",
+      "path": [],
+      "phases": []
+    },
+    {
+      "id": "turret-a",
+      "order": 180,
+      "trigger": {
+        "type": "frame",
+        "frame": 180,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "turret",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 180,
+      "enemyType": "turret",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "horizontal-rank",
+      "path": [
+        {
+          "x": 336,
+          "y": 60,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 220,
+          "y": 60,
+          "frame": 120,
+          "interpolation": "linear"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "bomb-cell",
+      "movementId": ""
+    },
+    {
+      "id": "scout-c",
+      "order": 420,
+      "trigger": {
+        "type": "frame",
+        "frame": 420,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "scout",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 420,
+      "enemyType": "scout",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "ref-showcase",
+      "path": [
+        {
+          "x": 336,
+          "y": 140,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 180,
+          "y": 112,
+          "frame": 150,
+          "interpolation": "linear"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "",
+      "movementId": ""
+    },
+    {
+      "id": "wave-on",
+      "order": 960,
+      "trigger": {
+        "type": "scroll",
+        "frame": 0,
+        "scroll": 640,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "set_wave",
+        "plane": "BG_A",
+        "wave": {
+          "preset": "shear",
+          "start": 96,
+          "end": 208,
+          "amplitude": 3,
+          "wavelength": 80,
+          "speed": 1,
+          "fadeFrames": 30
+        },
+        "enemyId": "",
+        "bossId": "",
+        "backgroundId": "",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "flag": ""
+      },
+      "spawnFrame": 0,
+      "enemyType": "grunt",
+      "boss": false,
+      "hp": 3,
+      "score": 100,
+      "patternId": "",
+      "movementId": "",
+      "dropItemId": "",
+      "path": [],
+      "phases": []
+    },
+    {
+      "id": "boss-engine",
+      "order": 2700,
+      "trigger": {
+        "type": "frame",
+        "frame": 2700,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_boss",
+        "bossId": "golden-engine",
+        "enemyId": "golden-engine",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 2700,
+      "enemyType": "golden-engine",
+      "boss": true,
+      "hp": 240,
+      "score": 30000,
+      "patternId": "horizontal-rank",
+      "path": [
+        {
+          "x": 240,
+          "y": 112,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 240,
+          "y": 192,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [
+        {
+          "threshold": 100,
+          "patternId": "horizontal-rank",
+          "movementId": "",
+          "rankOverride": null,
+          "activeParts": [],
+          "backgroundId": "",
+          "wave": {
+            "preset": "none",
+            "start": 0,
+            "end": 223,
+            "amplitude": 0,
+            "wavelength": 64,
+            "speed": 0,
+            "fadeFrames": 0
+          },
+          "clearBullets": false
+        },
+        {
+          "threshold": 66,
+          "patternId": "ref-showcase",
+          "movementId": "",
+          "rankOverride": null,
+          "activeParts": [],
+          "backgroundId": "",
+          "wave": {
+            "preset": "none",
+            "start": 0,
+            "end": 223,
+            "amplitude": 0,
+            "wavelength": 64,
+            "speed": 0,
+            "fadeFrames": 0
+          },
+          "clearBullets": false
+        },
+        {
+          "threshold": 33,
+          "patternId": "boss-split",
+          "rankOverride": 0.85,
+          "movementId": "",
+          "activeParts": [],
+          "backgroundId": "",
+          "wave": {
+            "preset": "none",
+            "start": 0,
+            "end": 223,
+            "amplitude": 0,
+            "wavelength": 64,
+            "speed": 0,
+            "fadeFrames": 0
+          },
+          "clearBullets": false
+        }
+      ],
+      "dropItemId": "",
+      "movementId": ""
+    },
+    {
+      "id": "clear",
+      "order": 3899,
+      "trigger": {
+        "type": "condition",
+        "frame": 0,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": "golden-engine"
+      },
+      "action": {
+        "type": "stage_clear",
+        "enemyId": "",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 0,
+      "enemyType": "grunt",
+      "boss": false,
+      "hp": 3,
+      "score": 100,
+      "patternId": "",
+      "movementId": "",
+      "dropItemId": "",
+      "path": [],
+      "phases": []
+    }
+  ],
+  "schemaVersion": 2,
+  "mainScroll": {
+    "speed": 0.75,
+    "axis": "x"
+  }
+}

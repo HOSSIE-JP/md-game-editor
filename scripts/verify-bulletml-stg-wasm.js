@@ -16,6 +16,8 @@ const BUTTON_A = 1 << 6;
 const BUTTON_START = 1 << 7;
 const QA_SYMBOLS = [
   'bmlQaScreen', 'bmlQaSelfTest', 'bmlQaSelfTestCrcHigh', 'bmlQaSelfTestCrcLow', 'bmlQaSelfTestFrame', 'bmlQaOrientation', 'bmlQaDifficulty',
+  'bmlQaShotButton', 'bmlQaBombButton', 'bmlQaSpeedButton', 'bmlQaSramLoaded', 'bmlQaCheckpointValid',
+  'bmlQaGameplayBgmStarted', 'bmlQaPcmWhileBgm',
   'bmlQaStageFrame', 'bmlQaCompletedStages', 'bmlQaStageOutcome',
   'bmlQaMaxBullets', 'bmlQaMaxEmitters', 'bmlQaMaxContexts',
   'bmlQaMaxOpcodes', 'bmlQaMaxSpawns', 'bmlQaFireDrops', 'bmlQaPoolDrops', 'bmlQaSpawnDrops', 'bmlQaContextDrops', 'bmlQaOpcodeExhaustions', 'bmlQaDisplayDeletes',
@@ -81,7 +83,7 @@ function writeFramebufferPng(filePath, framebuffer) {
 async function main() {
   const repoRoot = path.resolve(__dirname, '..');
   const options = parseArguments(process.argv.slice(2));
-  const projectDir = path.resolve(repoRoot, options.project || 'artifacts/bulletml-stg-verification');
+  const projectDir = path.resolve(repoRoot, options.project || 'template/template_bulletml_stg');
   const outputDir = path.resolve(repoRoot, options.output || path.join(projectDir, 'wasm-proof'));
   const romPath = path.join(projectDir, 'out', 'rom.bin');
   const symbolPath = path.join(projectDir, 'out', 'symbol.txt');
@@ -115,6 +117,11 @@ async function main() {
     emulator.set_controller_state(1, buttons);
     emulator.run_frame();
     hostFrame += 1;
+    const cpu = emulator.get_cpu_state();
+    if (cpu?.m68k?.last_exception?.IllegalInstruction) {
+      const trace = emulator.trace_execution();
+      throw new Error('68000 illegal instruction during WASM proof: ' + JSON.stringify({ hostFrame, cpu, trace: Array.isArray(trace) ? trace.slice(-64) : trace }));
+    }
     const samples = emulator.take_audio_samples(800);
     for (const sample of samples) {
       const absolute = Math.abs(sample);
@@ -130,6 +137,16 @@ async function main() {
       tick(0);
     }
     throw new Error('Timed out waiting for ' + label + ': ' + JSON.stringify({ qa: qaState(), cpu: emulator.get_cpu_state() }));
+  }
+
+  function runUntilAdvancing(predicate, maximumFrames, label) {
+    for (let count = 0; count < maximumFrames; count += 1) {
+      const state = qaState();
+      if (predicate(state)) return state;
+      tick(count % 6 === 0 ? BUTTON_B : 0);
+    }
+    const debug = snapshot('timeout-' + label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''));
+    throw new Error('Timed out while advancing ' + label + ': ' + JSON.stringify({ qa: qaState(), cpu: emulator.get_cpu_state(), framebuffer: debug.file }));
   }
 
   function press(button, releaseFrames = 2) {
@@ -156,20 +173,17 @@ async function main() {
     return entry;
   }
 
-  function driveStage(orientation) {
-    let middle = null;
+  function exerciseGameplay(label, shotButton, horizontal) {
     const audioStart = audioNonzero;
     const hostStart = hostFrame;
-    for (let count = 0; count < 6000; count += 1) {
+    for (let count = 0; count < 180; count += 1) {
       const state = qaState();
-      if (state.screen === 3) return { end: snapshot(orientation + '-stage-end'), middle, audioDelta: audioNonzero - audioStart, hostFrames: hostFrame - hostStart };
-      if (state.screen !== 2) throw new Error(orientation + ' stage left gameplay unexpectedly: ' + JSON.stringify(state));
-      if (!middle && state.stageFrame >= 1800) middle = snapshot(orientation + '-stage-middle');
+      if (state.screen !== 2) throw new Error(label + ' left gameplay unexpectedly: ' + JSON.stringify(state));
       const sweep = Math.trunc(state.stageFrame / 120) & 1;
-      const movement = orientation === 'vertical' ? (sweep ? BUTTON_LEFT : BUTTON_RIGHT) : (sweep ? BUTTON_UP : BUTTON_DOWN);
-      tick(BUTTON_A | BUTTON_B | movement);
+      const movement = horizontal ? (sweep ? BUTTON_UP : BUTTON_DOWN) : (sweep ? BUTTON_LEFT : BUTTON_RIGHT);
+      tick(shotButton | movement);
     }
-    throw new Error(orientation + ' stage did not clear or time out: ' + JSON.stringify({ hostFrames: hostFrame - hostStart, qa: qaState() }));
+    return { frame: snapshot(label), audioDelta: audioNonzero - audioStart, hostFrames: hostFrame - hostStart };
   }
 
   try {
@@ -181,12 +195,41 @@ async function main() {
     if (readyState.selfTest !== 0 || readyState.loadProbe !== 0) throw new Error('Full QA ran before it was requested');
 
     press(BUTTON_A);
-    runUntil((state) => state.screen === 2 && state.selfTest === 0 && state.loadProbe === 0, 120, 'gameplay without full QA');
-    for (let count = 0; count < 2; count += 1) tick(0);
-    const directGameStart = snapshot('game-start-without-qa');
+    runUntilAdvancing((state) => state.screen === 2 && state.orientation === 0 && state.selfTest === 0 && state.loadProbe === 0, 3600, 'Campaign opening and pre-stage demo');
+    const campaignStart = snapshot('campaign-start');
+    const campaign = exerciseGameplay('campaign-gameplay', BUTTON_A, false);
 
     emulator.reset();
-    runUntil((state) => state.screen === 1 && state.selfTest === 0 && state.loadProbe === 0, 120, 'BulletML title after reset');
+    runUntil((state) => state.screen === 1 && state.selfTest === 0 && state.loadProbe === 0, 120, 'BulletML title before Caravan');
+    press(BUTTON_DOWN);
+    runUntil((state) => state.screen === 1 && state.orientation === 1, 120, 'Caravan selection');
+    const caravanTitle = snapshot('title-caravan');
+    press(BUTTON_A);
+    runUntilAdvancing((state) => state.screen === 2 && state.selfTest === 0 && state.loadProbe === 0, 3600, 'Caravan pre-stage demo');
+    const caravanStart = snapshot('caravan-start');
+    const caravan = exerciseGameplay('caravan-gameplay', BUTTON_A, caravanStart.qa.orientation === 1);
+
+    emulator.reset();
+    runUntil((state) => state.screen === 1, 120, 'BulletML title before Options');
+    press(BUTTON_B);
+    const optionsReady = runUntil((state) => state.screen === 5, 120, 'Options screen');
+    const optionsBefore = snapshot('options-before');
+    press(BUTTON_RIGHT);
+    const optionsChanged = runUntil((state) => state.screen === 5 && state.shotButton !== optionsReady.shotButton, 120, 'changed shot assignment');
+    const optionsAfter = snapshot('options-after');
+    press(BUTTON_A);
+    const savedAtTitle = runUntil((state) => state.screen === 1 && state.sramLoaded === 1, 120, 'saved Options title');
+
+    emulator.reset();
+    const reloadedAtTitle = runUntil((state) => state.screen === 1, 120, 'title after SRAM reboot');
+    const sramReloaded = snapshot('title-after-sram-reset');
+    if (reloadedAtTitle.sramLoaded !== 1
+      || reloadedAtTitle.shotButton !== savedAtTitle.shotButton
+      || reloadedAtTitle.bombButton !== savedAtTitle.bombButton
+      || reloadedAtTitle.speedButton !== savedAtTitle.speedButton) {
+      throw new Error('Options did not survive SRAM reboot: ' + JSON.stringify({ savedAtTitle, reloadedAtTitle }));
+    }
+
     for (let count = 0; count < 3; count += 1) tick(0);
     const diagnosticsAudioStart = audioNonzero;
     tick(BUTTON_C);
@@ -230,32 +273,13 @@ async function main() {
       }));
     }
 
-    press(BUTTON_LEFT);
-    runUntil((state) => state.screen === 1 && state.difficulty === 0, 120, 'Easy difficulty selection');
-    press(BUTTON_A);
-    runUntil((state) => state.screen === 2 && state.orientation === 0, 120, 'vertical stage start');
-    const vertical = driveStage('vertical');
-    if (vertical.end.qa.stageOutcome !== 1 || vertical.end.qa.stageFrame !== 3600) throw new Error('vertical stage did not reach the 3600-frame clear: ' + JSON.stringify({ hostFrames: vertical.hostFrames, qa: vertical.end.qa }));
-    if (vertical.end.qa.fireDrops || vertical.end.qa.displayDeletes) throw new Error('vertical stage reported a resource drop');
-    if (vertical.audioDelta <= 0) throw new Error('vertical BGM/SFX produced no audio');
-
-    press(BUTTON_START);
-    runUntil((state) => state.screen === 1, 120, 'return to title');
-    press(BUTTON_DOWN);
-    const horizontalTitle = runUntil((state) => state.screen === 1 && state.orientation === 1, 120, 'horizontal selection');
-    if (horizontalTitle.difficulty !== 0) throw new Error('difficulty changed while selecting horizontal mode');
-    snapshot('title-horizontal');
-    press(BUTTON_A);
-    runUntil((state) => state.screen === 2 && state.orientation === 1, 120, 'horizontal stage start');
-    const horizontal = driveStage('horizontal');
-    if (horizontal.end.qa.stageOutcome !== 1 || horizontal.end.qa.stageFrame !== 3600) throw new Error('horizontal stage did not reach the 3600-frame clear: ' + JSON.stringify({ hostFrames: horizontal.hostFrames, qa: horizontal.end.qa }));
-    if (horizontal.end.qa.fireDrops || horizontal.end.qa.displayDeletes) throw new Error('horizontal stage reported a resource drop');
-    if (horizontal.audioDelta <= 0) throw new Error('horizontal BGM/SFX produced no audio');
-
     const emulatorMeta = JSON.parse(fs.readFileSync(emulatorMetaPath, 'utf8'));
     const buildProof = JSON.parse(fs.readFileSync(buildProofPath, 'utf8'));
+    const campaignQa = campaign.frame.qa;
+    const caravanQa = caravan.frame.qa;
+    const hasNoRuntimeDrops = (state) => !state.fireDrops && !state.poolDrops && !state.spawnDrops && !state.contextDrops && !state.opcodeExhaustions && !state.displayDeletes;
     const proof = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       verifiedAt: new Date().toISOString(),
       emulator: {
         version: wasmPackage.EmulatorHandle.build_version(),
@@ -267,13 +291,34 @@ async function main() {
       boot: {
         titleHostFrames: titleReady.hostFrame,
         deferredDiagnostics: titleReady.qa.selfTest === 0 && titleReady.qa.loadProbe === 0,
-        startedGameplayWithoutDiagnostics: directGameStart.qa.screen === 2 && directGameStart.qa.selfTest === 0 && directGameStart.qa.loadProbe === 0,
         visibleTitleColors: titleReady.uniqueColors,
         visibleTitlePixels: titleReady.nonBlackPixels,
-        visibleGameplayColors: directGameStart.uniqueColors,
-        visibleGameplayPixels: directGameStart.nonBlackPixels,
         visibleDiagnosticsColors: diagnosticsRunning.uniqueColors,
         visibleDiagnosticsPixels: diagnosticsRunning.nonBlackPixels,
+      },
+      modes: {
+        campaign: {
+          titleSelection: titleReady.qa.orientation,
+          started: campaignStart.qa.screen === 2,
+          orientation: campaignStart.qa.orientation,
+          hostFrames: campaign.hostFrames,
+          audioNonzero: campaign.audioDelta,
+          qa: campaignQa,
+        },
+        caravan: {
+          titleSelection: caravanTitle.qa.orientation,
+          started: caravanStart.qa.screen === 2,
+          orientation: caravanStart.qa.orientation,
+          hostFrames: caravan.hostFrames,
+          audioNonzero: caravan.audioDelta,
+          qa: caravanQa,
+        },
+      },
+      sram: {
+        before: { shot: optionsReady.shotButton, bomb: optionsReady.bombButton, speed: optionsReady.speedButton },
+        changed: { shot: optionsChanged.shotButton, bomb: optionsChanged.bombButton, speed: optionsChanged.speedButton },
+        saved: { shot: savedAtTitle.shotButton, bomb: savedAtTitle.bombButton, speed: savedAtTitle.speedButton, checksumAccepted: savedAtTitle.sramLoaded === 1 },
+        afterReset: { shot: reloadedAtTitle.shotButton, bomb: reloadedAtTitle.bombButton, speed: reloadedAtTitle.speedButton, checksumAccepted: reloadedAtTitle.sramLoaded === 1 },
       },
       selfTest: { frames: buildProof.runtime.selfTestFrames, expectedCrc: buildProof.runtime.selfTestExpectedCrc, passed: title.qa.selfTest === 1 },
       loadProbe: {
@@ -310,26 +355,27 @@ async function main() {
         audio: { nonzero: title.audio.nonzero - diagnosticsAudioStart, peak: title.audio.peak },
         passed: title.qa.loadProbe === 1,
       },
-      stages: {
-        vertical: { completed: true, hostFrames: vertical.hostFrames, audio: vertical.audioDelta, maxima: vertical.end.qa },
-        horizontal: { completed: true, hostFrames: horizontal.hostFrames, audio: horizontal.audioDelta, maxima: horizontal.end.qa },
-      },
       resources: {
         ram: {
           linker: buildProof.runtime.ram,
-          minimumFreeBytes: Math.min(vertical.end.qa.minFreeRam, horizontal.end.qa.minFreeRam),
-          maximumAllocatedBytes: Math.max(vertical.end.qa.maxAllocatedRam, horizontal.end.qa.maxAllocatedRam),
+          minimumFreeBytes: Math.min(campaignQa.minFreeRam, caravanQa.minFreeRam),
+          maximumAllocatedBytes: Math.max(campaignQa.maxAllocatedRam, caravanQa.maxAllocatedRam),
         },
         vram: {
           build: buildProof.runtime.vram,
-          minimumFreeSpriteTiles: Math.min(vertical.end.qa.minFreeSpriteTiles, horizontal.end.qa.minFreeSpriteTiles),
+          minimumFreeSpriteTiles: Math.min(campaignQa.minFreeSpriteTiles, caravanQa.minFreeSpriteTiles),
         },
       },
       assertions: {
         defaultBootReachedTitleWithinOneSecond: titleReady.hostFrame <= 60 && titleReady.qa.screen === 1,
         defaultBootDeferredDiagnostics: titleReady.qa.selfTest === 0 && titleReady.qa.loadProbe === 0,
         defaultBootRenderedVisibleTitle: titleReady.uniqueColors > 1 && titleReady.nonBlackPixels > 500,
-        defaultBootStartedVisibleGameplayWithoutDiagnostics: directGameStart.qa.screen === 2 && directGameStart.qa.selfTest === 0 && directGameStart.qa.loadProbe === 0 && directGameStart.uniqueColors > 1 && directGameStart.nonBlackPixels > 500,
+        modeSelectContainsCampaignAndCaravan: titleReady.qa.orientation === 0 && caravanTitle.qa.orientation === 1,
+        campaignStartedVisibleGameplayWithoutDiagnostics: campaignStart.qa.screen === 2 && campaignStart.qa.selfTest === 0 && campaignStart.qa.loadProbe === 0 && campaignStart.uniqueColors > 1 && campaignStart.nonBlackPixels > 500,
+        caravanStartedVisibleGameplayWithoutDiagnostics: caravanStart.qa.screen === 2 && caravanStart.qa.selfTest === 0 && caravanStart.qa.loadProbe === 0 && caravanStart.uniqueColors > 1 && caravanStart.nonBlackPixels > 500,
+        optionsChangedWithoutDuplicateButtons: new Set([optionsChanged.shotButton, optionsChanged.bombButton, optionsChanged.speedButton]).size === 3,
+        optionsSavedWithValidChecksum: savedAtTitle.sramLoaded === 1,
+        optionsPersistedAfterSramReset: reloadedAtTitle.sramLoaded === 1 && reloadedAtTitle.shotButton === savedAtTitle.shotButton && reloadedAtTitle.bombButton === savedAtTitle.bombButton && reloadedAtTitle.speedButton === savedAtTitle.speedButton,
         requestedDiagnosticsRenderedProgress: diagnosticsRunning.qa.screen === 4 && diagnosticsRunning.uniqueColors > 1 && diagnosticsRunning.nonBlackPixels > 500,
         cRuntimeMatchesJsCrc10000: title.qa.selfTest === 1,
         loadProbePassed: title.qa.loadProbe === 1,
@@ -338,13 +384,12 @@ async function main() {
         loadProbeNoDrops: !title.qa.loadFireDrops && !title.qa.loadContextDrops && !title.qa.loadOpcodeExhaustions && !title.qa.loadDisplayDeletes,
         loadProbeMaintained60Hz: title.qa.loadVBlankFrames === buildProof.runtime.loadProbe.frames && title.qa.loadMaxFrameSubticks <= buildProof.runtime.loadProbe.expected.subticksPerFrame && title.qa.loadMaxCpuLoad < 100,
         loadProbeAudioNonzero: title.audio.nonzero - diagnosticsAudioStart > 0,
-        verticalStageReached3600: vertical.end.qa.stageFrame === 3600 && vertical.end.qa.stageOutcome === 1,
-        horizontalStageReached3600: horizontal.end.qa.stageFrame === 3600 && horizontal.end.qa.stageOutcome === 1,
-        stagesMaintained60Hz: vertical.end.qa.maxCpuLoad < 100 && horizontal.end.qa.maxCpuLoad < 100,
-        verticalAudioNonzero: vertical.audioDelta > 0,
-        horizontalAudioNonzero: horizontal.audioDelta > 0,
-        noRuntimeDrops: !title.qa.loadFireDrops && !title.qa.loadContextDrops && !title.qa.loadOpcodeExhaustions && !title.qa.loadDisplayDeletes && !vertical.end.qa.fireDrops && !vertical.end.qa.poolDrops && !vertical.end.qa.spawnDrops && !vertical.end.qa.contextDrops && !vertical.end.qa.opcodeExhaustions && !vertical.end.qa.displayDeletes && !horizontal.end.qa.fireDrops && !horizontal.end.qa.poolDrops && !horizontal.end.qa.spawnDrops && !horizontal.end.qa.contextDrops && !horizontal.end.qa.opcodeExhaustions && !horizontal.end.qa.displayDeletes,
-        runtimeRamVramWithinBudget: buildProof.runtime.ram?.withinBudget === true && buildProof.runtime.vram?.withinBudget === true && vertical.end.qa.minFreeRam >= 4096 && horizontal.end.qa.minFreeRam >= 4096 && vertical.end.qa.minFreeSpriteTiles > 0 && horizontal.end.qa.minFreeSpriteTiles > 0,
+        campaignXgm2AndWavSimultaneous: campaignQa.gameplayBgmStarted === 1 && campaignQa.pcmWhileBgm === 1 && campaign.audioDelta > 0,
+        caravanXgm2AndWavSimultaneous: caravanQa.gameplayBgmStarted === 1 && caravanQa.pcmWhileBgm === 1 && caravan.audioDelta > 0,
+        gameplayMaintained60Hz: campaignQa.maxCpuLoad < 100 && caravanQa.maxCpuLoad < 100,
+        noRuntimeDrops: !title.qa.loadFireDrops && !title.qa.loadContextDrops && !title.qa.loadOpcodeExhaustions && !title.qa.loadDisplayDeletes && hasNoRuntimeDrops(campaignQa) && hasNoRuntimeDrops(caravanQa),
+        romWithin4MiB: rom.length <= 4 * 1024 * 1024,
+        runtimeRamVramWithinBudget: buildProof.runtime.ram?.withinBudget === true && buildProof.runtime.vram?.withinBudget === true && campaignQa.minFreeRam >= 4096 && caravanQa.minFreeRam >= 4096 && campaignQa.minFreeSpriteTiles > 0 && caravanQa.minFreeSpriteTiles > 0,
       },
       snapshots,
     };
@@ -352,7 +397,7 @@ async function main() {
     fs.writeFileSync(proofPath, JSON.stringify(proof, null, 2) + '\n');
     buildProof.wasm = proof;
     fs.writeFileSync(buildProofPath, JSON.stringify(buildProof, null, 2) + '\n');
-    process.stdout.write(JSON.stringify({ proofPath, assertions: proof.assertions, emulator: proof.emulator, loadProbe: proof.loadProbe, stages: proof.stages }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ proofPath, assertions: proof.assertions, emulator: proof.emulator, loadProbe: proof.loadProbe, modes: proof.modes, sram: proof.sram }, null, 2) + '\n');
     const failures = Object.entries(proof.assertions).filter(([, passed]) => !passed).map(([name]) => name);
     if (failures.length) throw new Error('BulletML WASM proof failed: ' + failures.join(', '));
   } finally {

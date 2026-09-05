@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "magic": "GNAS",
+  "version": 1,
+  "checksum": "crc16-ccitt",
+  "nameLength": 3,
+  "topCount": 10,
+  "campaignRanking": [
+    "score",
+    "stagesCleared",
+    "playFrames"
+  ],
+  "caravanRanking": [
+    "score",
+    "remainingFrames"
+  ],
+  "checkpoint": [
+    "nextStageId",
+    "score",
+    "lives",
+    "bombs",
+    "weaponId",
+    "speed",
+    "flags",
+    "stagesCleared"
+  ],
+  "resumeRankingEligible": true
+}

@@ -1,0 +1,76 @@
+{
+  "version": 2,
+  "assets": [
+    {
+      "id": "bg_abyss",
+      "name": "Abyss VN background",
+      "type": "image",
+      "source": "assets/images/vn_abyss.png",
+      "options": {}
+    },
+    {
+      "id": "sp_geroneko",
+      "name": "GERONEKO actor",
+      "type": "sprite",
+      "source": "assets/sprites/vn_geroneko.png",
+      "options": {
+        "transparentIndex": 0,
+        "animations": [
+          {
+            "id": "default",
+            "name": "Default",
+            "frameWidth": 64,
+            "frameHeight": 96,
+            "firstCell": 0,
+            "frameCount": 1,
+            "frameDelay": 12,
+            "frameDelays": [
+              12
+            ],
+            "frameStrideCells": 1,
+            "loop": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "demo_bgm",
+      "name": "Demo BGM",
+      "type": "psg-song",
+      "source": "",
+      "options": {
+        "kind": "song",
+        "bpm": 96,
+        "speed": 6,
+        "steps": 8,
+        "volume": 22,
+        "pattern": [
+          {
+            "step": 0,
+            "channel": 0,
+            "period": 508,
+            "volume": 22
+          },
+          {
+            "step": 2,
+            "channel": 0,
+            "period": 428,
+            "volume": 22
+          },
+          {
+            "step": 4,
+            "channel": 0,
+            "period": 381,
+            "volume": 22
+          },
+          {
+            "step": 6,
+            "channel": 0,
+            "period": 428,
+            "volume": 22
+          }
+        ]
+      }
+    }
+  ]
+}

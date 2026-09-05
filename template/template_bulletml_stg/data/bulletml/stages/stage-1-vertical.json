@@ -1,0 +1,410 @@
+{
+  "id": "stage-1-vertical",
+  "name": "星骸縦坑",
+  "orientation": "vertical",
+  "durationFrames": 3600,
+  "backgroundId": "vertical-ruins",
+  "collisionMap": {
+    "symbol": "stage1_collision",
+    "type": "MAP",
+    "collisionLayer": "near"
+  },
+  "next": [
+    {
+      "stageId": "stage-2-horizontal",
+      "flag": "",
+      "equals": true
+    }
+  ],
+  "events": [
+    {
+      "id": "bg-start",
+      "order": 0,
+      "trigger": {
+        "type": "frame",
+        "frame": 0,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "set_background",
+        "backgroundId": "vertical-ruins",
+        "transition": "fade",
+        "enemyId": "",
+        "bossId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 0,
+      "enemyType": "grunt",
+      "boss": false,
+      "hp": 3,
+      "score": 100,
+      "patternId": "",
+      "movementId": "",
+      "dropItemId": "",
+      "path": [],
+      "phases": []
+    },
+    {
+      "id": "scout-a",
+      "order": 120,
+      "trigger": {
+        "type": "frame",
+        "frame": 120,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "scout",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 120,
+      "enemyType": "scout",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "generic-aimed",
+      "path": [
+        {
+          "x": 80,
+          "y": -12,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 110,
+          "y": 68,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "score-gold",
+      "movementId": ""
+    },
+    {
+      "id": "scout-b",
+      "order": 300,
+      "trigger": {
+        "type": "frame",
+        "frame": 300,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "scout",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 300,
+      "enemyType": "scout",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "vertical-fan",
+      "path": [
+        {
+          "x": 230,
+          "y": -12,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 260,
+          "y": 68,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "weapon-spread",
+      "movementId": ""
+    },
+    {
+      "id": "ruin-a",
+      "order": 720,
+      "trigger": {
+        "type": "frame",
+        "frame": 720,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "destructible-ruin",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 720,
+      "enemyType": "destructible-ruin",
+      "boss": false,
+      "hp": 18,
+      "score": 1200,
+      "patternId": "",
+      "path": [
+        {
+          "x": 160,
+          "y": 64,
+          "frame": 0,
+          "interpolation": "linear"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "",
+      "movementId": ""
+    },
+    {
+      "id": "scroll-boost",
+      "order": 900,
+      "trigger": {
+        "type": "frame",
+        "frame": 900,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "set_scroll",
+        "value": 1.8,
+        "durationFrames": 180,
+        "interpolation": "smoothstep",
+        "enemyId": "",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 900,
+      "enemyType": "grunt",
+      "boss": false,
+      "hp": 3,
+      "score": 100,
+      "patternId": "",
+      "movementId": "",
+      "dropItemId": "",
+      "path": [],
+      "phases": []
+    },
+    {
+      "id": "boss-gate",
+      "order": 2400,
+      "trigger": {
+        "type": "frame",
+        "frame": 2400,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_boss",
+        "bossId": "astral-gate",
+        "enemyId": "astral-gate",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 2400,
+      "enemyType": "astral-gate",
+      "boss": true,
+      "hp": 180,
+      "score": 20000,
+      "patternId": "vertical-fan",
+      "path": [
+        {
+          "x": 160,
+          "y": 64,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 160,
+          "y": 144,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [
+        {
+          "threshold": 100,
+          "patternId": "vertical-fan",
+          "movementId": "",
+          "rankOverride": null,
+          "activeParts": [],
+          "backgroundId": "",
+          "wave": {
+            "preset": "none",
+            "start": 0,
+            "end": 223,
+            "amplitude": 0,
+            "wavelength": 64,
+            "speed": 0,
+            "fadeFrames": 0
+          },
+          "clearBullets": false
+        },
+        {
+          "threshold": 55,
+          "patternId": "boss-split",
+          "rankOverride": 0.7,
+          "movementId": "",
+          "activeParts": [],
+          "backgroundId": "",
+          "wave": {
+            "preset": "none",
+            "start": 0,
+            "end": 223,
+            "amplitude": 0,
+            "wavelength": 64,
+            "speed": 0,
+            "fadeFrames": 0
+          },
+          "clearBullets": false
+        }
+      ],
+      "dropItemId": "",
+      "movementId": ""
+    },
+    {
+      "id": "clear",
+      "order": 3599,
+      "trigger": {
+        "type": "condition",
+        "frame": 0,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": "astral-gate"
+      },
+      "action": {
+        "type": "stage_clear",
+        "enemyId": "",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 0,
+      "enemyType": "grunt",
+      "boss": false,
+      "hp": 3,
+      "score": 100,
+      "patternId": "",
+      "movementId": "",
+      "dropItemId": "",
+      "path": [],
+      "phases": []
+    }
+  ],
+  "schemaVersion": 2,
+  "mainScroll": {
+    "speed": 1,
+    "axis": "y"
+  }
+}

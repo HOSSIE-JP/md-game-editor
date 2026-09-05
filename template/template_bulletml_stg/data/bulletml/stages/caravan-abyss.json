@@ -1,0 +1,667 @@
+{
+  "id": "caravan-abyss",
+  "name": "ABYSS CARAVAN 120",
+  "orientation": "vertical",
+  "durationFrames": 7200,
+  "backgroundId": "caravan-depth",
+  "collisionMap": {
+    "symbol": "caravan_collision",
+    "type": "MAP",
+    "collisionLayer": "near"
+  },
+  "next": [],
+  "caravan": true,
+  "events": [
+    {
+      "id": "bg-start",
+      "order": 0,
+      "trigger": {
+        "type": "frame",
+        "frame": 0,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "set_background",
+        "backgroundId": "caravan-depth",
+        "transition": "cut",
+        "enemyId": "",
+        "bossId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 0,
+      "enemyType": "grunt",
+      "boss": false,
+      "hp": 3,
+      "score": 100,
+      "patternId": "",
+      "movementId": "",
+      "dropItemId": "",
+      "path": [],
+      "phases": []
+    },
+    {
+      "id": "wave-1",
+      "order": 180,
+      "trigger": {
+        "type": "frame",
+        "frame": 180,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "scout",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 180,
+      "enemyType": "scout",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "horizontal-rank",
+      "path": [
+        {
+          "x": 40,
+          "y": -12,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 70,
+          "y": 68,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "score-gold",
+      "movementId": ""
+    },
+    {
+      "id": "wave-2",
+      "order": 720,
+      "trigger": {
+        "type": "frame",
+        "frame": 720,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "scout",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 720,
+      "enemyType": "scout",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "vertical-fan",
+      "path": [
+        {
+          "x": 97,
+          "y": -12,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 127,
+          "y": 68,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "score-gold",
+      "movementId": ""
+    },
+    {
+      "id": "wave-3",
+      "order": 1260,
+      "trigger": {
+        "type": "frame",
+        "frame": 1260,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "turret",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 1260,
+      "enemyType": "turret",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "horizontal-rank",
+      "path": [
+        {
+          "x": 154,
+          "y": -12,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 184,
+          "y": 68,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "score-gold",
+      "movementId": ""
+    },
+    {
+      "id": "wave-4",
+      "order": 1800,
+      "trigger": {
+        "type": "frame",
+        "frame": 1800,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "scout",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 1800,
+      "enemyType": "scout",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "vertical-fan",
+      "path": [
+        {
+          "x": 211,
+          "y": -12,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 241,
+          "y": 68,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "score-gold",
+      "movementId": ""
+    },
+    {
+      "id": "wave-5",
+      "order": 2340,
+      "trigger": {
+        "type": "frame",
+        "frame": 2340,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "scout",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 2340,
+      "enemyType": "scout",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "horizontal-rank",
+      "path": [
+        {
+          "x": 268,
+          "y": -12,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 298,
+          "y": 68,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "score-gold",
+      "movementId": ""
+    },
+    {
+      "id": "wave-6",
+      "order": 2880,
+      "trigger": {
+        "type": "frame",
+        "frame": 2880,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "turret",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 2880,
+      "enemyType": "turret",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "vertical-fan",
+      "path": [
+        {
+          "x": 85,
+          "y": -12,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 115,
+          "y": 68,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "score-gold",
+      "movementId": ""
+    },
+    {
+      "id": "wave-7",
+      "order": 3420,
+      "trigger": {
+        "type": "frame",
+        "frame": 3420,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "scout",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 3420,
+      "enemyType": "scout",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "horizontal-rank",
+      "path": [
+        {
+          "x": 142,
+          "y": -12,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 172,
+          "y": 68,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "score-gold",
+      "movementId": ""
+    },
+    {
+      "id": "wave-8",
+      "order": 3960,
+      "trigger": {
+        "type": "frame",
+        "frame": 3960,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "scout",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 3960,
+      "enemyType": "scout",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "vertical-fan",
+      "path": [
+        {
+          "x": 199,
+          "y": -12,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 229,
+          "y": 68,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "score-gold",
+      "movementId": ""
+    },
+    {
+      "id": "wave-9",
+      "order": 4500,
+      "trigger": {
+        "type": "frame",
+        "frame": 4500,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "turret",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 4500,
+      "enemyType": "turret",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "horizontal-rank",
+      "path": [
+        {
+          "x": 256,
+          "y": -12,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 286,
+          "y": 68,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "score-gold",
+      "movementId": ""
+    },
+    {
+      "id": "wave-10",
+      "order": 5040,
+      "trigger": {
+        "type": "frame",
+        "frame": 5040,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "spawn_enemy",
+        "enemyId": "scout",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 5040,
+      "enemyType": "scout",
+      "boss": false,
+      "hp": 4,
+      "score": 300,
+      "patternId": "vertical-fan",
+      "path": [
+        {
+          "x": 73,
+          "y": -12,
+          "frame": 0,
+          "interpolation": "linear"
+        },
+        {
+          "x": 103,
+          "y": 68,
+          "frame": 120,
+          "interpolation": "smoothstep"
+        }
+      ],
+      "phases": [],
+      "dropItemId": "score-gold",
+      "movementId": ""
+    },
+    {
+      "id": "clear",
+      "order": 7199,
+      "trigger": {
+        "type": "frame",
+        "frame": 7199,
+        "scroll": 0,
+        "flag": "",
+        "operator": "set",
+        "bossId": ""
+      },
+      "action": {
+        "type": "stage_clear",
+        "enemyId": "",
+        "bossId": "",
+        "backgroundId": "",
+        "plane": "BG_A",
+        "value": 0,
+        "durationFrames": 0,
+        "interpolation": "step",
+        "transition": "cut",
+        "wave": {
+          "preset": "none",
+          "start": 0,
+          "end": 223,
+          "amplitude": 0,
+          "wavelength": 64,
+          "speed": 0,
+          "fadeFrames": 0
+        },
+        "flag": ""
+      },
+      "spawnFrame": 7199,
+      "enemyType": "grunt",
+      "boss": false,
+      "hp": 3,
+      "score": 100,
+      "patternId": "",
+      "movementId": "",
+      "dropItemId": "",
+      "path": [],
+      "phases": []
+    }
+  ],
+  "schemaVersion": 2,
+  "mainScroll": {
+    "speed": 1,
+    "axis": "y"
+  }
+}

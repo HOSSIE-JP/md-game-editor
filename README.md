@@ -173,22 +173,15 @@ npm test
 
 ### 横スクロールSTG
 
-`horizontal-stg-editor` / `horizontal-stg-builder` と2種類の新規プロジェクトテンプレートを同梱しています。
-汎用の `template_horizontal_stg` は独自作品のスターター、
-`template_geroneko_abyss_strike` は5面完成版 `GERONEKO: ABYSS STRIKE` です。
-どちらもbuilder roleに横STGビルダー、testplay roleに標準WASMエミュレーターを選択済みで、
-プロジェクト作成後に「横STG」画面から、実画像320x224 preview、8x8背景stamp編集、システム／敵／ボスsprite取り込み、BGM preview、弾幕、敵／item／boss timeline配置、検証、生成を一体で操作できます。
-editor／builder v1.3.0では、12セグメントのチャージバーと機体／武器強化／速度／ボム／コアの18タイルHUDを備えます。GERONEKO背景はBG_B 364～602／BG_A 73～342の8x8 patternを最終解像度へ直接配置し、HUD込み455～958 tileに収めています。タイトルは924／1005 tileに収めたボス対峙の一枚絵と、可読性を保つ半振幅走査線変形の独立ロゴで表示します。
-データ形式、アセット制約、生成物、ランタイム、検証手順は
-[`docs/HORIZONTAL_STG.md`](docs/HORIZONTAL_STG.md) を参照してください。
+`horizontal-stg-editor` / `horizontal-stg-builder` v1.3.0は開発終了です。既存projectの編集・Build互換コードと回帰テストは維持しますが、`template_horizontal_stg`と旧5面版`template_geroneko_abyss_strike`は`templateDeprecated: true`として新規作成一覧から除外されています。新規STGにはBulletML STG Studio v2を使ってください。既存projectの契約は[`docs/HORIZONTAL_STG.md`](docs/HORIZONTAL_STG.md)に残しています。
 
 ### BulletML STG
 
-Stagesの統合Previewはmain側BMLB sessionを使い、全eventの弾、自機射撃、HP／Boss phase、衝突、score／残機、sprite／走査線予算を実行します。
+`bulletml-stg-editor` / `bulletml-stg-builder` 2.0と、完成Showcase `template_bulletml_stg`「GERONEKO -ABYSS STRIKE-」を同梱しています。対象はSGDK 2.11、NTSC H40 320×224、1Pです。同一ROMに3面Campaignと専用Caravanを持ち、Stageごとの縦／横、Player animation、3 Weapon、3段速度、Bomb、Item、Movement、Enemy、1～8 phase Boss/Parts、破壊背景、BG_A/B band/wave、TMX collision、VN Demo、Top10/checkpoint SRAMを編集・実行できます。
 
-`bulletml-stg-editor` / `bulletml-stg-builder` と `template_bulletml_stg` を同梱しています。BulletML v0.21 subsetの構造化フロー／DOM＋SVG Graph、Pattern名と表示filter、Action／Fire／Bulletフォーム、ネストRef接続と`ref-showcase`、共通Inspector、canonical XML＋MD sidecar交換、loop切替可能なMD共通BMLB Preview、選択eventのみ／全eventを切り替える縦横stage経路表示、1～3 phase Boss編集、縦横別の固定背景／BGMとSFXを持つSGDK 2.11診断ROMを提供します。Editorは`asset-manager`／`sprite-editor`だけへ依存し、BuilderがEditorへ一方向依存します。旧`horizontal-stg-*`は変更せず併存します。
+Studioは「作品設定」から「診断」まで13個の日本語タブをプラグイン内に表示します。作品設定、各カタログ、ステージ基本設定／イベント／ステージCRUD、弾幕の画像／当たり判定／命令、デモ命令／割当は、説明ツールチップ付きのGUIフォームで編集でき、JSONは上級者向けの確認・一括修正欄だけに残します。配列の追加・削除・並べ替えや任意設定の有効化もGUI内で完結します。アセット選択はResComp定義を毎回再読込する共通選択画面を使い、候補を選んだ時点でSPRITEアニメーション、VGM/WAV、IMAGE、MAP/TILEMAPを自動プレビューします。デモタブはMD Novelとassets/pce-vn-scenes.json、エディター部品、プレビュー、16×16フォント部分生成、コンパイラーを共有します。schema v1は移行せず明示エラーにします。
 
-Build前にはrank・seed・自機経路の27ケースと縦横stageを自動負荷検証し、C self-test 10,000 frameとJS VMのCRC、ROM、同梱WASM通しプレイをproofへ記録できます。subset、保存／XML／sprite／runtime契約、操作、検証手順は[`docs/BULLETML_STG.md`](docs/BULLETML_STG.md)を参照してください。
+Stages PreviewとC runtimeは同じbig-endian `BMLB ABI v1`を使います。Build前にはrank 0/0.5/1・複数seed・自機経路の27ケース、asset/palette/collision/VN/DAG、sprite/scanline/VRAM/RAM/DMA/PCM/4 MiBを検査します。SGDK release ROM、UI verifier、Campaign/Caravan開始、SRAM再起動、XGM2＋WAV、60Hz/負荷を同梱WASM proofへ記録します。詳細は[`docs/BULLETML_STG.md`](docs/BULLETML_STG.md)を参照してください。
 
 ---
 

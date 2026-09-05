@@ -1,1 +1,16 @@
 /* Asset Manager renderer styles are currently provided by the host stylesheet. */
+.rescomp-picker-panel{width:min(980px,94vw);height:min(720px,88vh);padding:0;overflow:hidden}
+.rescomp-picker-shell{height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;background:#111a25;color:#dbe9f7}
+.rescomp-picker-header,.rescomp-picker-toolbar,.rescomp-picker-footer{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #2b3b4d}
+.rescomp-picker-header h2{flex:1;margin:0;font-size:16px}.rescomp-picker-header button{border:0;background:transparent;color:#9eb0c3;font-size:18px}
+.rescomp-picker-toolbar input{flex:1;min-width:0;padding:8px;border:1px solid #34485e;border-radius:5px;background:#0a111a;color:#fff}
+.rescomp-picker-body{min-height:0;display:grid;grid-template-columns:minmax(260px,40%) minmax(0,1fr)}
+.rescomp-picker-list,.rescomp-picker-preview{min-height:0;overflow:auto;padding:8px}.rescomp-picker-list{border-right:1px solid #2b3b4d}
+.rescomp-picker-row{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;margin:0 0 4px;padding:8px;border:1px solid transparent;border-radius:5px;background:#172436;color:#dbe9f7;text-align:left}
+.rescomp-picker-row:hover,.rescomp-picker-row.active{border-color:#47a7df;background:#1d344c}.rescomp-picker-row small{grid-column:1/-1;overflow:hidden;color:#8195aa;text-overflow:ellipsis;white-space:nowrap}
+.rescomp-picker-preview header{display:flex;justify-content:space-between;gap:10px;margin-bottom:10px;color:#a9bed2}.rescomp-picker-preview img{max-width:100%;max-height:430px;image-rendering:pixelated}
+.rescomp-picker-image,.rescomp-picker-map{display:grid;place-items:center;min-height:280px;border:1px solid #2d4055;background:#08101a}.rescomp-picker-map canvas{width:min(100%,512px);height:auto;image-rendering:pixelated}
+.rescomp-picker-image canvas{max-width:100%;max-height:160px;image-rendering:pixelated}
+.rescomp-picker-sprite-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}.rescomp-picker-sprite-controls select{min-width:56px}
+.rescomp-picker-preview audio{width:100%}.rescomp-picker-footer{justify-content:flex-end;border-top:1px solid #2b3b4d;border-bottom:0}.rescomp-picker-footer [data-picker-status]{margin-right:auto;color:#8296aa}.rescomp-picker-footer [data-picker-status].error,.rescomp-picker-error{color:#ff7382}
+.rescomp-picker-empty{color:#8395a8}.rescomp-picker-footer button{padding:7px 12px}.rescomp-picker-footer .primary{background:#287bab;color:#fff}

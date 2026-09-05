@@ -20,7 +20,7 @@ const {
   compatiblePaletteProfile,
   paletteProfileSatisfies,
   resolveCommandPalette,
-} = require('./novel-schema');
+} = require('../shared/md-vn/scene-schema');
 const {
   hashBuffer,
   convertVisualGroup,
@@ -50,7 +50,7 @@ const {
   generationMetadata,
   validateGeneration,
   validateProjectFontCoverage,
-} = require('./novel-font');
+} = require('../shared/md-vn/font');
 
 const fsp = fs.promises;
 const MAX_JSON_BYTES = 32 * 1024 * 1024;

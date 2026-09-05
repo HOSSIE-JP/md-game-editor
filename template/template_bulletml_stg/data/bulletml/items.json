@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 2,
+  "kind": "items",
+  "entries": [
+    {
+      "id": "weapon-needle",
+      "type": "weapon",
+      "name": "NEEDLE CORE",
+      "sprite": {
+        "symbol": "item_catalog",
+        "type": "SPRITE",
+        "animationRow": 0
+      },
+      "weaponId": "needle",
+      "amount": 1,
+      "score": 1000
+    },
+    {
+      "id": "weapon-spread",
+      "type": "weapon",
+      "name": "FAN CORE",
+      "sprite": {
+        "symbol": "item_catalog",
+        "type": "SPRITE",
+        "animationRow": 0
+      },
+      "weaponId": "spread",
+      "amount": 1,
+      "score": 1500
+    },
+    {
+      "id": "weapon-laser",
+      "type": "weapon",
+      "name": "LASER CORE",
+      "sprite": {
+        "symbol": "item_catalog",
+        "type": "SPRITE",
+        "animationRow": 0
+      },
+      "weaponId": "laser",
+      "amount": 1,
+      "score": 2000
+    },
+    {
+      "id": "bomb-cell",
+      "type": "bomb",
+      "name": "BOMB CELL",
+      "sprite": {
+        "symbol": "item_catalog",
+        "type": "SPRITE",
+        "animationRow": 1
+      },
+      "amount": 1,
+      "score": 500
+    },
+    {
+      "id": "score-gold",
+      "type": "score",
+      "name": "STAR RELIC",
+      "sprite": {
+        "symbol": "item_catalog",
+        "type": "SPRITE",
+        "animationRow": 2
+      },
+      "amount": 1,
+      "score": 5000
+    }
+  ]
+}

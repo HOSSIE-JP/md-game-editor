@@ -29,6 +29,15 @@ test('packaging exposes iconv-lite to external built-in plugins', () => {
   assert.equal(fs.existsSync(path.join(root, 'node_modules/iconv-lite/lib/index.js')), true);
   assert.equal(fs.existsSync(path.join(root, 'node_modules/safer-buffer/safer.js')), true);
 });
+
+test('external BulletML plugin resolves the canonical packaged ResComp parser', () => {
+  const service = fs.readFileSync(path.join(__dirname, '..', 'plugins', 'bulletml-stg-editor', 'stg-document-service.js'), 'utf-8');
+
+  assert.match(service, /path\.resolve\(__dirname, '\.\.', '\.\.', 'rescomp-manager\.js'\)/);
+  assert.match(service, /process\.resourcesPath/);
+  assert.match(service, /path\.join\(process\.resourcesPath, 'app\.asar', 'rescomp-manager\.js'\)/);
+  assert.doesNotMatch(readPackageConfig(), /from:\s*rescomp-manager\.js/);
+});
 test('development start script forwards stop signals to Electron', () => {
   const pkg = readPackageJson();
   const scriptPath = path.join(__dirname, '..', 'scripts', 'start-electron.js');

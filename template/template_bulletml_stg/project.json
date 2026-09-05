@@ -1,15 +1,21 @@
 {
   "coreId": "mega-drive",
-  "title": "BULLETML STG LAB",
+  "title": "GERONEKO -ABYSS STRIKE-",
   "author": "MD GAME EDITOR",
-  "serial": "GM BMLSTG00-00",
+  "serial": "GM GNAS0001-00",
   "region": "JUE",
-  "generatedAt": "2026-08-30T00:00:00.000Z",
+  "generatedAt": "2026-08-30T17:06:22.234Z",
   "pluginRoles": {
     "builder": "bulletml-stg-builder",
     "testplay": "standard-emulator"
   },
   "pluginSettings": {
-    "sidebarOrder": ["bulletml-stg-editor", "asset-manager", "sprite-editor", "code-editor"]
+    "sidebarOrder": [
+      "bulletml-stg-editor",
+      "asset-manager",
+      "sprite-editor",
+      "tilemap-editor",
+      "code-editor"
+    ]
   }
 }

@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 2,
+  "kind": "enemies",
+  "entries": [
+    {
+      "id": "scout",
+      "name": "Star Scout",
+      "sprite": {
+        "symbol": "enemy_scout",
+        "type": "SPRITE"
+      },
+      "hp": 4,
+      "score": 300,
+      "hitbox": {
+        "x": 0,
+        "y": 0,
+        "radius": 7
+      },
+      "movementId": "swoop",
+      "patternId": "generic-aimed",
+      "drop": {
+        "itemId": "score-gold"
+      },
+      "explosionId": "single",
+      "se": {
+        "symbol": "bml_sfx_hit",
+        "type": "WAV"
+      }
+    },
+    {
+      "id": "turret",
+      "name": "Ruin Turret",
+      "sprite": {
+        "symbol": "enemy_turret",
+        "type": "SPRITE"
+      },
+      "hp": 12,
+      "score": 800,
+      "hitbox": {
+        "x": 0,
+        "y": 0,
+        "radius": 10
+      },
+      "movementId": "side-patrol",
+      "patternId": "horizontal-rank",
+      "drop": {
+        "itemId": "bomb-cell"
+      },
+      "explosionId": "single",
+      "se": {
+        "symbol": "bml_sfx_hit",
+        "type": "WAV"
+      }
+    },
+    {
+      "id": "destructible-ruin",
+      "name": "Destructible Ruin",
+      "sprite": {
+        "symbol": "destructible_ruin",
+        "type": "SPRITE"
+      },
+      "hp": 18,
+      "score": 1200,
+      "hitbox": {
+        "x": 0,
+        "y": 0,
+        "radius": 14
+      },
+      "movementId": "",
+      "patternId": "",
+      "drop": {
+        "itemId": "weapon-spread"
+      },
+      "explosionId": "boss-chain",
+      "se": {
+        "symbol": "bml_sfx_destroy",
+        "type": "WAV"
+      },
+      "destructibleBackground": true
+    }
+  ]
+}

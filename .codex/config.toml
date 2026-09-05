@@ -1,0 +1,2 @@
+# Project default; preserve user reasoning, provider and permission settings.
+model = "gpt-6-astra"

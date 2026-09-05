@@ -1,0 +1,229 @@
+{
+  "schemaVersion": 2,
+  "kind": "backgrounds",
+  "entries": [
+    {
+      "id": "vertical-ruins",
+      "name": "Vertical Ruins",
+      "BG_A": {
+        "map": {
+          "symbol": "stage1_bg_a",
+          "type": "MAP"
+        },
+        "bands": [
+          {
+            "start": 0,
+            "end": 79,
+            "multiplier": 0.4
+          },
+          {
+            "start": 80,
+            "end": 159,
+            "multiplier": 0.75
+          },
+          {
+            "start": 160,
+            "end": 223,
+            "multiplier": 1
+          }
+        ],
+        "wave": {
+          "preset": "sine",
+          "start": 64,
+          "end": 192,
+          "amplitude": 2,
+          "wavelength": 96,
+          "speed": 0.5,
+          "fadeFrames": 30
+        }
+      },
+      "BG_B": {
+        "map": {
+          "symbol": "stage1_bg_b",
+          "type": "MAP"
+        },
+        "bands": [
+          {
+            "start": 0,
+            "end": 223,
+            "multiplier": 0.2
+          }
+        ],
+        "wave": {
+          "preset": "none"
+        }
+      },
+      "transition": "fade",
+      "fadeFrames": 20,
+      "bgm": {
+        "symbol": "bml_bgm_vertical",
+        "type": "XGM2"
+      }
+    },
+    {
+      "id": "horizontal-foundry",
+      "name": "Horizontal Foundry",
+      "BG_A": {
+        "map": {
+          "symbol": "stage2_bg_a",
+          "type": "MAP"
+        },
+        "bands": [
+          {
+            "start": 0,
+            "end": 63,
+            "multiplier": 0.25
+          },
+          {
+            "start": 64,
+            "end": 143,
+            "multiplier": 0.65
+          },
+          {
+            "start": 144,
+            "end": 223,
+            "multiplier": 1
+          }
+        ],
+        "wave": {
+          "preset": "shear",
+          "start": 96,
+          "end": 208,
+          "amplitude": 3,
+          "wavelength": 80,
+          "speed": 1,
+          "fadeFrames": 20
+        }
+      },
+      "BG_B": {
+        "map": {
+          "symbol": "stage2_bg_b",
+          "type": "MAP"
+        },
+        "bands": [
+          {
+            "start": 0,
+            "end": 111,
+            "multiplier": 0.15
+          },
+          {
+            "start": 112,
+            "end": 223,
+            "multiplier": 0.35
+          }
+        ],
+        "wave": {
+          "preset": "none"
+        }
+      },
+      "transition": "cut",
+      "fadeFrames": 0,
+      "bgm": {
+        "symbol": "bml_bgm_horizontal",
+        "type": "XGM2"
+      }
+    },
+    {
+      "id": "giant-core",
+      "name": "Giant Core Arena",
+      "BG_A": {
+        "map": {
+          "symbol": "stage3_bg_a",
+          "type": "MAP"
+        },
+        "bands": [
+          {
+            "start": 0,
+            "end": 223,
+            "multiplier": 1
+          }
+        ],
+        "wave": {
+          "preset": "dual-sine",
+          "start": 0,
+          "end": 223,
+          "amplitude": 4,
+          "wavelength": 72,
+          "speed": 1.5,
+          "fadeFrames": 30
+        }
+      },
+      "BG_B": {
+        "map": {
+          "symbol": "stage3_bg_b",
+          "type": "MAP"
+        },
+        "bands": [
+          {
+            "start": 0,
+            "end": 223,
+            "multiplier": 0.35
+          }
+        ],
+        "wave": {
+          "preset": "none"
+        }
+      },
+      "transition": "fade",
+      "fadeFrames": 24,
+      "giantBossArena": true,
+      "bgm": {
+        "symbol": "bgm_stage3",
+        "type": "XGM2"
+      }
+    },
+    {
+      "id": "caravan-depth",
+      "name": "Caravan Depth",
+      "BG_A": {
+        "map": {
+          "symbol": "caravan_bg_a",
+          "type": "MAP"
+        },
+        "bands": [
+          {
+            "start": 0,
+            "end": 111,
+            "multiplier": 0.6
+          },
+          {
+            "start": 112,
+            "end": 223,
+            "multiplier": 1.25
+          }
+        ],
+        "wave": {
+          "preset": "jitter",
+          "start": 160,
+          "end": 223,
+          "amplitude": 1,
+          "wavelength": 24,
+          "speed": 2,
+          "fadeFrames": 0
+        }
+      },
+      "BG_B": {
+        "map": {
+          "symbol": "caravan_bg_b",
+          "type": "MAP"
+        },
+        "bands": [
+          {
+            "start": 0,
+            "end": 223,
+            "multiplier": 0.3
+          }
+        ],
+        "wave": {
+          "preset": "none"
+        }
+      },
+      "transition": "cut",
+      "fadeFrames": 0,
+      "bgm": {
+        "symbol": "bgm_caravan",
+        "type": "XGM2"
+      }
+    }
+  ]
+}

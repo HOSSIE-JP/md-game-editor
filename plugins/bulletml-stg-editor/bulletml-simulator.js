@@ -528,8 +528,11 @@ function runStageValidationMatrix(stageInput, compiledPatterns, options = {}) {
     let failure = '';
     let crc = 0xffffffff;
     const maxima = { bullets: 0, emitters: 0, contexts: 0, opcodes: 0, spawns: 0, pieces: 0, dots: 0 };
-    const sorted = stage.events.slice().sort((left, right) => left.spawnFrame - right.spawnFrame);
+    const sorted = stage.events
+      .filter((event) => ['spawn_enemy', 'spawn_boss', 'spawn_destructible'].includes(event.action?.type))
+      .sort((left, right) => (left.spawnFrame - right.spawnFrame) || (left.order - right.order) || String(left.id).localeCompare(String(right.id)));
     function startRuntime(event, patternId, frame, phase = 0) {
+      if (!patternId) return;
       const program = programs.get(patternId);
       if (!program) { failure ||= `missing pattern ${patternId}`; return; }
       const vm = new BulletmlVm(program.bytes || program, { seed: normalizeStageSeed(seed, event.id, phase) });

@@ -27,6 +27,7 @@ function browserVerification(rendererUrl, loadedProject) {
   const clone = (value) => JSON.parse(JSON.stringify(value));
   const root = document.querySelector('#root');
   let snapshot = clone(loadedProject.snapshot);
+  let automaticPreviewCount = 0;
   const guardHost = document.createElement('div');
   document.body.append(guardHost);
   const api = {
@@ -64,6 +65,19 @@ function browserVerification(rendererUrl, loadedProject) {
         throw new Error(`unexpected hook: ${hook}`);
       },
     },
+    capabilities: {
+      get(name) {
+        if (name !== 'rescomp-asset-picker') return null;
+        return {
+          async mountPreview(container, reference) {
+            automaticPreviewCount += 1;
+            container.innerHTML = `<p data-test-automatic-preview>${reference?.symbol || '未選択'}を自動プレビュー</p>`;
+          },
+          stopPreview() {},
+        };
+      },
+      async require(name) { return this.get(name); },
+    },
   };
   let capability = null;
   return import(rendererUrl).then(async ({ activatePlugin }) => {
@@ -74,6 +88,22 @@ function browserVerification(rendererUrl, loadedProject) {
     });
     await waitFor(() => document.querySelectorAll('[data-action="select-pattern"]').length === 5, 'initial pattern list');
     if (!capability) throw new Error('renderer capability was not registered');
+    const tabLabels = [...document.querySelectorAll('[data-page]')].map((button) => button.textContent.trim());
+    for (const label of ['作品設定', 'プレイヤー', '武器', 'アイテム', '演出', '移動', '敵', 'ボス', '背景・衝突', 'ステージ', 'デモ', '弾幕', '診断']) {
+      if (!tabLabels.includes(label)) throw new Error(`Japanese tab is missing: ${label}`);
+    }
+    if (document.querySelector('[data-v2-asset-action="preview"]')) throw new Error('manual Preview button must not exist');
+    click('[data-page="player"]');
+    await waitFor(() => document.querySelector('[data-section="player"]').classList.contains('active'), 'Player page');
+    if (!document.querySelector('[data-section="player"] .structured-form')) throw new Error('Player settings did not render as a GUI form');
+    if (!document.querySelector('[data-section="player"] .structured-help[title]')) throw new Error('Player GUI help tooltip is missing');
+    if (!document.querySelector('[data-section="player"] [data-v2-asset-option="animationRow"]')) throw new Error('Player animation row did not render as a GUI asset option');
+    await waitFor(() => automaticPreviewCount > 0 && document.querySelector('[data-test-automatic-preview]'), 'automatic asset preview');
+    click('[data-page="patterns"]');
+    await waitFor(() => document.querySelector('[data-section="patterns"]').classList.contains('active'), 'Patterns page');
+    if (!document.querySelector('[data-role="pattern-settings-form"] [data-structured-form="pattern-settings"]')) throw new Error('Pattern sprite and hitbox settings did not render as a GUI form');
+    if (!document.querySelector('[data-role="pattern-animation-row"]')) throw new Error('Pattern animation row GUI is missing');
+    if (!document.querySelector('[data-role="pattern-asset-preview"] [data-test-automatic-preview]')) throw new Error('Pattern asset did not open an automatic preview');
     const loop = document.querySelector('[data-role="preview-loop"]');
     if (!loop.checked) throw new Error('Preview loop must default to ON');
 
@@ -84,16 +114,18 @@ function browserVerification(rendererUrl, loadedProject) {
     click('[data-action="select-definition"][data-key="action:volley"]');
     click('[data-action="select-command"][data-command-path="definitions.1.commands.0"]');
     if (document.querySelector('[data-action="connect-ref"]').disabled) throw new Error('Ref connector did not become enabled for fireRef');
+    if (!document.querySelector('[data-role="command-form"] [data-structured-form="pattern-command"]')) throw new Error('Pattern command details did not render as a GUI form');
+    if (!document.querySelector('[data-role="command-form"] .structured-help[title]')) throw new Error('Pattern command tooltip is missing');
 
     const definitionFilter = document.querySelector('[data-role="definition-filter"]');
     definitionFilter.value = 'fire'; definitionFilter.dispatchEvent(new Event('change', { bubbles: true }));
     if (document.querySelectorAll('[data-role="definition-list"] [data-action="select-definition"]').length !== 1) throw new Error('Definition display filter failed');
     if (!document.querySelector('[data-role="edit-title"]').textContent.includes('volley')) throw new Error('Definition filter changed the editor selection');
     click('[data-action="select-definition"][data-key="fire:aimed-fire"]');
-    if (!document.querySelector('[data-action="apply-definition-properties"]')?.textContent.includes('Fire')) throw new Error('Fire definition did not render a structured form');
+    if (!document.querySelector('[data-action="apply-definition-properties"]')?.textContent.includes('発射')) throw new Error('Fire definition did not render a Japanese structured form');
     definitionFilter.value = 'bullet'; definitionFilter.dispatchEvent(new Event('change', { bubbles: true }));
     click('[data-action="select-definition"][data-key="bullet:payload"]');
-    if (!document.querySelector('[data-action="apply-definition-properties"]')?.textContent.includes('Bullet')) throw new Error('Bullet definition did not render a structured form');
+    if (!document.querySelector('[data-action="apply-definition-properties"]')?.textContent.includes('弾設定')) throw new Error('Bullet definition did not render a Japanese structured form');
 
     const name = document.querySelector('[data-role="pattern-name"]');
     name.value = 'Ref Showcase Renamed';
@@ -106,18 +138,30 @@ function browserVerification(rendererUrl, loadedProject) {
     click('[data-page="stages"]');
     click('[data-choice="discard"]');
     await waitFor(() => document.querySelector('[data-section="stages"]').classList.contains('active'), 'Stages page');
+    if (!document.querySelector('[data-role="stage-settings-form"] [data-structured-form="stage-settings"]')) throw new Error('Stage basic settings did not render as a GUI form');
+    if (!document.querySelector('[data-role="stage-collision-layer"]')) throw new Error('Stage collision layer GUI is missing');
+    if (!document.querySelector('[data-role="stage-asset-preview"] [data-test-automatic-preview]')) throw new Error('Stage collision map did not open an automatic preview');
+    for (const action of ['new-stage', 'delete-stage', 'restore-stage']) {
+      const selector = action === 'restore-stage' ? '[data-role="stage-deleted-list"]' : `[data-action="${action}"]`;
+      if (!document.querySelector(selector)) throw new Error(`Stage CRUD GUI is missing: ${action}`);
+    }
     if (!document.querySelector('[data-path-mode="selected"]').classList.contains('active')) throw new Error('selected-event path mode must be the default');
     click('[data-path-mode="all"]');
     if (!document.querySelector('[data-path-mode="all"]').classList.contains('active')) throw new Error('all-path mode did not activate');
 
-    click('[data-role="event-list"] [data-action="select-event"][data-index="6"]');
+    const bossButton = [...document.querySelectorAll('[data-role="event-list"] [data-action="select-event"]')]
+      .find((button) => button.textContent.includes('boss-gate'));
+    if (!bossButton) throw new Error('Showcase Boss event was not found');
+    bossButton.click();
+    if (!document.querySelector('[data-role="stage-form"] .structured-form')) throw new Error('Stage event did not render as a GUI form');
+    if (!document.querySelector('[data-role="stage-form"] .structured-help[title]')) throw new Error('Stage event tooltip is missing');
     const addPhase = document.querySelector('[data-action="add-phase"]');
     const removePhase = document.querySelector('[data-action="remove-phase"]');
-    if (!addPhase.disabled || removePhase.disabled) throw new Error('3-phase Boss button bounds are incorrect');
+    if (addPhase.disabled || removePhase.disabled || !document.querySelector('[data-role="phase-summary"]').textContent.includes('2/8')) throw new Error('initial Boss phase controls are incorrect');
     removePhase.click();
-    if (addPhase.disabled || !document.querySelector('[data-role="phase-summary"]').textContent.includes('2/3')) throw new Error('phase removal did not enable phase add');
-    addPhase.click();
-    if (!addPhase.disabled || !document.querySelector('[data-role="phase-summary"]').textContent.includes('3/3')) throw new Error('phase add did not restore the third phase');
+    if (addPhase.disabled || !removePhase.disabled || !document.querySelector('[data-role="phase-summary"]').textContent.includes('1/8')) throw new Error('one-phase lower bound is incorrect');
+    for (let index = 0; index < 7; index += 1) addPhase.click();
+    if (!addPhase.disabled || removePhase.disabled || !document.querySelector('[data-role="phase-summary"]').textContent.includes('8/8')) throw new Error('eight-phase upper bound is incorrect');
 
     click('[data-page="patterns"]');
     click('[data-choice="discard"]');
@@ -129,8 +173,13 @@ function browserVerification(rendererUrl, loadedProject) {
       expressionFits: expression.scrollWidth <= expression.clientWidth + 1,
     };
     if (layout.inspectorOverflowX !== 'hidden' || !layout.expressionFits) throw new Error(`Inspector overflow regression: ${JSON.stringify(layout)}`);
+    click('[data-page="demos"]');
+    await waitFor(() => document.querySelector('[data-section="demos"]').classList.contains('active'), 'Demos page');
+    if (!document.querySelector('[data-vn-commands-gui] .structured-form')) throw new Error('Demo commands did not render as a GUI form');
+    if (!document.querySelector('[data-vn-commands-gui] .structured-help[title]')) throw new Error('Demo command tooltip is missing');
+    if (!document.querySelector('[data-vn-binding-gui] .structured-form')) throw new Error('Demo binding extras did not render as a GUI form');
     lifecycle.deactivate();
-    return { ok: true, patternCount: 5, refEnabled: true, loopDefault: true, pathModes: ['selected', 'all'], bossPhaseBounds: [1, 3], layout };
+    return { ok: true, patternCount: 5, japaneseTabs: tabLabels.length, guiForms: ['player', 'pattern-settings', 'pattern-command', 'stage-settings', 'stage-event', 'demo-binding', 'demo-command'], automaticPreviewCount, refEnabled: true, loopDefault: true, pathModes: ['selected', 'all'], bossPhaseBounds: [1, 8], layout };
   });
 }
 

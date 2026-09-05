@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "canonicalSceneDocument": "assets/pce-vn-scenes.json",
+  "opening": "opening",
+  "stages": {
+    "stage-1-vertical": {
+      "pre": "pre-1",
+      "post": "post-1"
+    },
+    "stage-2-horizontal": {
+      "pre": "pre-2",
+      "post": "post-2"
+    },
+    "stage-3-giant": {
+      "pre": "pre-3",
+      "post": "post-3-choice"
+    }
+  },
+  "endings": {
+    "rescue": "ending-rescue",
+    "destroy": "ending-destroy"
+  },
+  "endingSelector": {
+    "flag": "abyss_choice",
+    "rescueWhen": true
+  },
+  "flags": [
+    "core_heard",
+    "abyss_choice",
+    "ending_rescue",
+    "ending_destroy"
+  ],
+  "font": {
+    "kind": "bundled",
+    "size": 16,
+    "subset": true,
+    "includeAscii": true
+  },
+  "caravan": {
+    "pre": "caravan-intro",
+    "result": "caravan-result"
+  }
+}

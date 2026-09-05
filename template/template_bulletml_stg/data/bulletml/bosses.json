@@ -1,0 +1,261 @@
+{
+  "schemaVersion": 2,
+  "kind": "bosses",
+  "entries": [
+    {
+      "id": "astral-gate",
+      "name": "ASTRAL GATE",
+      "sprite": {
+        "symbol": "boss_stage1",
+        "type": "SPRITE"
+      },
+      "hp": 180,
+      "score": 20000,
+      "hitbox": {
+        "x": 0,
+        "y": 0,
+        "radius": 24
+      },
+      "movementId": "boss-hover",
+      "patternId": "vertical-fan",
+      "drop": {
+        "itemId": "weapon-laser"
+      },
+      "explosionId": "boss-chain",
+      "se": {
+        "symbol": "bml_sfx_destroy",
+        "type": "WAV"
+      },
+      "parts": [
+        {
+          "id": "left-core",
+          "hp": 35,
+          "globalHpTransfer": 0.5,
+          "hitbox": {
+            "x": -24,
+            "y": 2,
+            "radius": 10
+          },
+          "explosionId": "single",
+          "disableEventId": "disable-left"
+        }
+      ],
+      "phases": [
+        {
+          "threshold": 100,
+          "patternId": "vertical-fan",
+          "movementId": "boss-hover",
+          "activeParts": [
+            "left-core"
+          ],
+          "clearBullets": false
+        },
+        {
+          "threshold": 55,
+          "patternId": "boss-split",
+          "movementId": "boss-hover",
+          "activeParts": [],
+          "clearBullets": true,
+          "rankOverride": 0.7
+        }
+      ]
+    },
+    {
+      "id": "golden-engine",
+      "name": "GOLDEN ENGINE",
+      "sprite": {
+        "symbol": "boss_stage2",
+        "type": "SPRITE"
+      },
+      "hp": 240,
+      "score": 30000,
+      "hitbox": {
+        "x": 0,
+        "y": 0,
+        "radius": 26
+      },
+      "movementId": "boss-hover",
+      "patternId": "horizontal-rank",
+      "drop": {
+        "itemId": "bomb-cell"
+      },
+      "explosionId": "boss-chain",
+      "se": {
+        "symbol": "bml_sfx_destroy",
+        "type": "WAV"
+      },
+      "parts": [
+        {
+          "id": "upper",
+          "hp": 45,
+          "globalHpTransfer": 0.35,
+          "hitbox": {
+            "x": 0,
+            "y": -18,
+            "radius": 11
+          },
+          "explosionId": "single",
+          "disableEventId": "engine-slow"
+        },
+        {
+          "id": "lower",
+          "hp": 45,
+          "globalHpTransfer": 0.35,
+          "hitbox": {
+            "x": 0,
+            "y": 18,
+            "radius": 11
+          },
+          "explosionId": "single",
+          "disableEventId": "engine-wave"
+        }
+      ],
+      "phases": [
+        {
+          "threshold": 100,
+          "patternId": "horizontal-rank",
+          "movementId": "boss-hover",
+          "activeParts": [
+            "upper",
+            "lower"
+          ],
+          "clearBullets": false
+        },
+        {
+          "threshold": 66,
+          "patternId": "ref-showcase",
+          "movementId": "boss-hover",
+          "activeParts": [
+            "lower"
+          ],
+          "wave": {
+            "preset": "shear",
+            "amplitude": 3,
+            "wavelength": 80,
+            "speed": 1
+          },
+          "clearBullets": true
+        },
+        {
+          "threshold": 33,
+          "patternId": "boss-split",
+          "movementId": "boss-hover",
+          "activeParts": [],
+          "clearBullets": true,
+          "rankOverride": 0.85
+        }
+      ]
+    },
+    {
+      "id": "abyss-core",
+      "name": "ABYSS CORE",
+      "sprite": {
+        "symbol": "boss_core",
+        "type": "SPRITE"
+      },
+      "hp": 168,
+      "score": 50000,
+      "hitbox": {
+        "x": 0,
+        "y": 0,
+        "radius": 30
+      },
+      "movementId": "giant-bg-drift",
+      "patternId": "boss-split",
+      "drop": null,
+      "explosionId": "boss-chain",
+      "se": {
+        "symbol": "bml_sfx_destroy",
+        "type": "WAV"
+      },
+      "giantBackground": true,
+      "parts": [
+        {
+          "id": "left-pylon",
+          "hp": 60,
+          "globalHpTransfer": 0.4,
+          "hitbox": {
+            "x": -88,
+            "y": 12,
+            "radius": 18
+          },
+          "explosionId": "boss-chain",
+          "disableEventId": "pylon-left-down",
+          "followBackground": true
+        },
+        {
+          "id": "right-pylon",
+          "hp": 60,
+          "globalHpTransfer": 0.4,
+          "hitbox": {
+            "x": 88,
+            "y": 12,
+            "radius": 18
+          },
+          "explosionId": "boss-chain",
+          "disableEventId": "pylon-right-down",
+          "followBackground": true
+        },
+        {
+          "id": "heart",
+          "hp": 120,
+          "globalHpTransfer": 1,
+          "hitbox": {
+            "x": 0,
+            "y": 0,
+            "radius": 20
+          },
+          "explosionId": "boss-chain",
+          "disableEventId": "core-open",
+          "followBackground": true
+        }
+      ],
+      "phases": [
+        {
+          "threshold": 100,
+          "patternId": "ref-showcase",
+          "movementId": "giant-bg-drift",
+          "activeParts": [
+            "left-pylon",
+            "right-pylon"
+          ],
+          "backgroundId": "giant-core",
+          "clearBullets": false
+        },
+        {
+          "threshold": 70,
+          "patternId": "vertical-fan",
+          "movementId": "giant-bg-drift",
+          "activeParts": [
+            "heart"
+          ],
+          "backgroundId": "giant-core",
+          "wave": {
+            "preset": "dual-sine",
+            "amplitude": 4,
+            "wavelength": 72,
+            "speed": 1.5
+          },
+          "clearBullets": true
+        },
+        {
+          "threshold": 35,
+          "patternId": "boss-split",
+          "movementId": "giant-bg-drift",
+          "activeParts": [
+            "heart"
+          ],
+          "backgroundId": "giant-core",
+          "wave": {
+            "preset": "ripple",
+            "amplitude": 6,
+            "wavelength": 48,
+            "speed": 2
+          },
+          "clearBullets": true,
+          "rankOverride": 1
+        }
+      ]
+    }
+  ]
+}

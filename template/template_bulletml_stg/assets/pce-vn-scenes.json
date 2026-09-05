@@ -1,0 +1,390 @@
+{
+  "version": 2,
+  "settings": {
+    "messageSpeedFrames": 2,
+    "messageAdvanceMode": "button",
+    "messageAutoWaitFrames": 60
+  },
+  "startScene": "opening",
+  "scenes": [
+    {
+      "id": "opening",
+      "name": "起動",
+      "commands": [
+        {
+          "type": "background",
+          "assetId": "bg_abyss",
+          "transition": "fade",
+          "fadeOutFrames": 16,
+          "fadeInFrames": 16,
+          "x": 0,
+          "y": 0,
+          "palette": "PAL0"
+        },
+        {
+          "type": "sprite",
+          "slot": 0,
+          "assetId": "sp_geroneko",
+          "x": 32,
+          "y": 24,
+          "animationId": "default",
+          "flipX": false,
+          "flipY": false,
+          "visible": true,
+          "palette": "PAL2"
+        },
+        {
+          "type": "audio",
+          "kind": "psg",
+          "action": "play",
+          "assetId": "demo_bgm",
+          "channel": 0,
+          "target": "bgm"
+        },
+        {
+          "type": "message",
+          "speaker": "ネコ型航宙機 GERONEKO",
+          "text": "星骸機関が再起動した。蒼紺の深淵へ潜航する。",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        },
+        {
+          "type": "wait",
+          "frames": 30
+        }
+      ],
+      "nextSceneId": ""
+    },
+    {
+      "id": "pre-1",
+      "name": "第一層",
+      "commands": [
+        {
+          "type": "background",
+          "assetId": "bg_abyss",
+          "transition": "fade",
+          "fadeOutFrames": 16,
+          "fadeInFrames": 16,
+          "x": 0,
+          "y": 0,
+          "palette": "PAL0"
+        },
+        {
+          "type": "message",
+          "speaker": "管制AI ミオ",
+          "text": "縦坑を降下。左右入力で機体姿勢が変わる。速度シフトを忘れないで。",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        }
+      ],
+      "nextSceneId": ""
+    },
+    {
+      "id": "post-1",
+      "name": "門の残響",
+      "commands": [
+        {
+          "type": "background",
+          "assetId": "bg_abyss",
+          "transition": "fade",
+          "fadeOutFrames": 16,
+          "fadeInFrames": 16,
+          "x": 0,
+          "y": 0,
+          "palette": "PAL0"
+        },
+        {
+          "type": "sprite",
+          "slot": 0,
+          "assetId": "sp_geroneko",
+          "x": 180,
+          "y": 24,
+          "animationId": "default",
+          "flipX": false,
+          "flipY": false,
+          "visible": true,
+          "palette": "PAL2"
+        },
+        {
+          "type": "spritemove",
+          "slot": 0,
+          "x": 120,
+          "y": 24,
+          "frames": 30
+        },
+        {
+          "type": "message",
+          "speaker": "GERONEKO",
+          "text": "門は破壊した。でも奥から、呼ぶ声がする。",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        }
+      ],
+      "nextSceneId": ""
+    },
+    {
+      "id": "pre-2",
+      "name": "第二層",
+      "commands": [
+        {
+          "type": "background",
+          "assetId": "bg_abyss",
+          "transition": "fade",
+          "fadeOutFrames": 16,
+          "fadeInFrames": 16,
+          "x": 0,
+          "y": 0,
+          "palette": "PAL0"
+        },
+        {
+          "type": "message",
+          "speaker": "ミオ",
+          "text": "横坑へ転進。上下一帯が衝突地形、金色機関の波形に注意。",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        }
+      ],
+      "nextSceneId": ""
+    },
+    {
+      "id": "post-2",
+      "name": "記憶片",
+      "commands": [
+        {
+          "type": "background",
+          "assetId": "bg_abyss",
+          "transition": "fade",
+          "fadeOutFrames": 16,
+          "fadeInFrames": 16,
+          "x": 0,
+          "y": 0,
+          "palette": "PAL0"
+        },
+        {
+          "type": "message",
+          "speaker": "星骸機関",
+          "text": "ワタシハ、捨テラレタ星ノ記憶。壊スノカ、救ウノカ。",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        },
+        {
+          "type": "variable",
+          "variableName": "core_heard",
+          "operation": "define",
+          "value": 1,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "nextSceneId": ""
+    },
+    {
+      "id": "pre-3",
+      "name": "最深部",
+      "commands": [
+        {
+          "type": "background",
+          "assetId": "bg_abyss",
+          "transition": "fade",
+          "fadeOutFrames": 16,
+          "fadeInFrames": 16,
+          "x": 0,
+          "y": 0,
+          "palette": "PAL0"
+        },
+        {
+          "type": "sprite",
+          "slot": 0,
+          "assetId": "sp_geroneko",
+          "x": 32,
+          "y": 24,
+          "animationId": "default",
+          "flipX": false,
+          "flipY": false,
+          "visible": true,
+          "palette": "PAL2"
+        },
+        {
+          "type": "message",
+          "speaker": "ミオ",
+          "text": "BG_Aそのものが巨大個体。画素ではなく追従Partsを狙って！",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        }
+      ],
+      "nextSceneId": ""
+    },
+    {
+      "id": "post-3-choice",
+      "name": "選択",
+      "commands": [
+        {
+          "type": "background",
+          "assetId": "bg_abyss",
+          "transition": "fade",
+          "fadeOutFrames": 16,
+          "fadeInFrames": 16,
+          "x": 0,
+          "y": 0,
+          "palette": "PAL0"
+        },
+        {
+          "type": "message",
+          "speaker": "星骸機関",
+          "text": "選ベ。ワタシヲ星空ヘ還スカ、永遠ニ停止スルカ。",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        },
+        {
+          "type": "variable",
+          "variableName": "abyss_choice",
+          "operation": "define",
+          "value": 0,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "type": "choice",
+          "variableName": "abyss_choice",
+          "defaultIndex": 0,
+          "choices": [
+            {
+              "label": "救済する",
+              "value": 1,
+              "targetSceneId": ""
+            },
+            {
+              "label": "破壊する",
+              "value": 0,
+              "targetSceneId": ""
+            }
+          ]
+        }
+      ],
+      "nextSceneId": ""
+    },
+    {
+      "id": "ending-rescue",
+      "name": "救済END",
+      "commands": [
+        {
+          "type": "background",
+          "assetId": "bg_abyss",
+          "transition": "fade",
+          "fadeOutFrames": 16,
+          "fadeInFrames": 16,
+          "x": 0,
+          "y": 0,
+          "palette": "PAL0"
+        },
+        {
+          "type": "message",
+          "speaker": "GERONEKO",
+          "text": "機関を開放する。記憶は新しい星座になって、深淵を照らした。",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        },
+        {
+          "type": "variable",
+          "variableName": "ending_rescue",
+          "operation": "define",
+          "value": 1,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "nextSceneId": ""
+    },
+    {
+      "id": "ending-destroy",
+      "name": "破壊END",
+      "commands": [
+        {
+          "type": "background",
+          "assetId": "bg_abyss",
+          "transition": "fade",
+          "fadeOutFrames": 16,
+          "fadeInFrames": 16,
+          "x": 0,
+          "y": 0,
+          "palette": "PAL0"
+        },
+        {
+          "type": "message",
+          "speaker": "GERONEKO",
+          "text": "機関を停止する。静寂の向こうで、最後の金色光が消えた。",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        },
+        {
+          "type": "variable",
+          "variableName": "ending_destroy",
+          "operation": "define",
+          "value": 1,
+          "min": 0,
+          "max": 1
+        }
+      ],
+      "nextSceneId": ""
+    },
+    {
+      "id": "caravan-intro",
+      "name": "CARAVAN",
+      "commands": [
+        {
+          "type": "background",
+          "assetId": "bg_abyss",
+          "transition": "fade",
+          "fadeOutFrames": 16,
+          "fadeInFrames": 16,
+          "x": 0,
+          "y": 0,
+          "palette": "PAL0"
+        },
+        {
+          "type": "message",
+          "speaker": "ミオ",
+          "text": "120秒の深度試験。時間切れで入力・敵・弾を即停止する。",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        }
+      ],
+      "nextSceneId": ""
+    },
+    {
+      "id": "caravan-result",
+      "name": "RESULT",
+      "commands": [
+        {
+          "type": "background",
+          "assetId": "bg_abyss",
+          "transition": "fade",
+          "fadeOutFrames": 16,
+          "fadeInFrames": 16,
+          "x": 0,
+          "y": 0,
+          "palette": "PAL0"
+        },
+        {
+          "type": "message",
+          "speaker": "ミオ",
+          "text": "試験終了。スコアと残りframeをSRAMへ記録した。",
+          "textColor": "#ffffff",
+          "voiceAssetId": "",
+          "mouthSlot": null
+        }
+      ],
+      "nextSceneId": ""
+    }
+  ]
+}

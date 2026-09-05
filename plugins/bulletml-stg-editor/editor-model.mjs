@@ -291,9 +291,11 @@ export function stagePathsForMode(events, selectedIndex, mode = 'selected') {
 
 export function addBossPhase(eventInput) {
   const event = clone(eventInput);
-  if (!event?.boss || !Array.isArray(event.phases) || event.phases.length >= 3) return event;
-  const previous = event.phases.at(-1)?.threshold ?? 100;
-  event.phases.push({ threshold: Math.max(1, previous - 33), patternId: event.patternId || '' });
+  if (!event?.boss || !Array.isArray(event.phases) || event.phases.length >= 8) return event;
+  const defaults = [100, 75, 60, 45, 30, 20, 10, 1];
+  const previous = Math.trunc(Number(event.phases.at(-1)?.threshold ?? 100));
+  const threshold = Math.max(0, Math.min(defaults[event.phases.length], previous - 1));
+  event.phases.push({ threshold, patternId: event.patternId || '' });
   return event;
 }
 

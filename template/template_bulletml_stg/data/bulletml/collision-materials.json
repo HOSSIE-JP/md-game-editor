@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 2,
+  "kind": "collision-materials",
+  "entries": [
+    {
+      "id": "none",
+      "name": "None",
+      "solid": false,
+      "damage": 0,
+      "masks": {
+        "player": false,
+        "enemy": false,
+        "playerShot": false,
+        "enemyShot": false
+      }
+    },
+    {
+      "id": "solid",
+      "name": "Solid Ruin",
+      "solid": true,
+      "damage": 0,
+      "masks": {
+        "player": true,
+        "enemy": true,
+        "playerShot": true,
+        "enemyShot": false
+      }
+    },
+    {
+      "id": "damage",
+      "name": "Abyss Current",
+      "solid": false,
+      "damage": 1,
+      "masks": {
+        "player": true,
+        "enemy": false,
+        "playerShot": false,
+        "enemyShot": false
+      }
+    }
+  ]
+}

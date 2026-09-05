@@ -6,9 +6,15 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 const manifest = require('./manifest.json');
 const service = require('../bulletml-stg-editor/bulletml-service');
+const documentService = require('../bulletml-stg-editor/stg-document-service');
 const compiler = require('../bulletml-stg-editor/bulletml-compiler');
 const simulator = require('../bulletml-stg-editor/bulletml-simulator');
 const schema = require('../bulletml-stg-editor/bulletml-schema');
+const vnService = require('../bulletml-stg-editor/stg-vn-service');
+const sharedVn = require('../shared/md-vn');
+const vnCompiler = require('../shared/md-vn/compiler');
+const vnRuntimeAssets = require('../shared/md-vn/runtime-assets');
+const tmxParser = require('../shared/tilemap/tmx-parser-core');
 
 const SOURCE_FILES = Object.freeze([
   'src/main.c',
@@ -16,6 +22,8 @@ const SOURCE_FILES = Object.freeze([
   'src/bulletml/bulletml_lut.c',
   'src/bulletml/bulletml_game.c',
   'src/generated/bulletml_catalog.c',
+  'src/novel_runtime/novel_runtime.c',
+  'src/generated/novel_data.c',
 ]);
 
 const STATIC_FILES = Object.freeze({
@@ -154,27 +162,36 @@ function staticAssets() {
   };
 }
 
-function bulletSpriteConfig(snapshot) {
+function bulletSpriteConfig(snapshot, projectDir = '') {
   const entries = [
     { path: 'project.defaultSprite', sprite: snapshot.project.defaultSprite },
     ...snapshot.patterns.map((pattern) => ({ path: `patterns.${pattern.id}.sprite`, sprite: pattern.sprite })),
   ];
   const first = entries[0].sprite;
-  const source = String(first.source || '').replace(/\\/g, '/').replace(/^res\//, '');
+  const symbol = String(first.asset?.symbol || '');
+  let source = '';
+  if (projectDir) {
+    const matches = documentService.buildAssetIndex(projectDir).index.get(symbol) || [];
+    if (matches.length !== 1) throw new Error(matches.length ? `ResComp弾sprite symbolが重複しています: ${symbol}` : `ResComp弾sprite symbolがありません: ${symbol}`);
+    if (String(matches[0].type || '').toUpperCase() !== 'SPRITE') throw new Error(`ResComp弾asset ${symbol} はSPRITEではありません`);
+    source = String(matches[0].sourcePath || '').replace(/\\/g, '/').replace(/^res\//, '');
+  }
   const frameWidth = Number(first.frameWidth);
   const frameHeight = Number(first.frameHeight);
   const frameCount = Number(first.frameCount);
   const tileCount = Number(first.tileCount);
   const errors = [];
-  const comparable = ['assetId', 'source', 'palette', 'frameWidth', 'frameHeight', 'frameCount', 'hardwarePieces', 'tileCount'];
+  const comparable = ['palette', 'frameWidth', 'frameHeight', 'frameCount', 'hardwarePieces', 'tileCount'];
   for (const entry of entries) {
+    if (String(entry.sprite.asset?.symbol || '') !== symbol || String(entry.sprite.asset?.type || '').toUpperCase() !== 'SPRITE') errors.push(`${entry.path}.asset: 全patternがproject.defaultSpriteと同じSPRITE symbolを使う必要があります`);
     for (const key of comparable) {
-      const left = key === 'source' ? String(entry.sprite[key] || '').replace(/\\/g, '/').replace(/^res\//, '') : entry.sprite[key];
-      const right = key === 'source' ? source : first[key];
+      const left = entry.sprite[key];
+      const right = first[key];
       if (String(left) !== String(right)) errors.push(`${entry.path}.${key}: v1 runtimeでは全patternがproject.defaultSpriteと同じ共有spriteを使う必要があります`);
     }
   }
-  if (!source || path.posix.isAbsolute(source) || source.split('/').includes('..')) errors.push('project.defaultSprite.source: res内の相対pathを指定してください');
+  if (!symbol) errors.push('project.defaultSprite.asset.symbol: SPRITE symbolを指定してください');
+  if (projectDir && (!source || path.posix.isAbsolute(source) || source.split('/').includes('..'))) errors.push('project.defaultSprite.asset: ResComp SPRITEのsourceがres内相対pathではありません');
   if (![8, 16, 24, 32].includes(frameWidth) || ![8, 16, 24, 32].includes(frameHeight)) errors.push('project.defaultSprite: frameは8〜32pxの8px単位で指定してください');
   if (!Number.isInteger(frameCount) || frameCount < 1 || frameCount > 255) errors.push('project.defaultSprite.frameCount: 1..255で指定してください');
   if (Number(first.hardwarePieces) !== 1) errors.push('project.defaultSprite.hardwarePieces: 1 hardware pieceだけ使用できます');
@@ -183,7 +200,7 @@ function bulletSpriteConfig(snapshot) {
   if (tileCount !== expectedTiles) errors.push(`project.defaultSprite.tileCount: ${expectedTiles}を指定してください`);
   if (expectedTiles > 128) errors.push(`project.defaultSprite.tileCount: ${expectedTiles} tileは上限128を超えています`);
   if (errors.length) throw new Error(`BulletML弾sprite契約に違反しています:\n${errors.join('\n')}`);
-  return { source, frameWidth, frameHeight, frameCount, tileCount, paletteFingerprint: String(first.paletteFingerprint || '') };
+  return { symbol, source, animationRow: Number(first.asset?.animationRow) || 0, frameWidth, frameHeight, frameCount, tileCount, paletteFingerprint: String(first.paletteFingerprint || '') };
 }
 
 function parseIndexedPng(buffer) {
@@ -223,7 +240,8 @@ function parseIndexedPng(buffer) {
   if (colorType !== 3 || ![1, 2, 4, 8].includes(bitDepth)) throw new Error('弾spriteはindexed-color PNGである必要があります');
   if (ihdr[10] !== 0 || ihdr[11] !== 0 || ihdr[12] !== 0) throw new Error('非標準compression/filterまたはinterlace PNGは使用できません');
   if (plte.length > 16 * 3) throw new Error(`弾sprite paletteは16色以下です（現在${plte.length / 3}色）`);
-  return { width, height, bitDepth, colors: plte.length / 3, paletteFingerprint: sha256(plte) };
+  const paletteRgb = Array.from({ length: plte.length / 3 }, (_, index) => [plte[index * 3], plte[index * 3 + 1], plte[index * 3 + 2]]);
+  return { width, height, bitDepth, colors: plte.length / 3, paletteFingerprint: sha256(plte), paletteRgb };
 }
 
 function generatedIndexedTileCount(buffer) {
@@ -254,6 +272,141 @@ function generatedIndexedTileCount(buffer) {
     tiles.add(Buffer.concat(rows).toString('hex'));
   }
   return tiles.size;
+}
+
+function readProjectJson(projectDir, relativePath) {
+  const target = vnService.resolveInside(projectDir, relativePath);
+  if (!fs.existsSync(target)) throw new Error(`${relativePath} がありません`);
+  try { return JSON.parse(fs.readFileSync(target, 'utf8')); }
+  catch (error) { throw new Error(`${relativePath}: JSON parse error: ${error.message}`); }
+}
+
+function resolveRegisteredAsset(assetIndex, symbol, type) {
+  const matches = assetIndex?.index?.get(symbol) || [];
+  const expected = String(type || '').toUpperCase();
+  const typed = matches.filter((entry) => !expected || String(entry.type || '').toUpperCase() === expected);
+  if (typed.length !== 1) throw new Error(`VN assetを一意に解決できません: ${symbol} (${expected || 'ANY'})`);
+  return typed[0];
+}
+
+function resolveMapTilesetAsset(projectDir, assetIndex, mapSymbol) {
+  const mapAsset = resolveRegisteredAsset(assetIndex, mapSymbol, 'MAP');
+  const root = path.resolve(projectDir);
+  const mapPath = path.resolve(mapAsset.sourceAbsolutePath);
+  const ensureInside = (target, label) => {
+    const resolved = path.resolve(target);
+    const relative = path.relative(root, resolved);
+    if (!relative || (!relative.startsWith('..') && !path.isAbsolute(relative))) return resolved;
+    throw new Error(`${label} がproject root外を参照しています: ${target}`);
+  };
+  const tmxText = fs.readFileSync(ensureInside(mapPath, 'TMX'), 'utf8');
+  const parsed = tmxParser.parseTmx(tmxText);
+  let imagePath;
+  if (parsed.tilesetSource) {
+    const tsxPath = ensureInside(path.resolve(path.dirname(mapPath), parsed.tilesetSource), 'TSX');
+    const tsx = tmxParser.parseTsx(fs.readFileSync(tsxPath, 'utf8'));
+    imagePath = ensureInside(path.resolve(path.dirname(tsxPath), tsx.imageSource), 'TSX image');
+  } else {
+    const image = /<tileset\b[^>]*>[\s\S]*?<image\b[^>]*\bsource\s*=\s*(["'])(.*?)\1/i.exec(tmxText);
+    if (!image) throw new Error(`TMX tileset imageを解決できません: ${mapSymbol}`);
+    imagePath = ensureInside(path.resolve(path.dirname(mapPath), image[2]), 'TMX image');
+  }
+  const candidates = [];
+  for (const [symbol, entries] of assetIndex?.index || []) {
+    for (const entry of entries) {
+      if (String(entry.type || '').toUpperCase() === 'TILESET' && path.resolve(entry.sourceAbsolutePath) === imagePath) candidates.push({ symbol, entry });
+    }
+  }
+  if (candidates.length !== 1) throw new Error(`MAP ${mapSymbol}のTSX imageに対応するTILESET assetを一意に登録してください: ${path.relative(root, imagePath)}`);
+  const info = parseIndexedPng(fs.readFileSync(imagePath));
+  if (info.width % 8 || info.height % 8) throw new Error(`MAP tilesetは8px gridである必要があります: ${mapSymbol}`);
+  const palette = info.paletteRgb.map(([red, green, blue]) => ((Math.round(blue * 7 / 255) << 9) | (Math.round(green * 7 / 255) << 5) | (Math.round(red * 7 / 255) << 1)));
+  while (palette.length < 16) palette.push(0);
+  return { symbol: candidates[0].symbol, imagePath, tileCount: (info.width / 8) * (info.height / 8), paletteFingerprint: info.paletteFingerprint, palette: palette.slice(0, 16) };
+}
+
+function prepareNovelIntegration(projectDir, snapshot, assetIndex) {
+  const validation = vnService.validateDemoBindings(projectDir, snapshot);
+  if (!validation.ok) {
+    const first = validation.diagnostics.find((entry) => entry.severity === 'error');
+    throw new Error(`BulletML Demo validation failed: ${first?.path || '-'}: ${first?.message || 'invalid scene'}`);
+  }
+  const sceneDocument = validation.canonical.sceneDocument;
+  const catalog = readProjectJson(projectDir, 'assets/pce-assets.json');
+  const backgroundSource = vnService.resolveInside(projectDir, 'assets/images/vn_abyss.png');
+  const spriteSource = vnService.resolveInside(projectDir, 'assets/sprites/vn_geroneko.png');
+  if (!fs.existsSync(backgroundSource) || !fs.existsSync(spriteSource)) throw new Error('VN Showcase画像assetがありません');
+  const demoMusic = resolveRegisteredAsset(assetIndex, 'bgm_demo', 'XGM2');
+  const backgroundPng = fs.readFileSync(backgroundSource);
+  const spritePng = fs.readFileSync(spriteSource);
+  const backgroundInfo = parseIndexedPng(backgroundPng);
+  const spriteInfo = parseIndexedPng(spritePng);
+  if (backgroundInfo.width !== 320 || backgroundInfo.height !== 224) throw new Error('VN backgroundは320x224 indexed 16色である必要があります');
+  if (spriteInfo.width !== 64 || spriteInfo.height !== 96) throw new Error('VN actorは64x96 indexed 16色である必要があります');
+
+  const targetProfile = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'template', 'template_md_novel', 'data', 'md-novel', 'target-profile.json'), 'utf8'));
+  targetProfile.coordinateMode = 'md-native-320';
+  targetProfile.video.legacyViewportX = 0;
+  const fontSource = fs.readFileSync(vnRuntimeAssets.bundledAtlasPath());
+  const plan = sharedVn.createFontSubsetPlan(sceneDocument, targetProfile.font, fontSource);
+  const fontPng = sharedVn.font.generateBundledAtlas(plan, fontSource);
+  const fontPlan = {
+    entries: plan.entries.map((entry) => ({ character: entry.character, code: entry.code })),
+    width: plan.width,
+    height: plan.height,
+    inputHash: plan.inputHash,
+  };
+  const bindings = {
+    schemaVersion: 1,
+    sourceSceneRevision: sharedVn.hashDocument(sceneDocument),
+    assets: {
+      bg_abyss: {
+        assetId: 'bg_abyss', sourceType: 'image', runtimeType: 'IMAGE', symbol: 'nov_stg_bg_abyss', palette: 'PAL0',
+        sourcePath: 'novel/backgrounds/abyss.png', originalSource: 'assets/images/vn_abyss.png', paletteFingerprint: backgroundInfo.paletteFingerprint,
+        metadata: { width: 320, height: 224, uniqueTiles: generatedIndexedTileCount(backgroundPng), paletteEntries: backgroundInfo.colors, paletteIndicesUsed: [2, 3, 4, 5, 6], transparent: false, frameWidth: 320, frameHeight: 224, maxNumTile: 0, maxNumSprite: 0, timing: '', collision: '' },
+      },
+      sp_geroneko: {
+        assetId: 'sp_geroneko', sourceType: 'sprite', runtimeType: 'SPRITE', symbol: 'nov_stg_sp_geroneko', palette: 'PAL2',
+        sourcePath: 'novel/sprites/geroneko.png', originalSource: 'assets/sprites/vn_geroneko.png', paletteFingerprint: spriteInfo.paletteFingerprint,
+        metadata: { width: 64, height: 96, uniqueTiles: generatedIndexedTileCount(spritePng), paletteEntries: spriteInfo.colors, paletteIndicesUsed: [0, 2, 3, 4, 5], transparent: true, frameWidth: 64, frameHeight: 96, maxNumTile: 96, maxNumSprite: 6, timing: '[[12]]', collision: 'NONE' },
+      },
+    },
+    audioVariants: {
+      'demo_bgm@0': { key: 'demo_bgm@0', assetId: 'demo_bgm', channel: 0, sourceType: 'psg-song', runtimeType: 'XGM2', symbol: 'nov_stg_demo_bgm', sourcePath: 'novel/music/demo.vgm', status: 'ready' },
+    },
+  };
+  for (const symbol of ['nov_stg_bg_abyss', 'nov_stg_sp_geroneko', 'nov_stg_demo_bgm', 'novel_font_subset', 'nov_msg_16x16', 'nov_msg_8x8']) {
+    const conflicts = (assetIndex?.index?.get(symbol) || []).filter((entry) => !/(?:^|[\\/])novel\.res$/i.test(String(entry.file || '')));
+    if (conflicts.length) throw new Error(`VN generated ResComp symbolが既存assetと衝突します: ${symbol}`);
+  }
+  const generated = vnCompiler.generateProject({ sceneDocument, catalog, bindings, fontPlan, targetProfile });
+  const files = {
+    ...vnRuntimeAssets.collectRuntimeFiles(),
+    ...generated.files,
+    'res/novel/font/generated.png': fontPng,
+    'res/novel/backgrounds/abyss.png': backgroundPng,
+    'res/novel/sprites/geroneko.png': spritePng,
+    'res/novel/music/demo.vgm': fs.readFileSync(demoMusic.sourceAbsolutePath),
+  };
+  for (const [relativePath, contents] of Object.entries(files)) {
+    service.atomicWriteFile(vnService.resolveInside(projectDir, relativePath), contents);
+  }
+  const sceneIndexes = Object.fromEntries((sceneDocument.scenes || []).map((scene, index) => [String(scene.id || ''), index]));
+  const variables = vnCompiler.collectVariableTable(sceneDocument);
+  const flagBindings = (snapshot.demoBindings.flags || []).map((name) => {
+    const variableIndex = variables.index.get(String(name));
+    if (!Number.isInteger(variableIndex)) throw new Error(`Demo flagに対応するVN variableがありません: ${name}`);
+    return { name: String(name), variableIndex };
+  });
+  return {
+    sceneDocument,
+    sceneIndexes,
+    flagBindings,
+    report: generated.report,
+    warnings: generated.warnings,
+    files: Object.keys(files).sort(),
+    sourceSceneRevision: bindings.sourceSceneRevision,
+  };
 }
 
 function parseLinkerRamSymbols(contents) {
@@ -344,10 +497,10 @@ function generateLutSource() {
 function cIdentifier(value) { return String(value || '').replace(/[^A-Za-z0-9_]/g, '_').replace(/^([0-9])/, '_$1'); }
 function cString(value) { return JSON.stringify(String(value || '')); }
 
-function selfTestCrc(pattern) {
+function selfTestCrc(pattern, rank = 0.5) {
   const compiled = compiler.compilePattern(pattern);
   const vm = new simulator.BulletmlVm(compiled.bytes, { seed: 0xace1 });
-  vm.setRank(0.5); vm.setPlayer(160, 196); vm.startEmitter({ x: 160, y: 28, orientation: 'vertical' });
+  vm.setRank(rank); vm.setPlayer(160, 196); vm.startEmitter({ x: 160, y: 28, orientation: 'vertical' });
   let crc = 0xffffffff;
   for (let frame = 0; frame < 10000; frame += 1) { vm.tick(); vm.applyDisplayBudget(); crc = vm.stateCrc(crc); }
   return { value: (crc ^ 0xffffffff) >>> 0, sha256: compiled.sha256 };
@@ -522,7 +675,7 @@ function writeDiagnosticLoadResources(projectDir, bundle) {
   return generatedFiles;
 }
 
-function generateCatalog(snapshot, bulletSprite = bulletSpriteConfig(snapshot)) {
+function generateLegacyCatalog(snapshot, bulletSprite = bulletSpriteConfig(snapshot)) {
   const diagnosticLoad = diagnosticLoadBundle(snapshot, bulletSprite);
   const patternIndexes = new Map(snapshot.patterns.map((pattern, index) => [pattern.id, index]));
   const patternLines = snapshot.patterns.map((pattern) => {
@@ -534,13 +687,13 @@ function generateCatalog(snapshot, bulletSprite = bulletSpriteConfig(snapshot)) 
     const name = `bml_${stage.orientation}_events`;
     const entries = stage.events.slice().sort((left, right) => left.spawnFrame - right.spawnFrame).map((event) => {
       const points = Array.from({ length: 8 }, (_, index) => event.path[index] || { x: 0, y: 0, frame: 0 }).map((point) => `{ ${Math.trunc(point.x)}, ${Math.trunc(point.y)}, ${Math.trunc(point.frame)} }`).join(', ');
-      const thresholds = Array.from({ length: 3 }, (_, index) => event.phases[index]?.threshold || 0).join(', ');
-      const phases = Array.from({ length: 3 }, (_, index) => patternIndexes.get(event.phases[index]?.patternId) ?? patternIndexes.get(event.patternId) ?? 0).join(', ');
-      return `    { ${event.spawnFrame}, ${event.hp}, ${event.score}, ${{ grunt: 0, turret: 1, boss: 2 }[event.enemyType] ?? 0}, ${event.boss ? 1 : 0}, ${patternIndexes.get(event.patternId) ?? 0}, ${event.path.length}, ${event.phases.length}, { ${points} }, { ${thresholds} }, { ${phases} } }`;
+      const thresholds = Array.from({ length: 8 }, (_, index) => event.phases[index]?.threshold || 0).join(', ');
+      const phases = Array.from({ length: 8 }, (_, index) => patternIndexes.get(event.phases[index]?.patternId) ?? patternIndexes.get(event.patternId) ?? 0).join(', ');
+      return `    { ${event.spawnFrame}, ${event.hp}, ${event.score}, ${{ grunt: 0, turret: 1, boss: 2 }[event.enemyType] ?? 0}, ${event.boss ? 1 : 0}, ${patternIndexes.get(event.patternId) ?? 0}, ${event.path.length}, ${Math.min(8, event.phases.length)}, { ${points} }, { ${thresholds} }, { ${phases} } }`;
     });
     return { name, source: `static const BML_GameEvent ${name}[${Math.max(1, entries.length)}] = {\n${entries.length ? entries.join(',\n') : '    { 0 }'}\n};`, count: entries.length, duration: stage.durationFrames, horizontal: stage.orientation === 'horizontal' };
   });
-  const test = selfTestCrc(snapshot.patterns[0]);
+  const test = selfTestCrc(snapshot.patterns[0], snapshot.project.rank);
   const source = `#include <genesis.h>\n#include <bulletml.h>\n#include "bulletml/bulletml_game.h"\n#include "generated/bulletml_catalog.h"\n\nconst BML_GamePattern bmlGamePatterns[${Math.max(1, patternLines.length)}] = {\n${patternLines.length ? patternLines.join(',\n') : '    { NULL, 0, "none", 0 }'}\n};\nconst u8 bmlGamePatternCount = ${patternLines.length};\n\n${eventArrays.map((entry) => entry.source).join('\n\n')}\n\nconst BML_GameStage bmlGameStages[2] = {\n${eventArrays.map((entry) => `    { ${entry.name}, ${entry.count}, ${entry.duration}, ${entry.horizontal ? 'TRUE' : 'FALSE'} }`).join(',\n')}\n};\n`;
   const header = `#ifndef GENERATED_BULLETML_CATALOG_H\n#define GENERATED_BULLETML_CATALOG_H\n\n#define BML_SELF_TEST_EXPECTED_CRC 0x${test.value.toString(16).padStart(8, '0').toUpperCase()}UL\n#define BML_SELF_TEST_PATTERN_INDEX 0\n#define BML_BULLET_FRAME_COUNT ${bulletSprite.frameCount}\n#define BML_BULLET_FRAME_TICKS 8\n\n#endif\n`;
   const diagnosticHeader = [
@@ -555,14 +708,240 @@ function generateCatalog(snapshot, bulletSprite = bulletSpriteConfig(snapshot)) 
   return { source, header: headerWithDiagnostics, selfTest: test, diagnosticLoad };
 }
 
+const CATALOG_LIMITS = Object.freeze({ emitters: 8, placements: 16, movementPoints: 16, bossParts: 16, phases: 8, bands: 8, next: 8, legacyPath: 8 });
+
+function collectionEntries(snapshot, kind) {
+  return Array.isArray(snapshot?.[kind]?.entries) ? snapshot[kind].entries : Array.isArray(snapshot?.collections?.[kind]?.entries) ? snapshot.collections[kind].entries : [];
+}
+
+function stableRuntimeId(snapshot, kind, id) {
+  if (!id) return 0;
+  const value = Number(snapshot?.runtimeIds?.catalogs?.[kind]?.[id]);
+  if (!Number.isInteger(value) || value < 1 || value > 255) throw new Error(`stable runtime IDがありません: ${kind}.${id}`);
+  return value;
+}
+
+function cBool(value) { return value ? 'TRUE' : 'FALSE'; }
+function q8(value) { return Math.max(-2147483648, Math.min(2147483647, Math.round(Number(value || 0) * 256))); }
+function q16Rank(value) { return value == null ? -1 : Math.max(0, Math.min(65535, Math.round(Number(value) * 65535))); }
+function cArray(items, size, fallback) { return Array.from({ length: size }, (_, index) => items[index] == null ? fallback : items[index]).join(', '); }
+function cResourceSymbol(value) {
+  const symbol = String(value || '').trim();
+  if (!symbol) return '';
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(symbol)) throw new Error(`ResComp symbolをC識別子として使用できません: ${symbol}`);
+  return symbol;
+}
+function spriteInitializer(value) {
+  const symbol = cResourceSymbol(value?.symbol);
+  return symbol ? `{ &${symbol}, ${Math.max(0, Math.min(255, Math.trunc(Number(value?.animationRow) || 0)))} }` : '{ NULL, 0 }';
+}
+function audioPointer(value) {
+  const symbol = cResourceSymbol(value?.symbol);
+  return symbol ? { pointer: symbol, size: `sizeof(${symbol})` } : { pointer: 'NULL', size: '0' };
+}
+function patternIndexFor(patternIndexes, id) { return patternIndexes.has(id) ? patternIndexes.get(id) : 255; }
+function interpolationCode(value) { return ({ step: 0, linear: 1, smoothstep: 2 })[value] ?? 0; }
+function waveCode(value) { return ({ none: 0, sine: 1, 'dual-sine': 2, ripple: 3, shear: 4, jitter: 5 })[value] ?? 0; }
+function waveInitializer(value = {}) {
+  return `{ ${waveCode(value.preset)}, ${Math.trunc(Number(value.start) || 0)}, ${Math.trunc(Number(value.end) || 0)}, ${q8(value.amplitude)}, ${Math.max(1, Math.trunc(Number(value.wavelength) || 64))}, ${q8(value.speed)}, ${Math.trunc(Number(value.fadeFrames) || 0)} }`;
+}
+function itemTypeCode(value) { return ({ weapon: 0, bomb: 1, score: 2 })[value] ?? 2; }
+
+function resourceHeaders(assetIndex) {
+  const names = new Set(['bulletml']);
+  for (const matches of assetIndex?.index?.values?.() || []) for (const entry of matches || []) {
+    const name = path.basename(String(entry.file || ''), path.extname(String(entry.file || '')));
+    if (name) names.add(name);
+  }
+  return Array.from(names).sort().map((name) => `#include <${name}.h>`).join('\n');
+}
+
+function buildCollisionCatalogs(snapshot, projectDir, assetIndex) {
+  if (!projectDir || !assetIndex) return [];
+  const solidId = stableRuntimeId(snapshot, 'collision-materials', 'solid');
+  const damageId = stableRuntimeId(snapshot, 'collision-materials', 'damage');
+  const result = [];
+  for (const stage of snapshot.stages || []) {
+    const reference = stage.collisionMap;
+    if (!reference?.symbol) continue;
+    const matches = assetIndex.index.get(reference.symbol) || [];
+    if (matches.length !== 1 || String(matches[0].type).toUpperCase() !== 'MAP') throw new Error(`collision MAP assetを一意に解決できません: ${reference.symbol}`);
+    const text = fs.readFileSync(matches[0].sourceAbsolutePath, 'utf8');
+    const map = tmxParser.parseTmx(text);
+    const layer = tmxParser.findLayer(map, reference.collisionLayer);
+    if (!layer) throw new Error(`collision layerがありません: ${reference.symbol}.${reference.collisionLayer}`);
+    const mapping = { 0: 0, 1: solidId, 2: damageId, 4: damageId };
+    const unknown = Array.from(new Set(layer.data.filter((value) => mapping[value] == null)));
+    if (unknown.length) throw new Error(`collision layerに未割当tile値があります: ${reference.symbol}.${layer.name} = ${unknown.join(', ')}`);
+    const values = layer.data.map((value) => mapping[value]);
+    const rle = tmxParser.encodeRle(values);
+    if (rle.length > 65535) throw new Error(`collision RLEが65535 byteを超えています: ${stage.id}`);
+    result.push({ stageId: stage.id, stageRuntimeId: stableRuntimeId(snapshot, 'stages', stage.id), width: map.width, height: map.height, tileWidth: map.tileWidth, tileHeight: map.tileHeight, layerName: layer.name, rle });
+  }
+  return result;
+}
+
+function generateCatalog(snapshot, bulletSprite = bulletSpriteConfig(snapshot), options = {}) {
+  const assetIndex = options.assetIndex || (options.projectDir ? documentService.buildAssetIndex(options.projectDir) : null);
+  const demo = options.demo || { sceneIndexes: {}, flagBindings: [] };
+  const demoSceneIndex = (sceneId) => Number.isInteger(demo.sceneIndexes?.[String(sceneId || '')]) ? demo.sceneIndexes[String(sceneId || '')] : -1;
+  const diagnosticLoad = diagnosticLoadBundle(snapshot, bulletSprite);
+  const patternIndexes = new Map(snapshot.patterns.map((pattern, index) => [pattern.id, index]));
+  const patternLines = snapshot.patterns.map((pattern) => {
+    const symbol = `bmlb_${cIdentifier(pattern.id)}`;
+    const byteLength = compiler.compilePattern(pattern).bytes.length;
+    return `    { ${symbol}, ${byteLength}, ${cString(pattern.id)}, ${{ none: 0, vertical: 1, horizontal: 2 }[pattern.type] ?? 0} }`;
+  });
+  const patternRuntimeIds = snapshot.patterns.map((pattern) => stableRuntimeId(snapshot, 'patterns', pattern.id));
+
+  const weapons = collectionEntries(snapshot, 'weapons');
+  const items = collectionEntries(snapshot, 'items');
+  const effects = collectionEntries(snapshot, 'effects');
+  const explosions = collectionEntries(snapshot, 'explosions');
+  const movements = collectionEntries(snapshot, 'movements');
+  const enemies = collectionEntries(snapshot, 'enemies');
+  const bosses = collectionEntries(snapshot, 'bosses');
+  const backgrounds = collectionEntries(snapshot, 'backgrounds');
+  const materials = collectionEntries(snapshot, 'collision-materials');
+  const enemyById = new Map(enemies.map((entry) => [entry.id, entry]));
+  const bossById = new Map(bosses.map((entry) => [entry.id, entry]));
+
+  const weaponLines = weapons.map((entry) => {
+    const emitters = (entry.emitters || []).slice(0, CATALOG_LIMITS.emitters).map((emitter) => `{ ${Math.trunc(Number(emitter.x) || 0)}, ${Math.trunc(Number(emitter.y) || 0)}, ${Math.trunc(Number(emitter.angle) || 0)} }`);
+    return `    { ${stableRuntimeId(snapshot, 'weapons', entry.id)}, ${cString(entry.id)}, ${cString(entry.name)}, ${spriteInitializer(entry.sprite)}, ${Math.trunc(entry.intervalFrames)}, ${Math.trunc(entry.damage)}, ${q8(entry.speed)}, ${Math.trunc(entry.simultaneous)}, ${Math.trunc(entry.duplicateScore)}, { ${cArray(emitters, CATALOG_LIMITS.emitters, '{ 0, 0, 0 }')} }, ${emitters.length} }`;
+  });
+  const itemLines = items.map((entry) => `    { ${stableRuntimeId(snapshot, 'items', entry.id)}, ${cString(entry.id)}, ${itemTypeCode(entry.type)}, ${spriteInitializer(entry.sprite)}, ${stableRuntimeId(snapshot, 'weapons', entry.weaponId)}, ${Math.trunc(entry.amount)}, ${Math.trunc(entry.score)} }`);
+  const effectLines = effects.map((entry) => {
+    const audio = audioPointer(entry.se);
+    return `    { ${stableRuntimeId(snapshot, 'effects', entry.id)}, ${cString(entry.id)}, ${spriteInitializer(entry.sprite)}, ${Math.trunc(entry.durationFrames)}, ${audio.pointer}, ${audio.size} }`;
+  });
+  const explosionLines = explosions.map((entry) => {
+    const placements = (entry.placements || []).slice(0, CATALOG_LIMITS.placements).map((placement) => `{ ${Math.trunc(placement.frame)}, ${stableRuntimeId(snapshot, 'effects', placement.effectId)}, ${Math.trunc(placement.x)}, ${Math.trunc(placement.y)} }`);
+    return `    { ${stableRuntimeId(snapshot, 'explosions', entry.id)}, ${cString(entry.id)}, { ${cArray(placements, CATALOG_LIMITS.placements, '{ 0, 0, 0, 0 }')} }, ${placements.length} }`;
+  });
+  const movementLines = movements.map((entry) => {
+    const points = (entry.waypoints || []).slice(0, CATALOG_LIMITS.movementPoints).map((point) => `{ ${Math.trunc(point.x)}, ${Math.trunc(point.y)}, ${Math.trunc(point.durationFrames)}, ${interpolationCode(point.interpolation)} }`);
+    return `    { ${stableRuntimeId(snapshot, 'movements', entry.id)}, ${cString(entry.id)}, ${cBool(entry.loop)}, { ${cArray(points, CATALOG_LIMITS.movementPoints, '{ 0, 0, 0, 0 }')} }, ${points.length} }`;
+  });
+  const enemyLines = enemies.map((entry) => {
+    const audio = audioPointer(entry.se);
+    return `    { ${stableRuntimeId(snapshot, 'enemies', entry.id)}, ${cString(entry.id)}, ${spriteInitializer(entry.sprite)}, ${Math.trunc(entry.hp)}, ${Math.trunc(entry.score)}, ${Math.trunc(entry.hitbox?.x || 0)}, ${Math.trunc(entry.hitbox?.y || 0)}, ${Math.trunc(entry.hitbox?.radius || 0)}, ${stableRuntimeId(snapshot, 'movements', entry.movementId)}, ${patternIndexFor(patternIndexes, entry.patternId)}, ${stableRuntimeId(snapshot, 'items', entry.drop?.itemId)}, ${stableRuntimeId(snapshot, 'explosions', entry.explosionId)}, ${audio.pointer}, ${audio.size}, ${cBool(entry.destructibleBackground)} }`;
+  });
+  const bossLines = bosses.map((entry) => {
+    const audio = audioPointer(entry.se);
+    const parts = (entry.parts || []).slice(0, CATALOG_LIMITS.bossParts).map((part) => `{ ${cString(part.id)}, ${Math.trunc(part.hp)}, ${q8(part.globalHpTransfer)}, ${Math.trunc(part.hitbox?.x || 0)}, ${Math.trunc(part.hitbox?.y || 0)}, ${Math.trunc(part.hitbox?.radius || 0)}, ${stableRuntimeId(snapshot, 'explosions', part.explosionId)}, ${cString(part.disableEventId)}, ${cBool(part.followBackground)} }`);
+    const partIndexes = new Map((entry.parts || []).slice(0, CATALOG_LIMITS.bossParts).map((part, index) => [part.id, index]));
+    const phases = (entry.phases || []).slice(0, CATALOG_LIMITS.phases).map((phase) => {
+      const active = Array.isArray(phase.activeParts) && phase.activeParts.length ? phase.activeParts : [...partIndexes.keys()];
+      const activePartMask = active.reduce((mask, id) => partIndexes.has(id) ? mask | (1 << partIndexes.get(id)) : mask, 0);
+      return `{ ${Math.trunc(phase.threshold)}, ${patternIndexFor(patternIndexes, phase.patternId)}, ${stableRuntimeId(snapshot, 'movements', phase.movementId)}, ${stableRuntimeId(snapshot, 'backgrounds', phase.backgroundId)}, ${activePartMask}, ${cBool(phase.clearBullets)}, ${q16Rank(phase.rankOverride)}, ${waveInitializer(phase.wave)} }`;
+    });
+    return `    { ${stableRuntimeId(snapshot, 'bosses', entry.id)}, ${cString(entry.id)}, ${spriteInitializer(entry.sprite)}, ${Math.trunc(entry.hp)}, ${Math.trunc(entry.score)}, ${Math.trunc(entry.hitbox?.radius || 0)}, ${stableRuntimeId(snapshot, 'movements', entry.movementId)}, ${patternIndexFor(patternIndexes, entry.patternId)}, ${stableRuntimeId(snapshot, 'items', entry.drop?.itemId)}, ${stableRuntimeId(snapshot, 'explosions', entry.explosionId)}, ${audio.pointer}, ${audio.size}, { ${cArray(parts, CATALOG_LIMITS.bossParts, '{ NULL, 0, 0, 0, 0, 0, 0, NULL, FALSE }')} }, ${parts.length}, { ${cArray(phases, CATALOG_LIMITS.phases, `{ 0, 255, 0, 0, 0, FALSE, -1, ${waveInitializer()} }`)} }, ${phases.length} }`;
+  });
+  const mapTilesets = new Map();
+  const mapTileset = (mapSymbol) => {
+    if (!mapTilesets.has(mapSymbol)) {
+      const resolved = resolveMapTilesetAsset(options.projectDir, assetIndex, mapSymbol);
+      resolved.paletteSymbol = `bml_bg_palette_${resolved.paletteFingerprint.slice(0, 12)}`;
+      mapTilesets.set(mapSymbol, resolved);
+    }
+    return mapTilesets.get(mapSymbol);
+  };
+  const planeInitializer = (plane = {}) => {
+    const mapSymbol = cResourceSymbol(plane.map?.symbol);
+    const tileset = mapSymbol ? mapTileset(plane.map.symbol) : null;
+    const bands = (plane.bands || []).slice(0, CATALOG_LIMITS.bands).map((band) => `{ ${Math.trunc(band.start)}, ${Math.trunc(band.end)}, ${q8(band.multiplier)} }`);
+    return `{ ${mapSymbol ? `&${mapSymbol}` : 'NULL'}, ${tileset ? `&${cResourceSymbol(tileset.symbol)}` : 'NULL'}, ${tileset ? tileset.paletteSymbol : 'NULL'}, { ${cArray(bands, CATALOG_LIMITS.bands, '{ 0, 0, 0 }')} }, ${bands.length}, ${waveInitializer(plane.wave)} }`;
+  };
+  const backgroundLines = backgrounds.map((entry) => {
+    const bgm = audioPointer(entry.bgm);
+    return `    { ${stableRuntimeId(snapshot, 'backgrounds', entry.id)}, ${cString(entry.id)}, ${planeInitializer(entry.BG_A)}, ${planeInitializer(entry.BG_B)}, ${entry.transition === 'fade' ? 1 : 0}, ${Math.trunc(entry.fadeFrames)}, ${bgm.pointer} }`;
+  });
+  const materialLines = materials.map((entry) => {
+    const mask = (entry.masks?.player ? 1 : 0) | (entry.masks?.enemy ? 2 : 0) | (entry.masks?.playerShot ? 4 : 0) | (entry.masks?.enemyShot ? 8 : 0);
+    return `    { ${stableRuntimeId(snapshot, 'collision-materials', entry.id)}, ${cString(entry.id)}, ${cBool(entry.solid)}, ${Math.trunc(entry.damage)}, ${mask} }`;
+  });
+
+  const backgroundTilesetEntries = [...mapTilesets.values()];
+  const uniqueBackgroundTilesets = [...new Map(backgroundTilesetEntries.map((entry) => [`${entry.symbol}:${entry.paletteFingerprint}`, entry])).values()];
+  const paletteBySymbol = new Map(backgroundTilesetEntries.map((entry) => [entry.paletteSymbol, entry.palette]));
+  const backgroundPaletteDefinitions = [...paletteBySymbol].map(([symbol, values]) => `const u16 ${symbol}[16] = { ${values.map((value) => `0x${value.toString(16).padStart(4, '0')}`).join(', ')} };`).join('\n');
+  const backgroundPaletteDeclarations = [...paletteBySymbol.keys()].map((symbol) => `extern const u16 ${symbol}[16];`).join('\n');
+  const planeReserve = (planeName) => Math.max(0, ...backgrounds.map((entry) => {
+    const symbol = entry?.[planeName]?.map?.symbol;
+    return symbol ? mapTileset(symbol).tileCount : 0;
+  }));
+  const bgATileReserve = planeReserve('BG_A');
+  const bgBTileReserve = planeReserve('BG_B');
+  if (bgATileReserve + bgBTileReserve + bulletSprite.tileCount > 900) throw new Error(`Background + bullet tile reserveが900 tileを超えています: ${bgATileReserve + bgBTileReserve + bulletSprite.tileCount}`);
+
+  const collisionCatalogs = buildCollisionCatalogs(snapshot, options.projectDir, assetIndex);
+  const collisionIndexByStage = new Map(collisionCatalogs.map((entry, index) => [entry.stageId, index]));
+  const collisionArrays = collisionCatalogs.map((entry, index) => `static const u8 bml_collision_rle_${index}[${Math.max(1, entry.rle.length)}] = { ${entry.rle.length ? entry.rle.join(', ') : '0'} };`);
+  const collisionLines = collisionCatalogs.map((entry, index) => `    { ${entry.stageRuntimeId}, ${entry.width}, ${entry.height}, ${entry.tileWidth}, ${entry.tileHeight}, bml_collision_rle_${index}, ${entry.rle.length}, ${cString(entry.layerName)} }`);
+
+  const typedActionCodes = { spawn_enemy: 0, spawn_boss: 1, spawn_destructible: 2, set_scroll: 3, set_background: 4, set_wave: 5, set_flag: 6, clear_bullets: 7, stage_clear: 8 };
+  const triggerCodes = { frame: 0, scroll: 1, condition: 2 };
+  const stageBundles = (snapshot.stages || []).map((stage, stageIndex) => {
+    const sorted = (stage.events || []).slice().sort((left, right) => (left.order - right.order) || String(left.id).localeCompare(String(right.id)));
+    const typed = sorted.map((event) => {
+      const action = event.action || {};
+      const trigger = event.trigger || {};
+      const triggerValue = trigger.type === 'scroll' ? q8(trigger.scroll) : q8(trigger.frame);
+      const spawnEnemy = action.type === 'spawn_enemy' || action.type === 'spawn_destructible';
+      const spawnBoss = action.type === 'spawn_boss';
+      const setBackground = action.type === 'set_background';
+      return `    { ${cString(event.id)}, ${Math.trunc(event.order)}, ${triggerCodes[trigger.type] ?? 0}, ${triggerValue}, ${cString(trigger.flag)}, ${cString(trigger.operator)}, ${trigger.type === 'condition' ? stableRuntimeId(snapshot, 'bosses', trigger.bossId) : 0}, ${typedActionCodes[action.type] ?? 0}, ${spawnEnemy ? stableRuntimeId(snapshot, 'enemies', action.enemyId) : 0}, ${spawnBoss ? stableRuntimeId(snapshot, 'bosses', action.bossId) : 0}, ${setBackground ? stableRuntimeId(snapshot, 'backgrounds', action.backgroundId) : 0}, ${(spawnEnemy || spawnBoss) ? stableRuntimeId(snapshot, 'movements', event.movementId || action.movementId) : 0}, ${(spawnEnemy || spawnBoss) ? stableRuntimeId(snapshot, 'items', event.dropItemId || action.itemId) : 0}, ${(spawnEnemy || spawnBoss) ? patternIndexFor(patternIndexes, event.patternId || action.patternId) : 255}, ${action.plane === 'BG_B' ? 1 : 0}, ${q8(action.value)}, ${Math.trunc(action.durationFrames)}, ${interpolationCode(action.interpolation)}, ${action.transition === 'fade' ? 1 : 0}, ${waveInitializer(action.wave)}, ${cString(action.flag)} }`;
+    });
+    const legacy = sorted.filter((event) => ['spawn_enemy', 'spawn_boss', 'spawn_destructible'].includes(event.action?.type)).map((event) => {
+      const isBoss = event.action.type === 'spawn_boss';
+      const entity = isBoss ? bossById.get(event.action.bossId) : enemyById.get(event.action.enemyId);
+      const points = (event.path || []).slice(0, CATALOG_LIMITS.legacyPath).map((point) => `{ ${Math.trunc(point.x)}, ${Math.trunc(point.y)}, ${Math.trunc(point.frame)}, ${interpolationCode(point.interpolation)} }`);
+      const phases = isBoss ? (entity?.phases || []) : (event.phases || []);
+      const thresholds = phases.slice(0, CATALOG_LIMITS.phases).map((phase) => Math.trunc(phase.threshold));
+      const phasePatterns = phases.slice(0, CATALOG_LIMITS.phases).map((phase) => patternIndexFor(patternIndexes, phase.patternId || event.patternId || entity?.patternId));
+      const entityId = isBoss ? event.action.bossId : event.action.enemyId;
+      return `    { ${Math.trunc(event.trigger?.frame ?? event.spawnFrame)}, ${Math.trunc(event.hp || entity?.hp || 1)}, ${Math.trunc(event.score || entity?.score || 0)}, ${isBoss ? 2 : entityId === 'turret' ? 1 : 0}, ${isBoss ? 1 : 0}, ${patternIndexFor(patternIndexes, event.patternId || entity?.patternId)}, ${points.length}, ${Math.min(CATALOG_LIMITS.phases, phases.length)}, { ${cArray(points, CATALOG_LIMITS.legacyPath, '{ 0, 0, 0, 0 }')} }, { ${cArray(thresholds, CATALOG_LIMITS.phases, '0')} }, { ${cArray(phasePatterns, CATALOG_LIMITS.phases, '255')} }, ${stableRuntimeId(snapshot, isBoss ? 'bosses' : 'enemies', entityId)}, ${stableRuntimeId(snapshot, 'movements', event.movementId || entity?.movementId)}, ${stableRuntimeId(snapshot, 'items', event.dropItemId || entity?.drop?.itemId)} }`;
+    });
+    const eventName = `bml_stage_${stageIndex}_events`;
+    const typedName = `bml_stage_${stageIndex}_typed`;
+    const next = (stage.next || []).slice(0, CATALOG_LIMITS.next).map((edge) => `{ ${stableRuntimeId(snapshot, 'stages', edge.stageId)}, ${cString(edge.flag)}, ${cBool(edge.equals)} }`);
+    const demoBinding = stage.caravan ? { pre: snapshot.demoBindings.caravan?.pre, post: snapshot.demoBindings.caravan?.result } : (snapshot.demoBindings.stages?.[stage.id] || {});
+    return {
+      definitions: `static const BML_GameEvent ${eventName}[${Math.max(1, legacy.length)}] = {\n${legacy.length ? legacy.join(',\n') : '    { 0 }'}\n};\nstatic const BML_StageEventV2 ${typedName}[${Math.max(1, typed.length)}] = {\n${typed.length ? typed.join(',\n') : '    { 0 }'}\n};`,
+      initializer: `    { ${eventName}, ${legacy.length}, ${Math.trunc(stage.durationFrames)}, ${cBool(stage.orientation === 'horizontal')}, ${stableRuntimeId(snapshot, 'stages', stage.id)}, ${stableRuntimeId(snapshot, 'backgrounds', stage.backgroundId)}, ${collisionIndexByStage.has(stage.id) ? collisionIndexByStage.get(stage.id) : 255}, ${typedName}, ${typed.length}, { ${cArray(next, CATALOG_LIMITS.next, '{ 0, NULL, FALSE }')} }, ${next.length}, ${cBool(stage.caravan)}, ${demoSceneIndex(demoBinding.pre)}, ${demoSceneIndex(demoBinding.post)}, ${cString(stage.id)}, ${cString(stage.name)} }`,
+    };
+  });
+
+  const initialWeaponRuntimeId = stableRuntimeId(snapshot, 'weapons', snapshot.player.initial.weaponId);
+  const playerLine = `{ ${spriteInitializer(snapshot.player.sprite)}, { ${snapshot.player.animation.vertical.negative}, ${snapshot.player.animation.vertical.neutral}, ${snapshot.player.animation.vertical.positive} }, { ${snapshot.player.animation.horizontal.negative}, ${snapshot.player.animation.horizontal.neutral}, ${snapshot.player.animation.horizontal.positive} }, ${Math.trunc(snapshot.player.hitbox.x)}, ${Math.trunc(snapshot.player.hitbox.y)}, ${Math.trunc(snapshot.player.hitbox.radius)}, { ${Math.trunc(snapshot.player.speeds.slow)}, ${Math.trunc(snapshot.player.speeds.normal)}, ${Math.trunc(snapshot.player.speeds.fast)} }, ${Math.trunc(snapshot.player.initial.lives)}, ${Math.trunc(snapshot.player.initial.bombs)}, ${initialWeaponRuntimeId}, ${{ slow: 0, normal: 1, fast: 2 }[snapshot.player.initial.speed] ?? 1} }`;
+  const test = selfTestCrc(snapshot.patterns[0], snapshot.project.rank);
+  const source = `#include <genesis.h>\n${resourceHeaders(assetIndex)}\n#include "bulletml/bulletml_game.h"\n#include "generated/bulletml_catalog.h"\n\nconst BML_GamePattern bmlGamePatterns[${Math.max(1, patternLines.length)}] = {\n${patternLines.length ? patternLines.join(',\n') : '    { NULL, 0, "none", 0 }'}\n};\nconst u8 bmlGamePatternCount = ${patternLines.length};\nconst u8 bmlPatternRuntimeIds[${Math.max(1, patternRuntimeIds.length)}] = { ${patternRuntimeIds.length ? patternRuntimeIds.join(', ') : '0'} };\n\n${stageBundles.map((bundle) => bundle.definitions).join('\n\n')}\n\nconst BML_GameStage bmlGameStages[${Math.max(1, stageBundles.length)}] = {\n${stageBundles.length ? stageBundles.map((bundle) => bundle.initializer).join(',\n') : '    { 0 }'}\n};\nconst u8 bmlGameStageCount = ${stageBundles.length};\n\nconst BML_PlayerConfig bmlPlayerConfig = ${playerLine};\nconst BML_WeaponConfig bmlWeapons[${Math.max(1, weaponLines.length)}] = {\n${weaponLines.length ? weaponLines.join(',\n') : '    { 0 }'}\n};\nconst u8 bmlWeaponCount = ${weaponLines.length};\nconst BML_ItemConfig bmlItems[${Math.max(1, itemLines.length)}] = {\n${itemLines.length ? itemLines.join(',\n') : '    { 0 }'}\n};\nconst u8 bmlItemCount = ${itemLines.length};\nconst BML_EffectConfig bmlEffects[${Math.max(1, effectLines.length)}] = {\n${effectLines.length ? effectLines.join(',\n') : '    { 0 }'}\n};\nconst u8 bmlEffectCount = ${effectLines.length};\nconst BML_ExplosionConfig bmlExplosions[${Math.max(1, explosionLines.length)}] = {\n${explosionLines.length ? explosionLines.join(',\n') : '    { 0 }'}\n};\nconst u8 bmlExplosionCount = ${explosionLines.length};\nconst BML_MovementConfig bmlMovements[${Math.max(1, movementLines.length)}] = {\n${movementLines.length ? movementLines.join(',\n') : '    { 0 }'}\n};\nconst u8 bmlMovementCount = ${movementLines.length};\nconst BML_EnemyConfig bmlEnemies[${Math.max(1, enemyLines.length)}] = {\n${enemyLines.length ? enemyLines.join(',\n') : '    { 0 }'}\n};\nconst u8 bmlEnemyCount = ${enemyLines.length};\nconst BML_BossConfig bmlBosses[${Math.max(1, bossLines.length)}] = {\n${bossLines.length ? bossLines.join(',\n') : '    { 0 }'}\n};\nconst u8 bmlBossCount = ${bossLines.length};\nconst BML_BackgroundConfig bmlBackgrounds[${Math.max(1, backgroundLines.length)}] = {\n${backgroundLines.length ? backgroundLines.join(',\n') : '    { 0 }'}\n};\nconst u8 bmlBackgroundCount = ${backgroundLines.length};\nconst BML_CollisionMaterial bmlCollisionMaterials[${Math.max(1, materialLines.length)}] = {\n${materialLines.length ? materialLines.join(',\n') : '    { 0 }'}\n};\nconst u8 bmlCollisionMaterialCount = ${materialLines.length};\n${collisionArrays.join('\n')}\nconst BML_CollisionMap bmlCollisionMaps[${Math.max(1, collisionLines.length)}] = {\n${collisionLines.length ? collisionLines.join(',\n') : '    { 0 }'}\n};\nconst u8 bmlCollisionMapCount = ${collisionLines.length};\n`;
+
+  const sourceWithDemo = `${source}${backgroundPaletteDefinitions}\nconst char * const bmlDemoFlagNames[${Math.max(1, demo.flagBindings.length)}] = { ${demo.flagBindings.length ? demo.flagBindings.map((entry) => cString(entry.name)).join(', ') : 'NULL'} };\nconst u16 bmlDemoFlagVariableIndexes[${Math.max(1, demo.flagBindings.length)}] = { ${demo.flagBindings.length ? demo.flagBindings.map((entry) => entry.variableIndex).join(', ') : '0'} };\n`;
+  const button = (value) => ({ A: 'BUTTON_A', B: 'BUTTON_B', C: 'BUTTON_C' })[value] || 'BUTTON_A';
+  const hasAsset = (symbol, type) => (assetIndex?.index?.get(symbol) || []).some((entry) => !type || String(entry.type).toUpperCase() === type);
+  const fallbackImages = hasAsset('bml_bg_vertical', 'IMAGE') && hasAsset('bml_bg_horizontal', 'IMAGE');
+  const shotSe = hasAsset('bml_sfx_shot', 'WAV');
+  const hitSe = hasAsset('bml_sfx_hit', 'WAV');
+  const destroySe = hasAsset('bml_sfx_destroy', 'WAV');
+  const diagnosticBgmSymbol = cResourceSymbol(backgrounds.find((entry) => entry.bgm?.symbol)?.bgm?.symbol);
+  const diagnosticPcmSymbol = cResourceSymbol(effects.find((entry) => entry.se?.symbol)?.se?.symbol || snapshot.project.bomb.se?.symbol);
+  const startStageRuntimeId = stableRuntimeId(snapshot, 'stages', snapshot.project.campaign.startStageId);
+  const caravanStageRuntimeId = stableRuntimeId(snapshot, 'stages', snapshot.project.caravan.stageId);
+  const resetWeapon = ({ retain: 0, initial: 1 })[snapshot.project.resetOnHit.weapon] ?? 0;
+  const resetSpeed = ({ retain: 0, slow: 1, normal: 2, fast: 3 })[snapshot.project.resetOnHit.speed] ?? 2;
+  const resetBombs = ({ retain: 0, initial: 1, zero: 2 })[snapshot.project.resetOnHit.bombs] ?? 1;
+  const bombEffectRuntimeId = stableRuntimeId(snapshot, 'effects', snapshot.project.bomb.effectId);
+  const header = `#ifndef GENERATED_BULLETML_CATALOG_H\n#define GENERATED_BULLETML_CATALOG_H\n\n${resourceHeaders(assetIndex)}\n\n#define BML_SCHEMA_VERSION 2\n#define BML_SELF_TEST_EXPECTED_CRC 0x${test.value.toString(16).padStart(8, '0').toUpperCase()}UL\n#define BML_SELF_TEST_PATTERN_INDEX 0\n#define BML_BULLET_SPRITE ${cResourceSymbol(snapshot.project.defaultSprite.asset.symbol)}\n#define BML_BULLET_ANIMATION_ROW ${Math.trunc(snapshot.project.defaultSprite.asset.animationRow || 0)}\n#define BML_BULLET_FRAME_COUNT ${bulletSprite.frameCount}\n#define BML_BULLET_FRAME_TICKS 8\n#define BML_FIXED_RANK_Q16 ${q16Rank(snapshot.project.rank)}\n#define BML_CAMPAIGN_ENABLED ${snapshot.project.modes.campaign ? 1 : 0}\n#define BML_CARAVAN_ENABLED ${snapshot.project.modes.caravan ? 1 : 0}\n#define BML_CAMPAIGN_START_STAGE_ID ${startStageRuntimeId}\n#define BML_CARAVAN_STAGE_ID ${caravanStageRuntimeId}\n#define BML_CARAVAN_TIME_LIMIT_FRAMES ${Math.trunc(snapshot.project.caravan.timeLimitFrames)}\n#define BML_CAMPAIGN_CONTINUES ${Math.trunc(snapshot.project.campaign.continues)}\n#define BML_POOL_PLAYER_SHOTS ${Math.trunc(snapshot.pools.playerShots)}\n#define BML_POOL_ENEMIES ${Math.trunc(snapshot.pools.enemies)}\n#define BML_POOL_ITEMS ${Math.trunc(snapshot.pools.items)}\n#define BML_POOL_EFFECTS ${Math.trunc(snapshot.pools.effects)}\n#define BML_POOL_BOSS_PARTS ${Math.trunc(snapshot.pools.bossParts)}\n#define BML_BOMB_INITIAL_STOCK ${Math.trunc(snapshot.project.bomb.initialStock)}\n#define BML_BOMB_MAX_STOCK ${Math.trunc(snapshot.project.bomb.maxStock)}\n#define BML_BOMB_DAMAGE ${Math.trunc(snapshot.project.bomb.damage)}\n#define BML_BOMB_CLEAR_BULLETS ${snapshot.project.bomb.clearEnemyBullets ? 1 : 0}\n#define BML_BOMB_INVINCIBLE_FRAMES ${Math.trunc(snapshot.project.bomb.invincibleFrames)}\n#define BML_BOMB_EFFECT_ID ${bombEffectRuntimeId}\n#define BML_HIT_RESET_WEAPON ${resetWeapon}\n#define BML_HIT_RESET_SPEED ${resetSpeed}\n#define BML_HIT_RESET_BOMBS ${resetBombs}\n#define BML_DEFAULT_SHOT_BUTTON ${button(snapshot.input.defaults.shot)}\n#define BML_DEFAULT_BOMB_BUTTON ${button(snapshot.input.defaults.bomb)}\n#define BML_DEFAULT_SPEED_BUTTON ${button(snapshot.input.defaults.speedShift)}\n#define BML_SAVE_VERSION ${Math.trunc(snapshot.save.version)}\n#define BML_SAVE_TOP_COUNT ${Math.trunc(snapshot.save.topCount)}\n#define BML_SAVE_MAGIC 0x${Buffer.from(String(snapshot.save.magic).padEnd(4, ' ').slice(0, 4), 'ascii').toString('hex').toUpperCase()}UL\n#define BML_HAS_FALLBACK_IMAGES ${fallbackImages ? 1 : 0}\n${fallbackImages ? '#define BML_VERTICAL_IMAGE bml_bg_vertical\n#define BML_HORIZONTAL_IMAGE bml_bg_horizontal' : ''}\n#define BML_HAS_SHOT_SE ${shotSe ? 1 : 0}\n${shotSe ? '#define BML_SHOT_SE bml_sfx_shot' : ''}\n#define BML_HAS_HIT_SE ${hitSe ? 1 : 0}\n${hitSe ? '#define BML_HIT_SE bml_sfx_hit' : ''}\n#define BML_HAS_DESTROY_SE ${destroySe ? 1 : 0}\n${destroySe ? '#define BML_DESTROY_SE bml_sfx_destroy' : ''}\n#define BML_HAS_DIAGNOSTIC_BGM ${diagnosticBgmSymbol ? 1 : 0}\n${diagnosticBgmSymbol ? `#define BML_DIAGNOSTIC_BGM ${diagnosticBgmSymbol}` : ''}\n#define BML_HAS_DIAGNOSTIC_PCM ${diagnosticPcmSymbol ? 1 : 0}\n${diagnosticPcmSymbol ? `#define BML_DIAGNOSTIC_PCM ${diagnosticPcmSymbol}` : ''}\n\n#define BML_DIAGNOSTIC_BURST_SIZE ${diagnosticLoad.burst.bytes.length}\n#define BML_DIAGNOSTIC_IDLE_SIZE ${diagnosticLoad.idle.bytes.length}\n#define BML_DIAGNOSTIC_LOAD_FRAMES ${diagnosticLoad.proof.frames}\n#define BML_DIAGNOSTIC_NTSC_SUBTICKS_PER_FRAME 1280\n\n#endif\n`;
+  const demoHeader = `#define BML_BG_A_TILE_RESERVE ${bgATileReserve}\n#define BML_BG_B_TILE_RESERVE ${bgBTileReserve}\n#define BML_GAME_SPRITE_VRAM_TILES 420\n${backgroundPaletteDeclarations}\n#define BML_DEMO_OPENING_SCENE ${demoSceneIndex(snapshot.demoBindings.opening)}\n#define BML_DEMO_ENDING_RESCUE_SCENE ${demoSceneIndex(snapshot.demoBindings.endings?.rescue)}\n#define BML_DEMO_ENDING_DESTROY_SCENE ${demoSceneIndex(snapshot.demoBindings.endings?.destroy)}\n#define BML_DEMO_ENDING_FLAG ${cString(snapshot.demoBindings.endingSelector?.flag)}\n#define BML_DEMO_ENDING_RESCUE_WHEN ${cBool(snapshot.demoBindings.endingSelector?.rescueWhen !== false)}\n#define BML_DEMO_CARAVAN_PRE_SCENE ${demoSceneIndex(snapshot.demoBindings.caravan?.pre)}\n#define BML_DEMO_CARAVAN_RESULT_SCENE ${demoSceneIndex(snapshot.demoBindings.caravan?.result)}\n#define BML_DEMO_FLAG_COUNT ${demo.flagBindings.length}\nextern const char * const bmlDemoFlagNames[${Math.max(1, demo.flagBindings.length)}];\nextern const u16 bmlDemoFlagVariableIndexes[${Math.max(1, demo.flagBindings.length)}];\n`;
+  const headerWithDemo = header.replace('#define BML_HAS_FALLBACK_IMAGES', `${demoHeader}#define BML_HAS_FALLBACK_IMAGES`);
+  return { source: sourceWithDemo, header: headerWithDemo, selfTest: test, diagnosticLoad, collisionCatalogs, backgroundTilesets: uniqueBackgroundTilesets.map((entry) => ({ symbol: entry.symbol, tileCount: entry.tileCount, paletteFingerprint: entry.paletteFingerprint })), backgroundTileReserve: { bgA: bgATileReserve, bgB: bgBTileReserve, bullet: bulletSprite.tileCount }, counts: { patterns: snapshot.patterns.length, stages: stageBundles.length, weapons: weapons.length, items: items.length, effects: effects.length, explosions: explosions.length, movements: movements.length, enemies: enemies.length, bosses: bosses.length, backgrounds: backgrounds.length, materials: materials.length, collisions: collisionCatalogs.length, demoScenes: Object.keys(demo.sceneIndexes || {}).length, demoFlags: demo.flagBindings.length } };
+}
+
 function syncStaticFiles(projectDir, bulletSprite) {
   for (const [target, source] of Object.entries(STATIC_FILES)) copyFile(path.join(templateRoot(), source), path.join(projectDir, target));
   service.atomicWriteFile(path.join(projectDir, 'src', 'bulletml', 'bulletml_lut.c'), generateLutSource());
-  for (const [relative, contents] of Object.entries(staticAssets())) {
-    if (relative === 'res/gfx/bulletml_bullet.png') continue;
-    service.atomicWriteFile(path.join(projectDir, relative), contents);
-  }
-  service.atomicWriteFile(path.join(projectDir, 'res', 'bulletml_game.res'), gameResourceSource(bulletSprite));
 }
 
 function duplicateAssetDiagnostics(assets) {
@@ -582,13 +961,15 @@ function prepareProject(projectDir, context = {}) {
   if (duplicates.length) return { ok: false, error: `ResComp symbolが重複しています:\n${duplicates.join('\n')}` };
   const preflight = service.validateProject(projectDir);
   if (!preflight.ok) return preflight;
-  const bulletSprite = bulletSpriteConfig(preflight.snapshot);
+  const bulletSprite = bulletSpriteConfig(preflight.snapshot, projectDir);
   ensureDefaultBulletAsset(projectDir, bulletSprite);
   const bulletAsset = validateBulletSpriteAsset(projectDir, preflight.snapshot, bulletSprite);
   const exported = service.exportBuild(projectDir, { frames: context.bulletmlValidationFrames || 3600 });
   if (!exported.ok) return exported;
   syncStaticFiles(projectDir, bulletSprite);
-  const catalog = generateCatalog(exported.snapshot, bulletAsset);
+  const assetIndex = documentService.buildAssetIndex(projectDir);
+  const demo = prepareNovelIntegration(projectDir, exported.snapshot, assetIndex);
+  const catalog = generateCatalog(exported.snapshot, bulletAsset, { projectDir, assetIndex, demo });
   const diagnosticFiles = writeDiagnosticLoadResources(projectDir, catalog.diagnosticLoad);
   exported.generatedFiles.push(...diagnosticFiles.filter((file) => !exported.generatedFiles.includes(file)));
   service.atomicWriteFile(path.join(projectDir, 'src', 'generated', 'bulletml_catalog.c'), catalog.source);
@@ -603,11 +984,12 @@ function prepareProject(projectDir, context = {}) {
     selfTestPatternBmlbSha256: catalog.selfTest.sha256,
     loadProbe: catalog.diagnosticLoad.proof,
   };
-  const fixedAssets = staticAssets();
   const backgroundTiles = {
-    vertical: generatedIndexedTileCount(fixedAssets['res/gfx/bml_bg_vertical.png']),
-    horizontal: generatedIndexedTileCount(fixedAssets['res/gfx/bml_bg_horizontal.png']),
+    bgAReserve: catalog.backgroundTileReserve.bgA,
+    bgBReserve: catalog.backgroundTileReserve.bgB,
+    tilesets: catalog.backgroundTilesets,
   };
+  const staticGameplayTiles = catalog.backgroundTileReserve.bgA + catalog.backgroundTileReserve.bgB + bulletAsset.tileCount;
   proof.runtime.vram = {
     systemTiles: 16,
     fontTiles: 96,
@@ -616,14 +998,21 @@ function prepareProject(projectDir, context = {}) {
     sharedBulletTiles: bulletAsset.tileCount,
     sharedBulletTileLimit: 128,
     backgroundTiles,
+    staticGameplayTiles,
+    staticGameplayTileLimit: 900,
+    demoMaxTiles: demo.report.budget.maxBudget,
     worstCaseHardwareSprites: 62,
     h40HardwareSpriteLimit: 80,
-    withinBudget: bulletAsset.tileCount <= 128 && Math.max(backgroundTiles.vertical, backgroundTiles.horizontal) + bulletAsset.tileCount <= 158 && 44 <= 420 && 62 <= 80,
+    withinBudget: bulletAsset.tileCount <= 128 && staticGameplayTiles <= 900 && demo.report.budget.maxBudget <= 1024 && 44 <= 420 && 62 <= 80,
   };
+  proof.runtime.catalogs = catalog.counts;
+  proof.runtime.demo = { sourceSceneRevision: demo.sourceSceneRevision, scenes: demo.report.scenes, commands: demo.report.commands, glyphs: demo.report.glyphs, variables: demo.report.variables, flags: demo.flagBindings.length, generatedFiles: demo.files };
+  proof.runtime.collision = catalog.collisionCatalogs.map((entry) => ({ stageId: entry.stageId, width: entry.width, height: entry.height, layerName: entry.layerName, rawBytes: entry.width * entry.height, rleBytes: entry.rle.length }));
   proof.bulletSprite = bulletAsset;
   service.atomicWriteFile(proofPath, `${JSON.stringify(proof, null, 2)}\n`);
-  context.logger?.info?.(`BulletML BMLB ${exported.snapshot.patterns.length}件、48弾/5 emitter/16 burst診断、runtime、固定background/audio/enemy素材を同期し、共有弾spriteを検証しました`);
-  return { ok: true, exported, catalog, bulletAsset, diagnosticLoad: catalog.diagnosticLoad, sourceFiles: SOURCE_FILES.slice(), proof };
+  context.logger?.info?.(`BulletML v2 catalog ${exported.snapshot.stages.length} stage、BMLB ${exported.snapshot.patterns.length}件、TMX collision ${catalog.collisionCatalogs.length}件、VN ${demo.report.scenes} sceneを生成しました`);
+  for (const warning of demo.warnings || []) context.logger?.warn?.(`BulletML VN: ${warning.message || warning.code || warning}`);
+  return { ok: true, exported, catalog, demo, bulletAsset, diagnosticLoad: catalog.diagnosticLoad, sourceFiles: SOURCE_FILES.slice(), proof };
 }
 
 function generateSource(_assets = [], context = {}) {
@@ -651,7 +1040,9 @@ function onBuildEnd(payload = {}, context = {}) {
     if (!projectDir || !romPath || !fs.existsSync(romPath)) return { ok: true };
     const proofPath = path.join(projectDir, 'data', 'bulletml', 'proof.json');
     const proof = JSON.parse(fs.readFileSync(proofPath, 'utf8'));
-    proof.rom = { path: path.relative(projectDir, romPath).replace(/\\/g, '/'), bytes: fs.statSync(romPath).size, sha256: sha256(fs.readFileSync(romPath)) };
+    const romBytes = fs.statSync(romPath).size;
+    if (romBytes > 4 * 1024 * 1024) throw new Error(`BulletML ROMが4 MiB上限を超えています: ${romBytes} bytes`);
+    proof.rom = { path: path.relative(projectDir, romPath).replace(/\\/g, '/'), bytes: romBytes, limitBytes: 4 * 1024 * 1024, sha256: sha256(fs.readFileSync(romPath)) };
     const symbolPath = payload.symbolPath || path.join(path.dirname(romPath), 'symbol.txt');
     if (!fs.existsSync(symbolPath)) throw new Error(`BulletML RAM proofにsymbol.txtが必要です: ${symbolPath}`);
     proof.runtime.ram = parseLinkerRamSymbols(fs.readFileSync(symbolPath, 'utf8'));
@@ -679,6 +1070,7 @@ module.exports = {
   bulletSpriteConfig,
   parseIndexedPng,
   generatedIndexedTileCount,
+  prepareNovelIntegration,
   parseLinkerRamSymbols,
   validateBulletSpriteAsset,
   gameResourceSource,

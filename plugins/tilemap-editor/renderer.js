@@ -94,6 +94,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     getMap: () => structuredCloneSafe(state.map),
     save: () => saveMap(),
     registerResources: () => registerMapResource(),
+    openMap,
   });
 
   logger.debug('tilemap-editor renderer activated');
@@ -428,6 +429,26 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     scheduleInitialRightPanelHeights();
     syncRightAccordion();
     setStatus(`TILESET ${countEntries(TILE_TYPES)} 件 / MAP ${countEntries(MAP_TYPES)} 件`);
+  }
+
+  async function openMap({ symbol, collisionLayer = '' } = {}) {
+    const requested = String(symbol || '').trim();
+    if (!requested) return { ok: false, error: 'MAP/TILEMAP symbolが必要です' };
+    if (state.dirty && !await confirmCanReplaceCurrentMap()) return { ok: false, canceled: true };
+    await refresh();
+    const matches = state.files.flatMap((file) => file.entries.map((entry) => ({ file, entry })))
+      .filter((item) => MAP_TYPES.has(String(item.entry.type || '').toUpperCase()) && item.entry.name === requested);
+    if (!matches.length) return { ok: false, error: `MAP/TILEMAP symbolがありません: ${requested}` };
+    if (matches.length > 1) return { ok: false, error: `MAP/TILEMAP symbolが重複しています: ${requested}` };
+    api.pages.open(plugin.id);
+    await requestSelectAsset(assetKey(matches[0].file.file, matches[0].entry));
+    if (collisionLayer) {
+      const index = (state.map.layers || []).findIndex((layer) => layer.name === collisionLayer || layer.name === `Collision:${collisionLayer}`);
+      if (index < 0) return { ok: false, error: `collision layerがありません: ${collisionLayer}`, symbol: requested };
+      state.selectedLayer = index;
+      renderAll();
+    }
+    return { ok: true, symbol: requested, collisionLayer, map: structuredCloneSafe(state.map) };
   }
 
   async function selectAsset(key) {

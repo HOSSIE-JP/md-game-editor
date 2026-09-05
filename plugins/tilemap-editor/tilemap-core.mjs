@@ -1,3 +1,8 @@
+import '../shared/tilemap/tmx-parser-core.js';
+
+const sharedTmxParser = globalThis.MdGameEditorTmxParser;
+if (!sharedTmxParser) throw new Error('shared TMX parser failed to load');
+
 export const DEFAULT_TILEMAP = {
   name: 'map001',
   width: 40,
@@ -153,84 +158,7 @@ export function parseTsx(text) {
   };
 }
 
-export function parseTmx(text) {
-  const warnings = [];
-  const root = matchTag(text, 'map');
-  if (!root) throw new Error('TMX map element not found');
-  const attrs = parseAttrs(root.attrs);
-  if (attrs.orientation && attrs.orientation !== 'orthogonal') {
-    warnings.push(`未対応 orientation: ${attrs.orientation}`);
-  }
-  if (attrs.infinite === '1') {
-    warnings.push('infinite map は v1 では保存対象外です');
-  }
-  if (/<chunk\b/i.test(root.body)) {
-    warnings.push('chunked layer data は v1 では保存対象外です');
-  }
-  if (/<objectgroup\b/i.test(root.body)) {
-    warnings.push('object layer は v1.1 候補です。読み込み時は保持しません');
-  }
-  if (/<imagelayer\b/i.test(root.body) || /<group\b/i.test(root.body)) {
-    warnings.push('image/group layer は v1 では保存対象外です');
-  }
-
-  const tilesets = matchTilesetTags(root.body).map((tilesetTag) => {
-    const tilesetAttrs = parseAttrs(tilesetTag.attrs);
-    return {
-      firstgid: clampInt(tilesetAttrs.firstgid, 1, 65535, 1),
-      source: tilesetAttrs.source || '',
-      name: sourceBaseName(tilesetAttrs.source || 'tileset001'),
-    };
-  });
-  const firstTileset = tilesets[0] || { firstgid: 1, source: '', name: 'tileset001' };
-  const width = clampInt(attrs.width, 1, 4096, DEFAULT_TILEMAP.width);
-  const height = clampInt(attrs.height, 1, 4096, DEFAULT_TILEMAP.height);
-  const layers = [];
-  const layerRe = /<layer\b([^>]*)>([\s\S]*?)<\/layer>/gi;
-  let layerMatch;
-  while ((layerMatch = layerRe.exec(root.body))) {
-    const layerAttrs = parseAttrs(layerMatch[1]);
-    const dataTag = matchTag(layerMatch[2], 'data');
-    if (!dataTag) {
-      warnings.push(`layer '${layerAttrs.name || ''}' に data がありません`);
-      continue;
-    }
-    const dataAttrs = parseAttrs(dataTag.attrs);
-    if (String(dataAttrs.encoding || '').toLowerCase() !== 'csv') {
-      warnings.push(`layer '${layerAttrs.name || ''}' は CSV encoding ではありません`);
-      continue;
-    }
-    if (dataAttrs.compression) {
-      warnings.push(`layer '${layerAttrs.name || ''}' は compressed data です`);
-      continue;
-    }
-    layers.push({
-      name: layerAttrs.name || `Layer ${layers.length + 1}`,
-      visible: layerAttrs.visible !== '0' || isCollisionLayerName(layerAttrs.name || ''),
-      opacity: Number(layerAttrs.opacity || 1),
-      priority: /\s(priority|prio)$/i.test(layerAttrs.name || ''),
-      collision: isCollisionLayerName(layerAttrs.name || ''),
-      data: normalizeLayerData(parseCsvLayer(dataTag.body), width, height),
-    });
-  }
-
-  if (layers.length === 0) {
-    layers.push({ name: 'Ground', visible: true, opacity: 1, priority: false, collision: false, data: new Array(width * height).fill(0) });
-  }
-
-  return {
-    name: 'map001',
-    width,
-    height,
-    tileWidth: clampInt(attrs.tilewidth, 1, 1024, DEFAULT_TILEMAP.tileWidth),
-    tileHeight: clampInt(attrs.tileheight, 1, 1024, DEFAULT_TILEMAP.tileHeight),
-    tilesetSource: firstTileset.source || '',
-    tilesetName: firstTileset.name,
-    tilesets,
-    layers,
-    warnings,
-  };
-}
+export const parseTmx = sharedTmxParser.parseTmx;
 
 export function formatCsvLayer(data, width, height) {
   const normalized = normalizeLayerData(data, width, height);

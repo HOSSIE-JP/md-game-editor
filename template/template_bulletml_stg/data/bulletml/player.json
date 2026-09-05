@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "id": "player",
+  "name": "GERONEKO",
+  "sprite": {
+    "symbol": "player_ship",
+    "type": "SPRITE",
+    "animationRow": 1
+  },
+  "animation": {
+    "axis": "stage",
+    "vertical": {
+      "negative": 0,
+      "neutral": 1,
+      "positive": 2
+    },
+    "horizontal": {
+      "negative": 3,
+      "neutral": 4,
+      "positive": 5
+    }
+  },
+  "hitbox": {
+    "x": 0,
+    "y": 0,
+    "radius": 3
+  },
+  "speeds": {
+    "slow": 96,
+    "normal": 160,
+    "fast": 224,
+    "unit": "q8-pixels-per-frame"
+  },
+  "initial": {
+    "lives": 3,
+    "bombs": 3,
+    "weaponId": "needle",
+    "speed": "normal"
+  }
+}

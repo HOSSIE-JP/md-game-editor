@@ -27,6 +27,7 @@ import {
 import { simulateScene } from './preview-core.mjs';
 import { collectVisualAssetIds, drawSubsetFontPreviews, drawNovelFrame } from './rendering.mjs';
 import { openNovelPreview } from './preview-window.mjs';
+import { mountSharedVnEditor } from '../shared/md-vn/editor-component.mjs';
 
 const STORAGE_PREFIX = 'md-novel-editor.pce-ui.v1';
 const HISTORY_LIMIT = 100;
@@ -1633,6 +1634,11 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     requestSave: saveCurrent,
     getDirtyState: () => ({ dirty: state.dirty, sceneId: state.selectedSceneId, commandIndex: state.selectedCommandIndex }),
     async openScene(sceneId, commandIndex = 0) { if (!await selectScene(sceneId)) return false; selectCommand(commandIndex); return true; },
+    mountSharedEditor(options = {}) { return mountSharedVnEditor(options); },
+  });
+
+  registerCapability('md-vn-common', {
+    mountEditor: mountSharedVnEditor,
   });
 
   void loadFromDisk();

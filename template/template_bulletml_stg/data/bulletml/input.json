@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "defaults": {
+    "shot": "A",
+    "bomb": "B",
+    "speedShift": "C"
+  },
+  "remappable": [
+    "shot",
+    "bomb",
+    "speedShift"
+  ],
+  "buttons": [
+    "A",
+    "B",
+    "C"
+  ],
+  "rejectDuplicates": true,
+  "persistInSram": true
+}

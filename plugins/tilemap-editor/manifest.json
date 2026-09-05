@@ -2,7 +2,7 @@
   "id": "tilemap-editor",
   "name": "TileMap エディタ",
   "description": "Tiled 互換の TMX/TSX サブセットを編集し、SGDK ResComp の TILESET / TILEMAP / MAP 定義へ登録します。",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "icon": "grid",
   "types": ["editor", "asset"],
   "permissions": ["project.read", "project.write", "dialog.openFile", "res.read", "res.write"],

@@ -52,6 +52,7 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
     root,
     refresh,
     getSelectedSprite: () => getSelectedSprite(),
+    openSprite,
   });
 
   bindEvents();
@@ -260,6 +261,20 @@ export function activatePlugin({ plugin, root, api, logger, registerCapability }
       await selectSprite(state.selectedKey, { keepTree: true });
     }
     setStatus(`SPRITE ${countSprites()} 件`);
+  }
+
+  async function openSprite({ symbol } = {}) {
+    const requested = String(symbol || '').trim();
+    if (!requested) return { ok: false, error: 'SPRITE symbolが必要です' };
+    if (state.dirty && !await confirmCanReplaceCurrentSprite()) return { ok: false, canceled: true };
+    await refresh();
+    const matches = state.files.flatMap((file) => file.entries.map((entry) => ({ file, entry }))).filter((item) => item.entry.name === requested);
+    if (!matches.length) return { ok: false, error: `SPRITE symbolがありません: ${requested}` };
+    if (matches.length > 1) return { ok: false, error: `SPRITE symbolが重複しています: ${requested}` };
+    api.pages.open(plugin.id);
+    const key = spriteKey(matches[0].file.file, matches[0].entry);
+    await requestSelectSprite(key);
+    return { ok: true, symbol: requested, sprite: getSelectedSprite() };
   }
 
   async function requestSelectSprite(key) {

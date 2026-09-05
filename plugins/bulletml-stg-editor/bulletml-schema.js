@@ -2,8 +2,9 @@
 
 const crypto = require('node:crypto');
 const expression = require('./bulletml-expression');
+const hostSchema = require('./stg-schema-v2');
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = hostSchema.SCHEMA_VERSION;
 const PATTERN_TYPES = Object.freeze(['none', 'vertical', 'horizontal']);
 const DEFINITION_KINDS = Object.freeze(['action', 'bullet', 'fire']);
 const DIRECTION_TYPES = Object.freeze(['aim', 'absolute', 'relative', 'sequence']);
@@ -24,12 +25,11 @@ const LIMITS = Object.freeze({
   contexts: 106,
   spawnsPerFrame: 16,
   opcodesPerFrame: 512,
-  stages: Object.freeze({ events: 64, activeNormalEnemies: 4, activeBosses: 1, waypoints: 8, bossPhases: 3 }),
+  stages: Object.freeze({ events: 255, activeNormalEnemies: 12, activeBosses: 1, waypoints: 32, bossPhases: 8 }),
 });
 
 const DEFAULT_SPRITE = Object.freeze({
-  assetId: 'bulletml_bullet',
-  source: 'gfx/bulletml_bullet.png',
+  asset: Object.freeze({ symbol: 'bml_bullet', type: 'SPRITE', animationRow: 0 }),
   palette: 'PAL3',
   paletteFingerprint: '',
   frameWidth: 8,
@@ -40,8 +40,7 @@ const DEFAULT_SPRITE = Object.freeze({
 });
 
 const DEFAULT_PROJECT = Object.freeze({
-  schemaVersion: SCHEMA_VERSION,
-  target: Object.freeze({ platform: 'mega-drive', sgdk: '2.11', video: 'NTSC', width: 320, height: 224, hMode: 'H40' }),
+  ...hostSchema.DEFAULT_PROJECT,
   profile: Object.freeze({
     coordinateScale: 64,
     expressionFormat: 'Q16.16',
@@ -62,7 +61,7 @@ const DEFAULT_PROJECT = Object.freeze({
 
 const DEFAULT_EDITOR_STATE = Object.freeze({
   schemaVersion: SCHEMA_VERSION,
-  page: 'patterns',
+  page: 'project',
   selectedPatternId: '',
   selectedDefinition: '',
   selectedCommandPath: '',
@@ -162,7 +161,14 @@ function normalizeDefinition(value = {}, index = 0) {
 
 function normalizePattern(value = {}, fallbackId = 'pattern') {
   const id = safeId(value.id, fallbackId);
-  const sprite = { ...deepClone(DEFAULT_SPRITE), ...(value.sprite || {}) };
+  const sprite = {
+    ...deepClone(DEFAULT_SPRITE),
+    ...(value.sprite || {}),
+    asset: hostSchema.normalizeAssetRef(value.sprite?.asset || DEFAULT_SPRITE.asset, 'SPRITE', { animationRow: Math.max(0, Math.trunc(Number(value.sprite?.asset?.animationRow) || 0)) }),
+  };
+  delete sprite.source;
+  delete sprite.sourcePath;
+  delete sprite.assetId;
   return {
     schemaVersion: SCHEMA_VERSION,
     id,
@@ -178,10 +184,15 @@ function normalizePattern(value = {}, fallbackId = 'pattern') {
 }
 
 function normalizeProject(value = {}) {
-  const project = deepClone(DEFAULT_PROJECT);
-  Object.assign(project, value || {});
+  const project = { ...hostSchema.normalizeProject(value), ...deepClone(DEFAULT_PROJECT), ...deepClone(value || {}) };
   project.schemaVersion = SCHEMA_VERSION;
   project.target = { ...deepClone(DEFAULT_PROJECT.target), ...(value.target || {}) };
+  project.modes = { ...deepClone(hostSchema.DEFAULT_PROJECT.modes), ...(value.modes || {}) };
+  project.campaign = { ...deepClone(hostSchema.DEFAULT_PROJECT.campaign), ...(value.campaign || {}) };
+  project.caravan = { ...deepClone(hostSchema.DEFAULT_PROJECT.caravan), ...(value.caravan || {}) };
+  project.resetOnHit = { ...deepClone(hostSchema.DEFAULT_PROJECT.resetOnHit), ...(value.resetOnHit || {}) };
+  project.palettes = { ...deepClone(hostSchema.DEFAULT_PROJECT.palettes), ...(value.palettes || {}) };
+  project.rank = Math.max(0, Math.min(1, Number(value.rank ?? hostSchema.DEFAULT_PROJECT.rank)));
   project.profile = { ...deepClone(DEFAULT_PROJECT.profile), ...(value.profile || {}) };
   project.defaultSprite = { ...deepClone(DEFAULT_SPRITE), ...(value.defaultSprite || {}) };
   project.patternOrder = [...new Set((Array.isArray(value.patternOrder) ? value.patternOrder : []).map(String))];
@@ -203,31 +214,22 @@ function normalizeWaypoint(value = {}, index = 0) {
 }
 
 function normalizeStageEvent(value = {}, index = 0) {
-  const boss = Boolean(value.boss);
-  return {
-    id: safeId(value.id, `event-${index + 1}`),
-    spawnFrame: Math.max(0, Math.trunc(Number(value.spawnFrame) || 0)),
-    enemyType: ['grunt', 'turret', 'boss'].includes(value.enemyType) ? value.enemyType : (boss ? 'boss' : 'grunt'),
-    boss,
-    hp: Math.max(1, Math.trunc(Number(value.hp) || (boss ? 120 : 3))),
-    score: Math.max(0, Math.trunc(Number(value.score) || (boss ? 10000 : 100))),
-    patternId: String(value.patternId || ''),
-    path: (Array.isArray(value.path) ? value.path : []).map(normalizeWaypoint),
-    phases: (Array.isArray(value.phases) ? value.phases : []).map((phase, phaseIndex) => ({
-      threshold: Math.max(0, Math.min(100, Math.trunc(Number(phase.threshold) || Math.max(0, 100 - phaseIndex * 33)))),
-      patternId: String(phase.patternId || value.patternId || ''),
-    })),
-  };
+  const event = hostSchema.normalizeStageEvent(value, index);
+  event.path = (Array.isArray(value.path) ? value.path : event.path || []).map(normalizeWaypoint);
+  event.phases = (Array.isArray(value.phases) ? value.phases : event.phases || []).map((phase, phaseIndex) => ({
+    ...phase,
+    threshold: Math.max(0, Math.min(100, Math.trunc(Number(phase.threshold) || Math.max(0, 100 - phaseIndex * 20)))),
+    patternId: String(phase.patternId || value.patternId || ''),
+  }));
+  return event;
 }
 
-function normalizeStage(value = {}, orientation = 'vertical') {
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    orientation: orientation === 'horizontal' ? 'horizontal' : 'vertical',
-    name: String(value.name || `${orientation} stage`),
-    durationFrames: Math.max(1, Math.trunc(Number(value.durationFrames) || 3600)),
-    events: (Array.isArray(value.events) ? value.events : []).map(normalizeStageEvent),
-  };
+function normalizeStage(value = {}, orientationOrId = 'stage') {
+  const fallback = value.id || (['vertical', 'horizontal'].includes(orientationOrId) ? `stage-${orientationOrId}` : orientationOrId);
+  const orientation = value.orientation || (['vertical', 'horizontal'].includes(orientationOrId) ? orientationOrId : undefined);
+  const normalized = hostSchema.normalizeStage({ ...value, orientation }, fallback);
+  normalized.events = normalized.events.map(normalizeStageEvent);
+  return normalized;
 }
 
 function makeAction(label, commands) {
@@ -414,6 +416,7 @@ function validatePattern(patternInput, options = {}) {
   if (!Number.isInteger(frameCount) || frameCount < 1 || frameCount > 255) error('BML_SPRITE_FRAME_COUNT', 'sprite.frameCount', 'frameCountは1..255です');
   if (Number(pattern.sprite.hardwarePieces) !== 1) error('BML_SPRITE_PIECE', 'sprite.hardwarePieces', '弾spriteは1 hardware pieceだけ使用できます');
   if (String(pattern.sprite.palette) !== 'PAL3') error('BML_SPRITE_PALETTE', 'sprite.palette', 'Sampleと弾spriteはPAL3を使用します');
+  hostSchema.validateAssetReference(pattern.sprite.asset, 'sprite.asset', diagnostics, 'SPRITE');
   const expectedTileCount = width * height / 64 * frameCount;
   if (Number(pattern.sprite.tileCount) !== expectedTileCount) error('BML_TILE_COUNT', 'sprite.tileCount', `frame寸法とframeCountから計算した${expectedTileCount} tileを指定してください`);
   if (expectedTileCount > 128) error('BML_TILE_LIMIT', 'sprite.tileCount', '全弾tile総量は128以下です');
@@ -426,17 +429,23 @@ function validatePattern(patternInput, options = {}) {
 }
 
 function validateStage(stageInput, patternIds = new Set()) {
-  const stage = normalizeStage(stageInput, stageInput?.orientation);
+  const stage = normalizeStage(stageInput, stageInput?.id || stageInput?.orientation);
   const diagnostics = [];
   const error = (code, path, message) => diagnostics.push(diagnostic('error', code, path, message));
   const eventIds = new Set();
+  let stageClearCount = 0;
   if (stage.durationFrames > 65535) error('BML_STAGE_DURATION', 'durationFrames', 'stage durationは1..65535 frameです');
   if (stage.events.length > LIMITS.stages.events) error('BML_STAGE_EVENT_LIMIT', 'events', `eventは${LIMITS.stages.events}件以下です`);
   stage.events.forEach((event, index) => {
     const path = `events[${index}]`;
+    const actionType = event.action?.type || (event.boss ? 'spawn_boss' : 'spawn_enemy');
+    const isSpawn = actionType === 'spawn_enemy' || actionType === 'spawn_boss' || actionType === 'spawn_destructible';
     if (eventIds.has(event.id)) error('BML_STAGE_EVENT_DUPLICATE', `${path}.id`, `event ID ${event.id} が重複しています`);
     eventIds.add(event.id);
     if (event.spawnFrame >= stage.durationFrames || event.spawnFrame > 65535) error('BML_STAGE_SPAWN_FRAME', `${path}.spawnFrame`, '出現frameはstage duration内のu16で指定してください');
+    if (actionType === 'stage_clear') stageClearCount += 1;
+    if (!hostSchema.EVENT_ACTION_TYPES.includes(actionType)) error('BML_STAGE_ACTION_TYPE', `${path}.action.type`, `非対応stage actionです: ${actionType}`);
+    if (!isSpawn) return;
     if (!event.path.length) error('BML_STAGE_PATH_EMPTY', `${path}.path`, 'waypointを1点以上指定してください');
     if (event.path.length > LIMITS.stages.waypoints) error('BML_STAGE_PATH_LIMIT', `${path}.path`, `waypointは${LIMITS.stages.waypoints}点以下です`);
     for (let point = 1; point < event.path.length; point += 1) if (event.path[point].frame <= event.path[point - 1].frame) error('BML_STAGE_PATH_FRAME', `${path}.path[${point}].frame`, '到達frameは昇順にしてください');
@@ -446,9 +455,10 @@ function validateStage(stageInput, patternIds = new Set()) {
     for (let phaseIndex = 1; phaseIndex < event.phases.length; phaseIndex += 1) if (event.phases[phaseIndex].threshold >= event.phases[phaseIndex - 1].threshold) error('BML_STAGE_PHASE_THRESHOLD', `${path}.phases[${phaseIndex}].threshold`, 'Boss HP閾値はphase順に降順で指定してください');
     event.phases.forEach((phase, phaseIndex) => { if (phase.patternId && !patternIds.has(phase.patternId)) error('BML_STAGE_PHASE_PATTERN_REF', `${path}.phases[${phaseIndex}].patternId`, `pattern ${phase.patternId} がありません`); });
   });
+  if (stageClearCount !== 1) error('BML_STAGE_CLEAR_REQUIRED', 'events', 'stage_clear eventをちょうど1件指定してください');
   for (const frame of stage.events.map((event) => event.spawnFrame)) {
-    const normalCount = stage.events.filter((event) => !event.boss && event.spawnFrame <= frame && frame < event.spawnFrame + 660).length;
-    const bossCount = stage.events.filter((event) => event.boss && event.spawnFrame <= frame && frame < stage.durationFrames).length;
+    const normalCount = stage.events.filter((event) => event.action?.type === 'spawn_enemy' && !event.boss && event.spawnFrame <= frame && frame < event.spawnFrame + 660).length;
+    const bossCount = stage.events.filter((event) => event.action?.type === 'spawn_boss' && event.boss && event.spawnFrame <= frame && frame < stage.durationFrames).length;
     if (normalCount > LIMITS.stages.activeNormalEnemies) error('BML_STAGE_NORMAL_ACTIVE', 'events', `frame ${frame} の通常敵同時数 ${normalCount} は${LIMITS.stages.activeNormalEnemies}を超えています`);
     if (bossCount > LIMITS.stages.activeBosses) error('BML_STAGE_BOSS_ACTIVE', 'events', `frame ${frame} のBoss同時数 ${bossCount} は${LIMITS.stages.activeBosses}を超えています`);
   }
@@ -474,7 +484,7 @@ function validateProject(projectInput, patternsInput = [], stagesInput = []) {
   const uniqueSprites = new Map();
   patterns.forEach((pattern) => {
     const sprite = pattern.sprite;
-    const key = [sprite.source, sprite.frameWidth, sprite.frameHeight, sprite.frameCount, sprite.paletteFingerprint].join(':');
+    const key = [sprite.asset?.symbol, sprite.asset?.type, sprite.asset?.animationRow, sprite.frameWidth, sprite.frameHeight, sprite.frameCount, sprite.paletteFingerprint].join(':');
     if (!uniqueSprites.has(key)) uniqueSprites.set(key, Math.max(0, Number(sprite.tileCount) || 0));
   });
   const tileTotal = [...uniqueSprites.values()].reduce((sum, count) => sum + count, 0);
@@ -508,4 +518,5 @@ module.exports = {
   validatePattern,
   validateStage,
   validateProject,
+  hostSchema,
 };
